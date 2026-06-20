@@ -1,0 +1,4 @@
+# No auto-installed dependencies: Pillow / numpy / torch already ship with ComfyUI.
+# The Local LLM nodes additionally need llama-cpp-python (CUDA). It is installed by
+# install.py (run automatically by ComfyUI-Manager) rather than listed here, because
+# on Windows it needs a prebuilt CUDA wheel instead of a PyPI source build.

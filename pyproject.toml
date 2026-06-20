@@ -1,0 +1,15 @@
+[project]
+name = "kinburg-nodes"
+description = "Kinburg's ComfyUI nodes: a local GGUF text-LLM with on-demand VRAM unloading. An interactive HTML image-comparison node. Other utilities."
+version = "1.0.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/Kinburg/Kinburg-Nodes"
+
+[tool.comfy]
+PublisherId = "kinburg"
+DisplayName = "Kinburg-Nodes"
+Icon = "https://avatars.githubusercontent.com/u/10453040"
