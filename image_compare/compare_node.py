@@ -4,10 +4,15 @@ import json
 import base64
 import urllib.parse
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-
-import folder_paths
+# Heavy / ComfyUI-only imports are guarded so the package still imports — and the
+# Comfy Registry can enumerate its nodes — in an environment without ComfyUI present.
+# Inside ComfyUI at runtime these are always available.
+try:
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+    import folder_paths
+except Exception:
+    pass
 
 NODE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIEWER_TEMPLATE = os.path.join(NODE_DIR, "viewer.html")
