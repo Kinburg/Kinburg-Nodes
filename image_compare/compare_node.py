@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import uuid
 import base64
 import urllib.parse
 
@@ -58,6 +59,44 @@ def _b64_png(pil):
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def _hex_to_rgb(hex_color, fallback=(255, 255, 255)):
+    """'#RRGGBB' / '#RGB' (with or without '#') -> (r, g, b); fallback if invalid."""
+    if not hex_color:
+        return fallback
+    s = str(hex_color).strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(c * 2 for c in s)
+    if len(s) != 6:
+        return fallback
+    try:
+        return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return fallback
+
+
+def _norm_hex_or_none(value):
+    """Canonical '#RRGGBB' for a valid hex string, else None."""
+    rgb = _hex_to_rgb(value, None) if isinstance(value, str) and value.strip() else None
+    return ("#%02X%02X%02X" % rgb) if rgb else None
+
+
+def _parse_caption(raw):
+    """A caption line is either plain text or a Color Caption JSON object
+    ({"caption", "color", "band_color"}). Returns (text, color_hex_or_None,
+    band_hex_or_None). Plain text keeps the old behavior (stripped, no colors)."""
+    s = (raw or "").strip()
+    if s.startswith("{") and s.endswith("}"):
+        try:
+            obj = json.loads(s)
+        except (ValueError, TypeError):
+            obj = None
+        if isinstance(obj, dict) and "caption" in obj:
+            text = obj.get("caption", "")
+            text = text if isinstance(text, str) else str(text)
+            return text, _norm_hex_or_none(obj.get("color")), _norm_hex_or_none(obj.get("band_color"))
+    return s, None, None
+
+
 def _load_font(size):
     candidates = ["arial.ttf", "segoeui.ttf", "DejaVuSans.ttf",
                   os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts", "arial.ttf")]
@@ -85,10 +124,12 @@ def _wrap(text, font, draw, max_w):
     return lines
 
 
-def _overlay_caption(pil, text, position="bottom", font_size=0):
+def _overlay_caption(pil, text, position="bottom", font_size=0, color=None, band_color=None):
     text = (text or "").strip()
     if not text:
         return pil.convert("RGB")
+    fill = _hex_to_rgb(color) + (255,)
+    band = _hex_to_rgb(band_color, (0, 0, 0)) + (150,)
     img = pil.convert("RGBA")
     W, H = img.size
     fs = font_size if font_size > 0 else max(14, W // 38)
@@ -100,10 +141,10 @@ def _overlay_caption(pil, text, position="bottom", font_size=0):
     line_h = draw.textbbox((0, 0), "Ag", font=font)[3] + max(2, fs // 6)
     band_h = line_h * len(lines) + 2 * pad
     y0 = (H - band_h) if position == "bottom" else 0
-    draw.rectangle([0, y0, W, y0 + band_h], fill=(0, 0, 0, 150))
+    draw.rectangle([0, y0, W, y0 + band_h], fill=band)
     y = y0 + pad
     for ln in lines:
-        draw.text((pad, y), ln, font=font, fill=(255, 255, 255, 255))
+        draw.text((pad, y), ln, font=font, fill=fill)
         y += line_h
     return Image.alpha_composite(img, overlay).convert("RGB")
 
@@ -169,9 +210,14 @@ class ImageCompare:
             "optional": {
                 "prompts": ("STRING", {"multiline": True, "default": "", "tooltip": "Full generation prompts, separated by a line equal to 'prompt_separator'. Shown on the page (toggleable). Multi-line prompts are fine."}),
                 "prompt_separator": ("STRING", {"default": "---", "tooltip": "A line equal to this string separates one prompt from the next"}),
-                "show_prompts": ("BOOLEAN", {"default": True, "tooltip": "Initial visibility of prompts on the page (can be toggled there too)"}),
+                "show_prompts": ("BOOLEAN", {"default": False, "tooltip": "Initial visibility of prompts on the page (can be toggled there too)"}),
                 "output_dir": ("STRING", {"default": "", "tooltip": "Custom save folder (absolute path). Empty = ComfyUI output. A served copy is also written to output so 'Open comparison' keeps working."}),
                 "save_prompts_txt": ("BOOLEAN", {"default": False, "tooltip": "Save each prompt to a .txt file named like its image"}),
+                "settings": ("STRING", {"multiline": True, "default": "", "tooltip": "Per-image generation settings (e.g. from Generation Info Filter), separated by a line equal to 'settings_separator'. Shown under each image; toggleable on the page."}),
+                "settings_separator": ("STRING", {"default": "---", "tooltip": "A line equal to this string separates one image's settings block from the next"}),
+                "show_settings": ("BOOLEAN", {"default": True, "tooltip": "Initial visibility of settings on the page (can be toggled there too)"}),
+                "settings_data": ("GEN_SETTINGS", {"tooltip": "Structured per-image settings from Generation Info Filter's 'settings_data' output. Stored by field (EAV) when you 'Save run to report', so the report can filter/sort by setting."}),
+                "report_db": ("STRING", {"default": "", "tooltip": "SQLite file the page's 'Save run to report' button writes to. Empty = <output>/kinburg/reports.db. The value is shown (and editable) on the page."}),
             },
         }
 
@@ -183,25 +229,69 @@ class ImageCompare:
 
     def run(self, images, captions, title, columns, overlay_captions,
             caption_position, font_size, filename_prefix, save_captioned_images=False,
-            prompts="", prompt_separator="---", show_prompts=True,
-            output_dir="", save_prompts_txt=False):
+            prompts="", prompt_separator="---", show_prompts=False,
+            output_dir="", save_prompts_txt=False,
+            settings="", settings_separator="---", show_settings=True, settings_data="", report_db=""):
         pils = _tensors_to_pil(images)
         n = len(pils)
 
-        # Captions: one short tag per line, padded/truncated to the batch size.
-        caps = captions.split("\n") if captions else []
-        caps = [c.strip() for c in caps]
-        caps = (caps + [""] * n)[:n]
+        # Report prep: save clean per-image PNGs to a stable, run-scoped folder and gather a
+        # run_id + resolved DB path. The page's "Save run to report" button uses these; the
+        # node itself never writes to the DB.
+        comfy_out = folder_paths.get_output_directory()
+        run_id = uuid.uuid4().hex[:12]
+        report_db_resolved = report_db.strip() or os.path.join(comfy_out, "kinburg", "reports.db")
+        report_paths = []
+        try:
+            rdir = os.path.join(comfy_out, "kinburg", "report_images", run_id)
+            os.makedirs(rdir, exist_ok=True)
+            for i, p in enumerate(pils):
+                rp = os.path.join(rdir, f"{i:03d}.png")
+                p.convert("RGB").save(rp)
+                report_paths.append(rp)
+        except Exception as e:
+            print(f"[ImageCompare] could not save report images: {e}")
+            report_paths = []
+        report_paths = (report_paths + [""] * n)[:n]
 
-        # Full generation prompts: separated by the separator line, may be multi-line.
+        # Captions: one per line, padded/truncated to the batch size. Each line is
+        # either plain text or a Color Caption JSON ({"caption","color","band_color"});
+        # the colors (when present) tint the text and the band behind it, both on the
+        # page and on the drawn images.
+        caps, cap_colors, cap_bands = [], [], []
+        for line in (captions.split("\n") if captions else []):
+            text, color, band = _parse_caption(line)
+            caps.append(text)
+            cap_colors.append(color)
+            cap_bands.append(band)
+        caps = (caps + [""] * n)[:n]
+        cap_colors = (cap_colors + [None] * n)[:n]
+        cap_bands = (cap_bands + [None] * n)[:n]
+
+        # Full generation prompts and per-image settings: each separated by its own
+        # separator line, may be multi-line.
         proms = _split_prompts(prompts, prompt_separator)
         proms = (proms + [""] * n)[:n]
+        setts = _split_prompts(settings, settings_separator)
+        setts = (setts + [""] * n)[:n]
+
+        # Structured per-image settings (from Generation Info Filter) for the report DB.
+        try:
+            sdata = json.loads(settings_data) if isinstance(settings_data, str) and settings_data.strip() else []
+        except (ValueError, TypeError):
+            sdata = []
+        if not isinstance(sdata, list):
+            sdata = []
+        sdata = (sdata + [[]] * n)[:n]
 
         # Data for the interactive page uses the ORIGINAL (clean) images.
-        items = [{"src": _b64_png(p), "caption": c, "prompt": pr}
-                 for p, c, pr in zip(pils, caps, proms)]
-        cfg = {"title": title, "columns": int(columns),
-               "show_prompts": bool(show_prompts), "items": items}
+        items = [{"src": _b64_png(p), "caption": c, "prompt": pr, "settings": st,
+                  "color": col, "band": band, "report_path": rpth, "settings_data": sd}
+                 for p, c, pr, st, col, band, rpth, sd in
+                 zip(pils, caps, proms, setts, cap_colors, cap_bands, report_paths, sdata)]
+        cfg = {"title": title, "columns": int(columns), "show_prompts": bool(show_prompts),
+               "show_settings": bool(show_settings), "run_id": run_id,
+               "report_db": report_db_resolved, "items": items}
 
         try:
             with open(VIEWER_TEMPLATE, "r", encoding="utf-8") as f:
@@ -212,7 +302,6 @@ class ImageCompare:
         html = template.replace("/*__COMPARE_DATA__*/null", json.dumps(cfg, ensure_ascii=True))
         prefix = filename_prefix or "compare"
 
-        comfy_out = folder_paths.get_output_directory()
         out_dir = output_dir.strip() or comfy_out
         try:
             os.makedirs(out_dir, exist_ok=True)
@@ -229,7 +318,8 @@ class ImageCompare:
         print(f"[ImageCompare] saved {path}\n[ImageCompare] open: {url}")
 
         if overlay_captions:
-            cap_pils = [_overlay_caption(p, c, caption_position, font_size) for p, c in zip(pils, caps)]
+            cap_pils = [_overlay_caption(p, c, caption_position, font_size, col, band)
+                        for p, c, col, band in zip(pils, caps, cap_colors, cap_bands)]
         else:
             cap_pils = [p.convert("RGB") for p in pils]
         out_tensor = _pil_to_tensor_batch(cap_pils)

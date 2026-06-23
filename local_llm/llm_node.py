@@ -19,7 +19,8 @@ HELP_TEXT = """# Local LLM (GGUF) — quick help
 - **text** — the answer (reasoning removed when `strip_think` is on)
 - **thoughts** — `<think>…</think>` content (reasoning models only, else empty)
 - **finish_reason** — `stop` = finished on its own; `length` = hit `max_tokens` (truncated)
-- **sys/user/output_tokens** — token counts · **gen_seconds** — load + generation time
+- **sys/user/output_tokens** — token counts · **thoughts/answer_tokens** — the output split
+  by text length (estimate; sums to output_tokens) · **gen_seconds** — load + generation time
 
 ## If the answer is cut off
 `finish_reason = length`. Raise **max_tokens** (it is a ceiling, not a target) and
@@ -230,7 +231,7 @@ class LocalLLMTextGGUF:
         return {
             "required": {
                 "model": (_list_models(), {"tooltip": "Pick a .gguf from ComfyUI/models/llm. Choose the placeholder to type any path in model_path"}),
-                "model_path": ("STRING", {"default": "", "tooltip": "Full path to a .gguf, used when 'model' is the placeholder. Lets you load models from anywhere on disk"}),
+                "model_path": ("STRING", {"default": "", "tooltip": "Full path to a .gguf, used when 'model' is the placeholder. Lets you load models from anywhere on disk. Surrounding quotes (e.g. from Windows 'Copy as path') are stripped automatically."}),
                 "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
                 "user_prompt": ("STRING", {"multiline": True, "default": ""}),
                 "max_tokens": ("INT", {"default": 512, "min": 16, "max": 32768, "step": 16}),
@@ -257,8 +258,8 @@ class LocalLLMTextGGUF:
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "STRING")
-    RETURN_NAMES = ("text", "thoughts", "finish_reason", "sys_tokens", "user_tokens", "output_tokens", "gen_seconds", "help")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "STRING", "INT", "INT")
+    RETURN_NAMES = ("text", "thoughts", "finish_reason", "sys_tokens", "user_tokens", "output_tokens", "gen_seconds", "help", "thoughts_tokens", "answer_tokens")
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
@@ -270,15 +271,19 @@ class LocalLLMTextGGUF:
 
         def _err(msg):
             # Keep the output signature consistent on every error path.
-            return (f"[ERROR] {msg}", "", "error", 0, 0, 0, 0.0, HELP_TEXT)
+            return (f"[ERROR] {msg}", "", "error", 0, 0, 0, 0.0, HELP_TEXT, 0, 0)
 
         # Resolve the model: a real dropdown selection wins; else the manual path.
+        # Strip surrounding quotes/whitespace so a Windows "Copy as path" value
+        # (e.g. "C:\models\m.gguf") works as-is.
         resolved = ""
         if model and model != PLACEHOLDER:
             d = _gguf_dir()
             resolved = os.path.join(d, model) if d else model
-        elif model_path and model_path.strip():
-            resolved = model_path.strip()
+        else:
+            mp = (model_path or "").strip().strip('"').strip("'").strip()
+            if mp:
+                resolved = mp
         if not resolved or not os.path.isfile(resolved):
             return _err(f"Model file not found: {resolved or '(none selected)'}")
 
@@ -370,15 +375,23 @@ class LocalLLMTextGGUF:
                 raw = re.sub(r"\s*" + re.escape(directive) + r"(?=\W|$)", "", raw).strip()
             answer, thoughts = _split_reasoning(raw, answer_marker)
             text = answer if strip_think else raw
+            out_tok = int(data.get("output_tokens", 0))
+            # Split the exact total proportionally by text length — a cheap estimate (the
+            # tokenizer lives only in the worker). thoughts_tokens + answer_tokens == out_tok.
+            denom = len(answer) + len(thoughts)
+            thoughts_tokens = round(out_tok * len(thoughts) / denom) if (denom and out_tok) else 0
+            answer_tokens = max(0, out_tok - thoughts_tokens)
             return (
                 text,
                 thoughts,
                 data.get("finish_reason", ""),
                 int(data.get("sys_tokens", 0)),
                 int(data.get("user_tokens", 0)),
-                int(data.get("output_tokens", 0)),
+                out_tok,
                 gen_seconds,
                 HELP_TEXT,
+                thoughts_tokens,
+                answer_tokens,
             )
 
         print("[LocalLLM] worker error:\n", data.get("traceback", ""))

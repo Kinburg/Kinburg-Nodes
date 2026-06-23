@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Investigate Report</title>
+<style>
+  :root { --bg:#1b1b1f; --fg:#e7e7ea; --panel:#2a2a30; --accent:#4f8cff; --muted:#9a9aa2; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { position:sticky; top:0; z-index:5; background:var(--panel); padding:10px 14px; box-shadow:0 2px 8px #0006; }
+  h1 { font-size:16px; margin:0 0 8px; font-weight:600; }
+  .bar { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
+  .grp { display:flex; gap:4px; align-items:center; }
+  .lbl { color:var(--muted); font-size:12px; }
+  input, select, button { background:#3a3a42; color:var(--fg); border:1px solid #4a4a52; border-radius:6px; padding:5px 8px; font-size:13px; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  #count { color:var(--muted); font-size:12px; }
+  #wrap { padding:12px; overflow:auto; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th, td { border:1px solid #ffffff14; padding:6px 8px; vertical-align:top; text-align:left; }
+  th { position:sticky; top:0; background:#222228; cursor:pointer; white-space:nowrap; z-index:1; }
+  th .arr { color:var(--accent); }
+  tr:nth-child(even) td { background:#ffffff06; }
+  tr.reject td.thumb img, tr.reject td.pre, tr.reject td.set { opacity:.5; }
+  td.thumb { width:120px; } td.thumb img { width:110px; height:auto; max-height:110px; object-fit:contain; border-radius:4px; cursor:zoom-in; background:#000; display:block; }
+  td.pre { white-space:pre-wrap; word-break:break-word; max-width:320px; }
+  td.set { white-space:pre-wrap; word-break:break-word; max-width:280px; font-family:ui-monospace,Consolas,monospace; color:#bcd4e6; }
+  td.cmt { white-space:pre-wrap; word-break:break-word; max-width:240px; min-width:120px; cursor:text; outline:none; }
+  td.cmt:focus { background:#4f8cff14; }
+  .stat { font-weight:600; cursor:pointer; user-select:none; } .stat.keep { color:#43d17a; } .stat.reject { color:#e56e6e; }
+  .rate { white-space:nowrap; } .rate .st { cursor:pointer; color:#5a5a62; } .rate .st.on { color:#ffce54; }
+  .tagcell { min-width:120px; }
+  .tag { display:inline-flex; align-items:center; gap:2px; background:#4f8cff22; border:1px solid #4f8cff55; border-radius:10px; padding:0 4px 0 7px; margin:1px; font-size:11px; }
+  .tagx { background:none; border:none; color:var(--muted); cursor:pointer; font-size:12px; padding:0; line-height:1; }
+  .taginp { width:54px; background:#00000022; border:1px solid #ffffff1f; border-radius:8px; padding:1px 5px; font-size:11px; color:var(--fg); margin:1px; }
+  a.run { color:var(--accent); text-decoration:none; } a.run:hover { text-decoration:underline; }
+  .empty { color:var(--muted); padding:40px; text-align:center; }
+  #lb { position:fixed; inset:0; background:#000d; display:none; align-items:center; justify-content:center; z-index:50; }
+  #lb img { max-width:96vw; max-height:96vh; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Investigate Report</h1>
+  <div class="bar">
+    <div class="grp"><span class="lbl">DB</span>
+      <input id="db" style="width:240px" placeholder="(default reports.db)"><button id="load">Load</button></div>
+    <div class="grp"><span class="lbl">Search</span><input id="q" style="width:150px" placeholder="caption / prompt / tag…"></div>
+    <div class="grp"><span class="lbl">Status</span>
+      <select id="fstatus"><option value="">all</option><option value="keep">keep</option><option value="reject">reject</option></select></div>
+    <div class="grp"><span class="lbl">Min ★</span>
+      <select id="frating"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+    <div class="grp"><span class="lbl">Tag</span><select id="ftag"><option value="">all</option></select></div>
+    <div class="grp"><span class="lbl">Run</span><select id="frun"><option value="">all</option></select>
+      <button id="delrun" title="Delete the run selected in the Run filter (and its images)">🗑 Delete run</button></div>
+    <div class="grp"><span class="lbl">Setting</span><select id="fkey"><option value="">—</option></select>
+      <input id="fval" style="width:110px" placeholder="value contains"></div>
+    <div class="grp"><span class="lbl">Export</span>
+      <button data-exp="csv">CSV</button><button data-exp="md">MD</button><button data-exp="html">HTML</button></div>
+    <span id="count"></span>
+  </div>
+</header>
+
+<div id="wrap"><div class="empty">Loading…</div></div>
+<div id="lb"><img></div>
+
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+  const wrap = $('#wrap');
+  let DATA = { results:[], keys:[], tags:[], runs:[] };
+  let byId = {}, view = [];
+  let sortKey = 'run_created', sortDir = -1;
+
+  const COLS = [
+    { k:'thumb',       t:'',         sort:null },
+    { k:'run_title',   t:'Run',      sort:r=>r.run_title||r.run_key||'' },
+    { k:'caption',     t:'Caption',  sort:r=>r.caption||'' },
+    { k:'status',      t:'Status',   sort:r=>r.status||'' },
+    { k:'rating',      t:'Rating',   sort:r=>r.rating||0 },
+    { k:'tags',        t:'Tags',     sort:r=>(r.tags||[]).join(',') },
+    { k:'settings',    t:'Settings', sort:r=>r.settings_text||'' },
+    { k:'prompt',      t:'Prompt',   sort:r=>r.prompt||'' },
+    { k:'comment',     t:'Comment',  sort:r=>r.comment||'' },
+    { k:'run_created', t:'When',     sort:r=>r.run_created||'' },
+  ];
+
+  function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function imgUrl(p){ return '/kinburg/report/image?path=' + encodeURIComponent(p||''); }
+
+  async function load(){
+    const db = $('#db').value.trim();
+    wrap.innerHTML = '<div class="empty">Loading…</div>';
+    try {
+      const r = await fetch('/kinburg/report/data' + (db ? ('?db=' + encodeURIComponent(db)) : ''));
+      const j = await r.json();
+      if(!j.ok){ wrap.innerHTML = '<div class="empty">error: ' + esc(j.error) + '</div>'; return; }
+      DATA = j; if(j.db_path) $('#db').value = j.db_path;
+      byId = {}; (DATA.results||[]).forEach(r=>byId[r.id]=r);
+      fillOptions(); apply();
+    } catch(e){ wrap.innerHTML = '<div class="empty">error: ' + esc(e) + '</div>'; }
+  }
+
+  function fillOptions(){
+    $('#ftag').innerHTML = '<option value="">all</option>' + (DATA.tags||[]).map(t=>`<option>${esc(t)}</option>`).join('');
+    $('#frun').innerHTML = '<option value="">all</option>' + (DATA.runs||[]).map(r=>`<option value="${esc(r.run_key)}">${esc(r.title||r.run_key)}</option>`).join('');
+    $('#fkey').innerHTML = '<option value="">—</option>' + (DATA.keys||[]).map(k=>`<option>${esc(k)}</option>`).join('');
+  }
+
+  function apply(){
+    const q = $('#q').value.trim().toLowerCase();
+    const st = $('#fstatus').value, minR = +$('#frating').value || 0;
+    const tag = $('#ftag').value, run = $('#frun').value;
+    const fkey = $('#fkey').value, fval = $('#fval').value.trim().toLowerCase();
+    view = (DATA.results||[]).filter(r=>{
+      if(st && (r.status||'keep') !== st) return false;
+      if((r.rating||0) < minR) return false;
+      if(tag && !(r.tags||[]).includes(tag)) return false;
+      if(run && r.run_key !== run) return false;
+      if(fkey){ const v=(r.settings||{})[fkey]; if(v==null) return false; if(fval && !String(v).toLowerCase().includes(fval)) return false; }
+      if(q){ const hay=[r.caption,r.prompt,r.comment,r.settings_text,(r.tags||[]).join(' ')].join(' ').toLowerCase(); if(!hay.includes(q)) return false; }
+      return true;
+    });
+    const col = COLS.find(c=>c.k===sortKey);
+    if(col && col.sort) view.sort((a,b)=>{ const x=col.sort(a),y=col.sort(b); return (x<y?-1:x>y?1:0)*sortDir; });
+    render();
+  }
+
+  function starsHtml(n){ n=+n||0; let h=''; for(let i=1;i<=5;i++) h+=`<span class="st ${i<=n?'on':''}" data-star="${i}">★</span>`; return h; }
+
+  function render(){
+    if(!view.length){ wrap.innerHTML='<div class="empty">No results.</div>'; $('#count').textContent=`0 / ${(DATA.results||[]).length}`; return; }
+    const head = '<tr>' + COLS.map(c=>{
+      const arr = c.k===sortKey ? `<span class="arr">${sortDir<0?'▼':'▲'}</span>` : '';
+      return `<th data-k="${c.k}">${esc(c.t)} ${arr}</th>`;
+    }).join('') + '</tr>';
+    const body = view.map(r=>{
+      const tags = (r.tags||[]).map((t,i)=>`<span class="tag">${esc(t)}<button class="tagx" data-ti="${i}" title="remove">×</button></span>`).join('');
+      const runcell = r.run_url ? `<a class="run" href="${esc(r.run_url)}" target="_blank" rel="noopener">${esc(r.run_title||r.run_key)}</a>` : esc(r.run_title||r.run_key);
+      const stt = esc(r.status||'keep');
+      return `<tr data-id="${r.id}" class="${r.status==='reject'?'reject':''}">`
+        + `<td class="thumb">${r.image_path?`<img loading="lazy" src="${imgUrl(r.image_path)}" data-full="${imgUrl(r.image_path)}">`:''}</td>`
+        + `<td>${runcell}</td>`
+        + `<td class="pre">${esc(r.caption)}</td>`
+        + `<td><span class="stat ${stt}" data-act="status" title="click to toggle keep/reject">${stt}</span></td>`
+        + `<td><span class="rate" data-act="rate">${starsHtml(r.rating)}</span></td>`
+        + `<td class="tagcell">${tags}<input class="taginp" placeholder="+tag"></td>`
+        + `<td class="set">${esc(r.settings_text)}</td>`
+        + `<td class="pre">${esc(r.prompt)}</td>`
+        + `<td class="cmt" contenteditable="true" data-act="comment">${esc(r.comment)}</td>`
+        + `<td>${esc(r.run_created)}</td>`
+        + `</tr>`;
+    }).join('');
+    wrap.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    $('#count').textContent = `${view.length} / ${(DATA.results||[]).length} result(s)`;
+    wireTable();
+  }
+
+  function wireTable(){
+    wrap.querySelectorAll('th[data-k]').forEach(th=>{
+      const k=th.dataset.k; if(k==='thumb') return;
+      th.onclick=()=>{ if(sortKey===k) sortDir=-sortDir; else { sortKey=k; sortDir=1; } apply(); };
+    });
+    wrap.querySelectorAll('td.thumb img').forEach(im=>{
+      im.onerror=()=>{ im.style.display='none'; };
+      im.onclick=()=>{ const lb=$('#lb'); lb.querySelector('img').src=im.dataset.full; lb.style.display='flex'; };
+    });
+    wrap.querySelectorAll('tbody tr').forEach(tr=>{
+      const r = byId[tr.dataset.id]; if(!r) return;
+      const stEl = tr.querySelector('[data-act="status"]');
+      if(stEl) stEl.onclick=()=>{ r.status=(r.status==='reject'?'keep':'reject'); saveResult(r,{status:r.status}); apply(); };
+      tr.querySelectorAll('[data-act="rate"] .st').forEach(s=>{
+        s.onclick=()=>{ const v=+s.dataset.star; r.rating=(r.rating===v?0:v); saveResult(r,{rating:r.rating}); apply(); };
+      });
+      tr.querySelectorAll('.tagx').forEach(b=>{
+        b.onclick=()=>{ (r.tags||[]).splice(+b.dataset.ti,1); saveResult(r,{tags:r.tags}); apply(); };
+      });
+      const ti = tr.querySelector('.taginp');
+      if(ti) ti.onkeydown=e=>{ if(e.key==='Enter'||e.key===','){ e.preventDefault(); const v=ti.value.trim();
+        if(v){ r.tags=r.tags||[]; if(!r.tags.includes(v)){ r.tags.push(v); saveResult(r,{tags:r.tags}); apply(); } } } };
+      const cm = tr.querySelector('[data-act="comment"]');
+      if(cm) cm.onblur=()=>{ const v=cm.textContent; if(v!==(r.comment||'')){ r.comment=v; saveResult(r,{comment:v}); } };
+    });
+  }
+
+  async function saveResult(r, patch){
+    Object.assign(r, patch);
+    try {
+      await fetch('/kinburg/report/result', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ db_path:$('#db').value.trim(), id:r.id, status:r.status, rating:r.rating, comment:r.comment, tags:r.tags }) });
+    } catch(e) { /* UI already updated; ignore transient error */ }
+  }
+
+  async function delRun(){
+    const run = $('#frun').value;
+    if(!run){ alert('Select a specific run in the Run filter first.'); return; }
+    if(!confirm('Delete the entire run (its results, settings and image files)?\n\n' + run)) return;
+    try {
+      await fetch('/kinburg/report/run/delete', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ db_path:$('#db').value.trim(), run_key:run }) });
+      $('#frun').value=''; load();
+    } catch(e){ alert('error: ' + e); }
+  }
+
+  function doExport(fmt){
+    const cols = ['run_title','caption','status','rating','tags','settings_text','prompt','comment','run_created'];
+    const head = ['Run','Caption','Status','Rating','Tags','Settings','Prompt','Comment','When'];
+    const cell = (r,c)=> c==='tags' ? (r.tags||[]).join('; ') : (r[c]==null?'':String(r[c]));
+    let out='', mime='text/plain', ext='txt';
+    if(fmt==='csv'){
+      const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
+      out = head.map(q).join(',') + '\r\n' + view.map(r=>cols.map(c=>q(cell(r,c))).join(',')).join('\r\n');
+      mime='text/csv'; ext='csv';
+    } else if(fmt==='md'){
+      const e=s=>String(s).replace(/\|/g,'\\|').replace(/\n/g,' ');
+      out = '| '+head.join(' | ')+' |\n| '+head.map(()=>'---').join(' | ')+' |\n'
+          + view.map(r=>'| '+cols.map(c=>e(cell(r,c))).join(' | ')+' |').join('\n');
+      mime='text/markdown'; ext='md';
+    } else {
+      out = '<!doctype html><meta charset="utf-8"><title>Report</title>'
+          + '<table border="1" cellspacing="0" cellpadding="4"><thead><tr>' + head.map(x=>'<th>'+esc(x)+'</th>').join('') + '</tr></thead><tbody>'
+          + view.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(cell(r,c)).replace(/\n/g,'<br>')+'</td>').join('')+'</tr>').join('')
+          + '</tbody></table>';
+      mime='text/html'; ext='html';
+    }
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([out],{type:mime}));
+    a.download='report.'+ext; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+
+  $('#load').onclick = load;
+  $('#db').addEventListener('keydown', e=>{ if(e.key==='Enter') load(); });
+  $('#delrun').onclick = delRun;
+  document.querySelectorAll('[data-exp]').forEach(b=>b.onclick=()=>doExport(b.dataset.exp));
+  ['#q','#fstatus','#frating','#ftag','#frun','#fkey','#fval'].forEach(s=>{
+    const el=$(s); el.addEventListener('input', apply); el.addEventListener('change', apply);
+  });
+  $('#lb').onclick = ()=>{ $('#lb').style.display='none'; };
+
+  const m = location.search.match(/[?&]db=([^&]*)/);
+  if(m) $('#db').value = decodeURIComponent(m[1]);
+  load();
+})();
+</script>
+</body>
+</html>
