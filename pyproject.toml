@@ -1,7 +1,7 @@
 [project]
 name = "kinburg-nodes"
 description = "Kinburg's ComfyUI nodes: a local GGUF text-LLM with on-demand VRAM unloading. An interactive HTML image-comparison node. Other utilities."
-version = "1.0.1"
+version = "1.1.0"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = []

@@ -63,7 +63,7 @@ nodes (read the length, take an item by index, process it inside the loop). Note
 downstream nodes then run once per item rather than on a single batch. Category
 `Kinburg-Nodes/image`.
 
-### `util/` — Date String, Unlim Text Concat
+### `util/` — Date String, Unlim Text Concat, Color Picker
 **`Date String`** appends the current **date** (and optionally **time**) to a string, with
 selectable formats. Handy for building save paths: e.g. `project/2026-06-20` (a folder per
 day) or `.../2026-06-20/17-05` (per minute). The `/` separator creates subfolders; `_`/`-`
@@ -76,6 +76,10 @@ with `text_1` (required) and `text_2`, and each time you connect the last slot a
 one appears (disconnect and trailing empties collapse). `skip_empty` drops empty/unconnected
 inputs so they don't leave stray separators. Pairs naturally with **Color Caption** →
 Concat (newline) → the compare node's `captions`. Category `Kinburg-Nodes/util`.
+
+**`Color Picker`** is the handy color control from Color Caption (a 10-swatch palette + a
+native color picker, or type a HEX) as a standalone node. Outputs the normalized `#RRGGBB`
+string plus its `R` / `G` / `B` components. Category `Kinburg-Nodes/util`.
 
 ### `timer/` — Start Timer, Stop Timer
 **`Start Timer`** / **`Stop Timer`** measure the wall-clock time of a slice of a workflow.
@@ -127,6 +131,20 @@ comment) with free-text search and a by-setting-field filter; rows link back to 
 comparison. You can **edit in place** (toggle status, set rating, add/remove tags, edit the
 comment — saved straight to the DB), **export** the filtered view to CSV / Markdown / HTML,
 and **delete a run** (removing its rows and image files).
+
+### `accumulators/` — Set / Get Results (name-based accumulators)
+For collecting parallel branches without manual batch wiring. **`Set Results (image)`** is a
+labelled pass-through: connect a flow's final image and give it an accumulator `name` (e.g.
+`IMG_RESULTS`); copying the flow auto-increments its `index`. **`Get Results (image)`** has a
+**dropdown** of the defined accumulator names — pick one (it auto-collects) — plus a
+**Collect** button that physically wires every matching Set's output into it (real links, in
+`index` order) and batches them (reusing Unlim Image Batch: `mode` /
+`pad_color` / `skip_empty`). Plug `Get Results` where an image batch used to go (e.g. Image
+Compare). Press Collect again after adding/removing Set nodes. A **text pair** —
+**`Set Results (text)`** / **`Get Results (text)`** — works the same way and joins the
+collected texts with a `separator` (reusing Unlim Text Concat) in index order. The wiring is
+plain links, so execution and caching are completely standard. Category
+`Kinburg-Nodes/accumulators`.
 
 ## Installation
 
