@@ -225,6 +225,175 @@ def _request(proc, req, progress_cb=None):
         sys.stdout.write("[LocalLLM worker] " + line)
 
 
+VISION_HELP_TEXT = """# Local LLM (GGUF, vision) — quick help
+
+Needs TWO files: the vision model `.gguf` (**model**) AND its projector `mmproj` `.gguf`
+(**mmproj**). They usually ship together in a model's repo — put both in ComfyUI/models/llm.
+
+## Inputs
+- **vision_handler = auto (MTMD)** works for most modern vision GGUFs (LLaVA, Qwen2-VL,
+  MiniCPM-V, Gemma3, SmolVLM, …). If a model won't load or returns garbage, pick its family.
+- **image** — the picture(s) to analyze; a batch sends every frame. **image_max_side**
+  downscales before sending (the model resizes internally anyway); 0 = send full size.
+- Sampling, max_tokens, the reasoning split, and output_format/grammar behave exactly like
+  the text node — e.g. force a JSON description of the image with output_format = json_object.
+
+## Notes
+- Image tokens are counted inside the model and are NOT reflected in the token outputs here.
+- VRAM: the projector loads alongside the model; keep both unload toggles ON to free it.
+"""
+
+# Vision chat-handler dropdown: friendly label -> key sent to the worker (_HANDLER_MAP there).
+_VISION_HANDLERS = [
+    ("auto (MTMD)", "auto"),
+    ("LLaVA 1.5", "llava-1.5"),
+    ("LLaVA 1.6", "llava-1.6"),
+    ("Qwen2-VL / Qwen2.5-VL", "qwen2-vl"),
+    ("MiniCPM-V 2.6", "minicpm-v-2.6"),
+    ("Moondream", "moondream"),
+    ("NanoLLaVA", "nanollava"),
+    ("Llama 3 Vision", "llama3-vision"),
+    ("Obsidian", "obsidian"),
+    ("Gemma", "gemma"),
+]
+_VISION_HANDLER_LABELS = [lbl for lbl, _ in _VISION_HANDLERS]
+_VISION_HANDLER_KEY = {lbl: key for lbl, key in _VISION_HANDLERS}
+
+
+def _list_mmproj():
+    """models/llm .gguf files for the mmproj dropdown, mmproj-named ones first."""
+    d = _gguf_dir()
+    files = []
+    if d and os.path.isdir(d):
+        allg = [f for f in os.listdir(d) if f.lower().endswith(".gguf")]
+        files = sorted(f for f in allg if "mmproj" in f.lower()) + \
+                sorted(f for f in allg if "mmproj" not in f.lower())
+    return [PLACEHOLDER] + files
+
+
+def _resolve_path(choice, manual):
+    """A models/llm dropdown selection wins; else the manual path (quotes/space stripped)."""
+    if choice and choice != PLACEHOLDER:
+        d = _gguf_dir()
+        return os.path.join(d, choice) if d else choice
+    return (manual or "").strip().strip('"').strip("'").strip()
+
+
+def _err(msg, help_text=HELP_TEXT):
+    """Keep the 10-output signature consistent on every error path."""
+    return (f"[ERROR] {msg}", "", "error", 0, 0, 0, 0.0, help_text, 0, 0)
+
+
+def _apply_directive(user_prompt, thinking_directive, custom_directive):
+    """Append a Qwen3-style reasoning directive to the prompt; return (prompt, directive)."""
+    directive = {
+        "/no_think (Qwen3)": "/no_think",
+        "/think (Qwen3)": "/think",
+        "custom": (custom_directive or "").strip(),
+    }.get(thinking_directive, "")
+    if directive:
+        user_prompt = (user_prompt or "").rstrip() + "\n" + directive
+    return user_prompt, directive
+
+
+def _apply_output_format(output_format, grammar, system_prompt):
+    """Expand the built-in ideogram4_json preset; return (format, grammar, system_prompt)."""
+    if output_format == "ideogram4_json":
+        sep = (system_prompt.rstrip() + "\n\n") if system_prompt.strip() else ""
+        return "gbnf_grammar", IDEOGRAM4_GRAMMAR, sep + IDEOGRAM4_INSTRUCTION
+    return output_format, grammar, system_prompt
+
+
+def _encode_images(image, max_side):
+    """ComfyUI IMAGE [B,H,W,C] float 0..1 -> list of PNG `data:` URIs, downscaled to max_side
+    (0 = no downscale). Encoded here (the node has PIL/torch) so the worker stays llama-only."""
+    import io
+    import base64
+    import numpy as np
+    from PIL import Image
+
+    arr = image.detach().cpu().numpy()
+    if arr.ndim == 3:
+        arr = arr[None, ...]
+    uris = []
+    for im in arr:
+        pil = Image.fromarray((np.clip(im, 0.0, 1.0) * 255.0).astype("uint8")).convert("RGB")
+        if max_side and max(pil.size) > max_side:
+            s = max_side / max(pil.size)
+            pil = pil.resize((max(1, round(pil.width * s)), max(1, round(pil.height * s))),
+                             Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        pil.save(buf, format="PNG")
+        uris.append("data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii"))
+    return uris
+
+
+def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
+                         unload_llm_after_run, directive, strip_think, answer_marker, help_text):
+    """Shared core for both LLM nodes: optionally free ComfyUI VRAM, talk to the worker with a
+    live token progress bar, then split reasoning out and return the 10-output tuple."""
+    if unload_comfy_models:
+        try:
+            import comfy.model_management as mm
+            mm.unload_all_models()
+            mm.soft_empty_cache(True)
+        except Exception as e:
+            print(f"[LocalLLM] unload_all_models failed: {e}")
+
+    pbar = None
+    try:
+        from comfy.utils import ProgressBar
+        pbar = ProgressBar(max_tokens)
+    except Exception:
+        pbar = None
+
+    def _progress(n):
+        if pbar is not None:
+            try:
+                pbar.update_absolute(min(n, max_tokens))
+            except Exception:
+                pass
+
+    gen_seconds = 0.0
+    with _worker_lock:
+        try:
+            t0 = time.perf_counter()
+            proc = _ensure_worker(load_sig)
+            data = _request(proc, req, _progress)
+            if (data.get("status") == "error"
+                    and "worker exited" in data.get("message", "")):
+                proc = _start_worker(load_sig)
+                data = _request(proc, req, _progress)
+            gen_seconds = round(time.perf_counter() - t0, 2)
+        except Exception as e:
+            _shutdown_worker()
+            return _err(f"Worker communication failed: {e}", help_text)
+        finally:
+            if unload_llm_after_run:
+                _shutdown_worker()
+
+    _progress(max_tokens)
+
+    if data.get("status") == "success":
+        raw = data["output"]
+        if directive:
+            raw = re.sub(r"\s*" + re.escape(directive) + r"(?=\W|$)", "", raw).strip()
+        answer, thoughts = _split_reasoning(raw, answer_marker)
+        text = answer if strip_think else raw
+        out_tok = int(data.get("output_tokens", 0))
+        # Split the exact total proportionally by text length — a cheap estimate (the
+        # tokenizer lives only in the worker). thoughts_tokens + answer_tokens == out_tok.
+        denom = len(answer) + len(thoughts)
+        thoughts_tokens = round(out_tok * len(thoughts) / denom) if (denom and out_tok) else 0
+        answer_tokens = max(0, out_tok - thoughts_tokens)
+        return (text, thoughts, data.get("finish_reason", ""),
+                int(data.get("sys_tokens", 0)), int(data.get("user_tokens", 0)),
+                out_tok, gen_seconds, help_text, thoughts_tokens, answer_tokens)
+
+    print("[LocalLLM] worker error:\n", data.get("traceback", ""))
+    return _err(data.get("message", "unknown"), help_text)
+
+
 class LocalLLMTextGGUF:
     @classmethod
     def INPUT_TYPES(cls):
@@ -269,47 +438,14 @@ class LocalLLMTextGGUF:
             strip_think, thinking_directive="model default", custom_directive="",
             output_format="text", grammar="", answer_marker=""):
 
-        def _err(msg):
-            # Keep the output signature consistent on every error path.
-            return (f"[ERROR] {msg}", "", "error", 0, 0, 0, 0.0, HELP_TEXT, 0, 0)
-
-        # Resolve the model: a real dropdown selection wins; else the manual path.
-        # Strip surrounding quotes/whitespace so a Windows "Copy as path" value
-        # (e.g. "C:\models\m.gguf") works as-is.
-        resolved = ""
-        if model and model != PLACEHOLDER:
-            d = _gguf_dir()
-            resolved = os.path.join(d, model) if d else model
-        else:
-            mp = (model_path or "").strip().strip('"').strip("'").strip()
-            if mp:
-                resolved = mp
+        # Resolve the model: a real dropdown selection wins; else the manual path (quotes
+        # stripped so a Windows "Copy as path" value works as-is).
+        resolved = _resolve_path(model, model_path)
         if not resolved or not os.path.isfile(resolved):
             return _err(f"Model file not found: {resolved or '(none selected)'}")
 
-        directive = {
-            "/no_think (Qwen3)": "/no_think",
-            "/think (Qwen3)": "/think",
-            "custom": (custom_directive or "").strip(),
-        }.get(thinking_directive, "")
-        if directive:
-            user_prompt = (user_prompt or "").rstrip() + "\n" + directive
-
-        if unload_comfy_models:
-            try:
-                import comfy.model_management as mm
-                mm.unload_all_models()
-                mm.soft_empty_cache(True)
-            except Exception as e:
-                print(f"[LocalLLM] unload_all_models failed: {e}")
-
-        stop_list = [s for s in (stop or "").splitlines() if s.strip()]
-
-        eff_format, eff_grammar, eff_system = output_format, grammar, system_prompt
-        if output_format == "ideogram4_json":
-            eff_format, eff_grammar = "gbnf_grammar", IDEOGRAM4_GRAMMAR
-            sep = (system_prompt.rstrip() + "\n\n") if system_prompt.strip() else ""
-            eff_system = sep + IDEOGRAM4_INSTRUCTION
+        user_prompt, directive = _apply_directive(user_prompt, thinking_directive, custom_directive)
+        eff_format, eff_grammar, eff_system = _apply_output_format(output_format, grammar, system_prompt)
 
         req = {
             "model_path": resolved,
@@ -321,7 +457,7 @@ class LocalLLMTextGGUF:
             "top_k": top_k,
             "min_p": min_p,
             "repeat_penalty": repeat_penalty,
-            "stop": stop_list,
+            "stop": [s for s in (stop or "").splitlines() if s.strip()],
             "n_ctx": n_ctx,
             "n_gpu_layers": n_gpu_layers,
             "n_batch": n_batch,
@@ -333,70 +469,90 @@ class LocalLLMTextGGUF:
             "verbose": False,
         }
         load_sig = (resolved, int(n_ctx), int(n_gpu_layers), int(n_batch),
-                    bool(flash_attn), kv_cache_type)
+                    bool(flash_attn), kv_cache_type, None, None)
 
-        pbar = None
+        return _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
+                                    unload_llm_after_run, directive, strip_think,
+                                    answer_marker, HELP_TEXT)
+
+
+class LocalLLMVisionGGUF:
+    """Multimodal twin of the text node: same engine + sampling, plus an mmproj projector and
+    an image input. Shares the worker and the generation core; only the loader inputs differ."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        # Reuse the text node's widgets verbatim (single source of truth) and inject the
+        # vision-only inputs right after model_path so the shared params can't drift.
+        req = {}
+        for k, v in LocalLLMTextGGUF.INPUT_TYPES()["required"].items():
+            req[k] = v
+            if k == "model_path":
+                req["mmproj"] = (_list_mmproj(), {"tooltip": "Projector mmproj .gguf from ComfyUI/models/llm (mmproj-named files first). Choose the placeholder to type any path in mmproj_path."})
+                req["mmproj_path"] = ("STRING", {"default": "", "tooltip": "Full path to the mmproj .gguf, used when 'mmproj' is the placeholder. Surrounding quotes are stripped."})
+                req["vision_handler"] = (_VISION_HANDLER_LABELS, {"default": "auto (MTMD)", "tooltip": "auto (MTMD) is llama.cpp's generic multimodal loader and handles most modern vision GGUFs. Switch to the model's family only if auto fails to load it or returns garbage."})
+                req["image"] = ("IMAGE", {"tooltip": "Image(s) to analyze. A batch sends every frame to the model."})
+                req["image_max_side"] = ("INT", {"default": 1024, "min": 0, "max": 4096, "step": 64, "tooltip": "Downscale each image so its longest side is at most this many px before sending (the model resizes internally anyway). 0 = full size."})
+        return {"required": req}
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "STRING", "INT", "INT")
+    RETURN_NAMES = ("text", "thoughts", "finish_reason", "sys_tokens", "user_tokens", "output_tokens", "gen_seconds", "help", "thoughts_tokens", "answer_tokens")
+    FUNCTION = "run"
+    CATEGORY = "Kinburg-Nodes/LLM"
+
+    def run(self, model, model_path, mmproj, mmproj_path, vision_handler, image, image_max_side,
+            system_prompt, user_prompt, max_tokens, temperature, top_p, top_k, min_p,
+            repeat_penalty, stop, n_ctx, n_gpu_layers, n_batch, flash_attn, kv_cache_type,
+            seed, unload_comfy_models, unload_llm_after_run, strip_think,
+            thinking_directive="model default", custom_directive="", output_format="text",
+            grammar="", answer_marker=""):
+
+        resolved = _resolve_path(model, model_path)
+        if not resolved or not os.path.isfile(resolved):
+            return _err(f"Model file not found: {resolved or '(none selected)'}", VISION_HELP_TEXT)
+        mmproj_resolved = _resolve_path(mmproj, mmproj_path)
+        if not mmproj_resolved or not os.path.isfile(mmproj_resolved):
+            return _err(f"mmproj file not found: {mmproj_resolved or '(none selected)'} — vision needs the model's mmproj .gguf.", VISION_HELP_TEXT)
         try:
-            from comfy.utils import ProgressBar
-            pbar = ProgressBar(max_tokens)
-        except Exception:
-            pbar = None
+            images = _encode_images(image, int(image_max_side))
+        except Exception as e:
+            return _err(f"Failed to encode image(s): {e}", VISION_HELP_TEXT)
 
-        def _progress(n):
-            if pbar is not None:
-                try:
-                    pbar.update_absolute(min(n, max_tokens))
-                except Exception:
-                    pass
+        handler_key = _VISION_HANDLER_KEY.get(vision_handler, "auto")
+        user_prompt, directive = _apply_directive(user_prompt, thinking_directive, custom_directive)
+        eff_format, eff_grammar, eff_system = _apply_output_format(output_format, grammar, system_prompt)
 
-        gen_seconds = 0.0
-        with _worker_lock:
-            try:
-                t0 = time.perf_counter()
-                proc = _ensure_worker(load_sig)
-                data = _request(proc, req, _progress)
-                if (data.get("status") == "error"
-                        and "worker exited" in data.get("message", "")):
-                    proc = _start_worker(load_sig)
-                    data = _request(proc, req, _progress)
-                gen_seconds = round(time.perf_counter() - t0, 2)
-            except Exception as e:
-                _shutdown_worker()
-                return _err(f"Worker communication failed: {e}")
-            finally:
-                if unload_llm_after_run:
-                    _shutdown_worker()
+        req = {
+            "model_path": resolved,
+            "mmproj_path": mmproj_resolved,
+            "vision_handler": handler_key,
+            "images": images,
+            "system_prompt": eff_system,
+            "user_prompt": user_prompt,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "top_k": top_k,
+            "min_p": min_p,
+            "repeat_penalty": repeat_penalty,
+            "stop": [s for s in (stop or "").splitlines() if s.strip()],
+            "n_ctx": n_ctx,
+            "n_gpu_layers": n_gpu_layers,
+            "n_batch": n_batch,
+            "flash_attn": flash_attn,
+            "kv_cache_type": kv_cache_type,
+            "seed": seed,
+            "output_format": eff_format,
+            "grammar": eff_grammar,
+            "verbose": False,
+        }
+        load_sig = (resolved, int(n_ctx), int(n_gpu_layers), int(n_batch),
+                    bool(flash_attn), kv_cache_type, mmproj_resolved, handler_key)
 
-        _progress(max_tokens)
-
-        if data.get("status") == "success":
-            raw = data["output"]
-            if directive:
-                raw = re.sub(r"\s*" + re.escape(directive) + r"(?=\W|$)", "", raw).strip()
-            answer, thoughts = _split_reasoning(raw, answer_marker)
-            text = answer if strip_think else raw
-            out_tok = int(data.get("output_tokens", 0))
-            # Split the exact total proportionally by text length — a cheap estimate (the
-            # tokenizer lives only in the worker). thoughts_tokens + answer_tokens == out_tok.
-            denom = len(answer) + len(thoughts)
-            thoughts_tokens = round(out_tok * len(thoughts) / denom) if (denom and out_tok) else 0
-            answer_tokens = max(0, out_tok - thoughts_tokens)
-            return (
-                text,
-                thoughts,
-                data.get("finish_reason", ""),
-                int(data.get("sys_tokens", 0)),
-                int(data.get("user_tokens", 0)),
-                out_tok,
-                gen_seconds,
-                HELP_TEXT,
-                thoughts_tokens,
-                answer_tokens,
-            )
-
-        print("[LocalLLM] worker error:\n", data.get("traceback", ""))
-        return _err(data.get("message", "unknown"))
+        return _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
+                                    unload_llm_after_run, directive, strip_think,
+                                    answer_marker, VISION_HELP_TEXT)
 
 
-NODE_CLASS_MAPPINGS = {"LocalLLMTextGGUF": LocalLLMTextGGUF}
-NODE_DISPLAY_NAME_MAPPINGS = {"LocalLLMTextGGUF": "Local LLM (GGUF, text)"}
+NODE_CLASS_MAPPINGS = {"LocalLLMTextGGUF": LocalLLMTextGGUF, "LocalLLMVisionGGUF": LocalLLMVisionGGUF}
+NODE_DISPLAY_NAME_MAPPINGS = {"LocalLLMTextGGUF": "Local LLM (GGUF, text)", "LocalLLMVisionGGUF": "Local LLM (GGUF, vision)"}

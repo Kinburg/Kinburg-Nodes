@@ -5,8 +5,8 @@ the node mappings from the root `__init__.py`, and the sets are split into subpa
 
 ## What's inside
 
-### `local_llm/` — Local LLM (GGUF, text)
-Run a text GGUF LLM right inside ComfyUI **with guaranteed VRAM unloading**: inference
+### `local_llm/` — Local LLM (GGUF, text + vision)
+Run a GGUF LLM right inside ComfyUI **with guaranteed VRAM unloading**: inference
 runs in a separate worker process, so when it exits the OS reclaims all of its VRAM —
 ideal right before image generation. Features: streaming progress bar, token counters
 (including an estimated `thoughts_tokens` / `answer_tokens` split of the output),
@@ -15,6 +15,16 @@ configurable `answer_marker` for models that reason without `<think>` tags), `mi
 `stop`, flash attention, KV-cache quantization, and structured output (JSON / GBNF / a
 built-in Ideogram prompt grammar). Node: **`Local LLM (GGUF, text)`** (category
 `Kinburg-Nodes/LLM`).
+
+**`Local LLM (GGUF, vision)`** is the multimodal twin — same engine, sampling, reasoning
+split and output formats, plus an **`image`** input and a second model path for the
+projector **`mmproj`** `.gguf` (both files ship together in a vision model's repo; put them
+in `ComfyUI/models/llm`). `vision_handler = auto (MTMD)` uses llama.cpp's generic
+multimodal loader, which handles most modern vision GGUFs (LLaVA, Qwen2-VL, MiniCPM-V,
+Gemma 3, SmolVLM, …) straight from the mmproj — only switch to a specific family if auto
+fails. `image_max_side` downscales images before they're sent to the worker. Combine it with
+`output_format = json_object` to get a structured description of an image. Both LLM nodes
+share one worker process. Node: **`Local LLM (GGUF, vision)`** (category `Kinburg-Nodes/LLM`).
 
 ### `image_compare/` — Image Compare (HTML)
 Takes a batch of images + short labels (`captions`) + full generation prompts (`prompts`)
@@ -26,14 +36,16 @@ toolbar toggle to show/hide hidden results), a **star rating** (1–5), **tags**
 them. The review state (hide / rating / tags / comment) persists across reloads of the served
 page (browser localStorage). Save
 options: `output_dir` (any folder; the page is served straight from there, no copies),
-`save_captioned_images`, `save_prompts_txt`. It also takes an optional **`settings`** input
-(per-image blocks separated by `settings_separator`, e.g. from **Generation Info Filter**)
-shown under each image with its own toggle on the page. The `url` output is a clickable http
+`save_captioned_images`, `save_prompts_txt`. Only `images` is required; the text inputs are
+all sockets (no inline fields): `captions` (one per line, e.g. from **Get Accumulator
+(captions)**), `prompts` (full per-image blocks separated by a `---` line, e.g. from **Get
+Accumulator (prompts)**), and `settings_data` (structured per-image settings from
+**Generation Info Filter**) — rendered under each image as one `[Class] param: value` line
+per field, with its own page toggle. The `url` output is a clickable http
 link. Node: **`Image Compare (HTML)`** (category `Kinburg-Nodes/image/compare`).
 
-Also in this package: **`Color Caption`** — write a caption and pick two colors, the
-**text** color and the **band** color behind it (each via a 10-swatch palette plus a
-native color picker for anything custom). It outputs a one-line JSON
+Also in this package: **`Color Caption`** — write a caption and type two colors, the
+**text** color and the **band** color behind it (each as a HEX `#RRGGBB` value). It outputs a one-line JSON
 `{"caption": "...", "color": "#RRGGBB", "band_color": "#RRGGBB"}`. Wire it into the compare
 node's `captions` input (one caption per line) to style that label — both on the page and
 on the drawn `images_captioned`. The defaults (white text on a black band) reproduce the
@@ -62,6 +74,17 @@ total image count and each index is exactly one image — convenient for loop / 
 nodes (read the length, take an item by index, process it inside the loop). Note that
 downstream nodes then run once per item rather than on a single batch. Category
 `Kinburg-Nodes/image`.
+
+### `collage/` — Collage
+**`Collage`** arranges images into a grid on a single output canvas (e.g. an A4-ish
+2480×3508). Source is the wired `input_images` batch, or — if nothing is connected —
+every image in `folder_path` (natural-sorted, so `img2` < `img10`). `cols` sets the column
+count and the rows follow from the image count; `gap` spaces the cells and `margin` frames
+the grid, with the cell size derived so the whole grid fits the canvas. Each image is fit
+into its cell with its aspect ratio preserved; the letterbox border is filled with the
+image's own top-left pixel color so it blends in. The background is `background_color`
+(HEX), or a connected `background_image` (stretched to the output size, first frame).
+Category `Kinburg-Nodes/image`.
 
 ### `util/` — Date String, Unlim Text Concat, Color Picker
 **`Date String`** appends the current **date** (and optionally **time**) to a string, with
@@ -104,18 +127,21 @@ widget values (`[RandomNoise] noise_seed: …`, `[KSamplerSelect] sampler_name: 
 dump shows on the node, collapsed by default — click to expand. Outputs a human dump (`info`)
 and machine-readable `data` (GEN_INFO). Category `Kinburg-Nodes/util`.
 
-**`Generation Info Filter`** takes the `data` of one Generation Info per branch (growing
-inputs) and emits a per-image `settings` string. `mode`: `all`, `differences` (only the
+**`Generation Info Filter`** takes a single `data` bundle (`GEN_INFO_LIST`) from a
+**Get Accumulator (gen info)** — which collects one Generation Info `data` per branch — and
+emits a per-image `settings` string (one block per dump, in accumulator `index` order).
+`mode`: `all`, `differences` (only the
 fields that vary across the inputs — each block then shows them all, so the images line
 up), `custom` (fields named in `custom_fields`, one selector per line: `ClassType`,
 `ClassType[n]`, `ClassType[n].param`, `ClassType.param`; `[n]` is the 1-based occurrence),
 or `differences + custom`. A `help` output prints the selector syntax. `skip_empty` (on by
-default) drops empty / unconnected inputs so a bypassed branch keeps the blocks aligned.
-Outputs: `settings` (text — into the compare
-node's **`settings`** input, shown under each image with its own page toggle) and
-`settings_data` (`GEN_SETTINGS`, structured per-image `{key, value}` with class-qualified
-keys — into the compare node's **`settings_data`** input, so a saved report stores settings
-by field for filtering/sorting). Category `Kinburg-Nodes/util`.
+default) drops empty dumps so a bypassed branch keeps the blocks aligned.
+Outputs: `settings_data`
+(`GEN_SETTINGS`, structured per-image `{key, value}` with class-qualified keys) — wire it into
+the compare node's **`settings_data`** input, which both renders the settings under each image
+(one `[Class] param: value` line per field, toggleable) and stores them by field in a saved
+report for filtering/sorting. A plain-text `settings` output is also provided for standalone
+use (saving to a file, feeding a text node, etc.). Category `Kinburg-Nodes/util`.
 
 ### `report/` — investigate report DB (work in progress)
 The Image Compare node carries a `report_db` input (default `<output>/kinburg/reports.db`,
@@ -142,8 +168,20 @@ labelled pass-through: connect a flow's final image and give it an accumulator `
 `pad_color` / `skip_empty`). Plug `Get Results` where an image batch used to go (e.g. Image
 Compare). Press Collect again after adding/removing Set nodes. A **text pair** —
 **`Set Results (text)`** / **`Get Results (text)`** — works the same way and joins the
-collected texts with a `separator` (reusing Unlim Text Concat) in index order. The wiring is
-plain links, so execution and caching are completely standard. Category
+collected texts with a `separator` (reusing Unlim Text Concat) in index order. Two
+compare-tuned twins of the text pair drop the separator field entirely and hardcode the
+separator Image Compare expects, so the two ends can't mismatch: **`Set/Get Accumulator
+(prompts)`** joins blocks with a `---` line (feed `Get` into the compare node's `prompts`),
+and **`Set/Get Accumulator (captions)`** joins with a newline, one caption per line (feed into
+`captions`). A **gen-info pair** — **`Set Accumulator (gen info)`** / **`Get Accumulator (gen info)`** — works the same
+way for the `data` (GEN_INFO) of **Generation Info** nodes: Get collects every matching Set's
+dump (in index order) and outputs a single `data` bundle (`GEN_INFO_LIST`) — wire that one
+output straight into **Generation Info Filter**, so its settings no longer need wiring branch
+by branch. The wiring is plain links, so execution and caching are completely standard.
+
+**`Collect All Accumulators`** is a one-button helper for big workflows: a standalone node
+whose single **🔌 Collect All** button (re)wires *every* Get Accumulator in the graph at once,
+so you don't have to visit each one after scaling the workflow. Category
 `Kinburg-Nodes/accumulators`.
 
 ## Installation

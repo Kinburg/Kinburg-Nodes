@@ -5,6 +5,8 @@ import uuid
 import base64
 import urllib.parse
 
+from ..util.separators import BLOCK_SEP
+
 # Heavy / ComfyUI-only imports are guarded so the package still imports — and the
 # Comfy Registry can enumerate its nodes — in an environment without ComfyUI present.
 # Inside ComfyUI at runtime these are always available.
@@ -149,6 +151,31 @@ def _overlay_caption(pil, text, position="bottom", font_size=0, color=None, band
     return Image.alpha_composite(img, overlay).convert("RGB")
 
 
+def _settings_block(fields, cap=300):
+    """Render one image's structured settings into display text, one line per field:
+
+        [KSamplerSelect] sampler_name: res_multistep
+        [PrimitiveInt] value: 164917466401748
+
+    `fields` is a list of {"key", "value"} from Generation Info Filter's settings_data,
+    where key is 'ClassType.param' (or 'ClassType #ord.param'). Values are squashed to a
+    single line and capped so one huge value can't blow up the panel.
+    """
+    lines = []
+    for f in fields or []:
+        if not isinstance(f, dict):
+            continue
+        key = str(f.get("key", ""))
+        val = f.get("value", "")
+        val = val if isinstance(val, str) else json.dumps(val, ensure_ascii=False)
+        val = " ".join(val.split())
+        if len(val) > cap:
+            val = val[:cap] + "…"
+        cls, dot, param = key.partition(".")
+        lines.append(f"[{cls}] {param}: {val}" if dot else f"{key}: {val}" if key else val)
+    return "\n".join(lines)
+
+
 def _split_prompts(text, sep):
     """Split full (possibly multi-line) prompts on a separator LINE (default '---')."""
     if not text or not text.strip():
@@ -198,7 +225,6 @@ class ImageCompare:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "captions": ("STRING", {"multiline": True, "default": "", "tooltip": "One caption per line, aligned with the image batch (missing lines become empty)"}),
                 "title": ("STRING", {"default": "Image comparison"}),
                 "columns": ("INT", {"default": 3, "min": 1, "max": 12, "tooltip": "Default number of columns in Grid mode"}),
                 "overlay_captions": ("BOOLEAN", {"default": True, "tooltip": "Draw captions onto the 'images_captioned' output"}),
@@ -208,15 +234,13 @@ class ImageCompare:
                 "save_captioned_images": ("BOOLEAN", {"default": False, "tooltip": "Also save the captioned images as PNG files in the output folder"}),
             },
             "optional": {
-                "prompts": ("STRING", {"multiline": True, "default": "", "tooltip": "Full generation prompts, separated by a line equal to 'prompt_separator'. Shown on the page (toggleable). Multi-line prompts are fine."}),
-                "prompt_separator": ("STRING", {"default": "---", "tooltip": "A line equal to this string separates one prompt from the next"}),
+                "captions": ("STRING", {"forceInput": True, "tooltip": "One caption per line, aligned with the image batch (e.g. from Get Accumulator (captions)). Missing lines become empty."}),
+                "prompts": ("STRING", {"forceInput": True, "tooltip": "Full generation prompts, one block per image separated by a '---' line (e.g. from Get Accumulator (prompts)). Shown on the page (toggleable). Multi-line prompts are fine."}),
                 "show_prompts": ("BOOLEAN", {"default": False, "tooltip": "Initial visibility of prompts on the page (can be toggled there too)"}),
                 "output_dir": ("STRING", {"default": "", "tooltip": "Custom save folder (absolute path). Empty = ComfyUI output. A served copy is also written to output so 'Open comparison' keeps working."}),
                 "save_prompts_txt": ("BOOLEAN", {"default": False, "tooltip": "Save each prompt to a .txt file named like its image"}),
-                "settings": ("STRING", {"multiline": True, "default": "", "tooltip": "Per-image generation settings (e.g. from Generation Info Filter), separated by a line equal to 'settings_separator'. Shown under each image; toggleable on the page."}),
-                "settings_separator": ("STRING", {"default": "---", "tooltip": "A line equal to this string separates one image's settings block from the next"}),
+                "settings_data": ("GEN_SETTINGS", {"tooltip": "Structured per-image settings from Generation Info Filter's 'settings_data' output. Rendered under each image (one '[Class] param: value' line per field; toggleable) and stored by field (EAV) when you 'Save run to report'."}),
                 "show_settings": ("BOOLEAN", {"default": True, "tooltip": "Initial visibility of settings on the page (can be toggled there too)"}),
-                "settings_data": ("GEN_SETTINGS", {"tooltip": "Structured per-image settings from Generation Info Filter's 'settings_data' output. Stored by field (EAV) when you 'Save run to report', so the report can filter/sort by setting."}),
                 "report_db": ("STRING", {"default": "", "tooltip": "SQLite file the page's 'Save run to report' button writes to. Empty = <output>/kinburg/reports.db. The value is shown (and editable) on the page."}),
             },
         }
@@ -227,11 +251,12 @@ class ImageCompare:
     CATEGORY = "Kinburg-Nodes/image/compare"
     OUTPUT_NODE = True
 
-    def run(self, images, captions, title, columns, overlay_captions,
-            caption_position, font_size, filename_prefix, save_captioned_images=False,
-            prompts="", prompt_separator="---", show_prompts=False,
+    def run(self, images, title, columns, overlay_captions,
+            caption_position, font_size, filename_prefix,
+            captions="", save_captioned_images=False,
+            prompts="", show_prompts=False,
             output_dir="", save_prompts_txt=False,
-            settings="", settings_separator="---", show_settings=True, settings_data="", report_db=""):
+            show_settings=True, settings_data="", report_db=""):
         pils = _tensors_to_pil(images)
         n = len(pils)
 
@@ -268,14 +293,12 @@ class ImageCompare:
         cap_colors = (cap_colors + [None] * n)[:n]
         cap_bands = (cap_bands + [None] * n)[:n]
 
-        # Full generation prompts and per-image settings: each separated by its own
-        # separator line, may be multi-line.
-        proms = _split_prompts(prompts, prompt_separator)
+        # Full generation prompts: blocks separated by a '---' line, may be multi-line.
+        proms = _split_prompts(prompts, BLOCK_SEP)
         proms = (proms + [""] * n)[:n]
-        setts = _split_prompts(settings, settings_separator)
-        setts = (setts + [""] * n)[:n]
 
-        # Structured per-image settings (from Generation Info Filter) for the report DB.
+        # Structured per-image settings (from Generation Info Filter) drive both the report
+        # DB (stored by field) and the on-page settings text (rendered one line per field).
         try:
             sdata = json.loads(settings_data) if isinstance(settings_data, str) and settings_data.strip() else []
         except (ValueError, TypeError):
@@ -283,6 +306,7 @@ class ImageCompare:
         if not isinstance(sdata, list):
             sdata = []
         sdata = (sdata + [[]] * n)[:n]
+        setts = [_settings_block(fields) for fields in sdata]
 
         # Data for the interactive page uses the ORIGINAL (clean) images.
         items = [{"src": _b64_png(p), "caption": c, "prompt": pr, "settings": st,

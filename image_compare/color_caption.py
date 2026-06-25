@@ -1,4 +1,4 @@
-"""Color Caption — type a caption and pick a color.
+"""Color Caption — type a caption and a color.
 
 Outputs a compact one-line JSON `{"caption", "color", "band_color"}` meant to be wired
 into the Image Compare node's `captions` input (one caption per line): `color` tints the
@@ -9,16 +9,6 @@ import json
 import re
 
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
-
-# A small built-in palette. The frontend (web/color_caption.js) renders these as
-# clickable swatches and adds a native color picker for anything custom; this list
-# is the source of truth for the swatches there too.
-PALETTE = [
-    ("White", "#FFFFFF"), ("Black", "#000000"), ("Red", "#E53935"),
-    ("Orange", "#FB8C00"), ("Yellow", "#FDD835"), ("Green", "#43A047"),
-    ("Teal", "#00ACC1"), ("Blue", "#1E88E5"), ("Purple", "#8E24AA"),
-    ("Pink", "#D81B60"),
-]
 
 
 def _normalize_hex(value, fallback="#FFFFFF"):
@@ -40,7 +30,7 @@ class ColorCaption:
         return {
             "required": {
                 "caption": ("STRING", {"multiline": True, "default": "", "tooltip": "The caption text."}),
-                "color": ("STRING", {"default": "#FFFFFF", "tooltip": "Text color as HEX (#RRGGBB). Use the swatches / color picker above, or type a value."}),
+                "color": ("STRING", {"default": "#FFFFFF", "tooltip": "Text color as HEX (#RRGGBB)."}),
                 "band_color": ("STRING", {"default": "#000000", "tooltip": "Color of the band behind the text, as HEX (#RRGGBB)."}),
             }
         }

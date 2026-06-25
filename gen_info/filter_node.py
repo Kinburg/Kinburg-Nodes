@@ -1,9 +1,9 @@
 """Generation Info Filter — turn several Generation Info dumps into per-image settings.
 
-Feed it the `data` (GEN_INFO) output of one Generation Info node per branch/image. It lines
-the dumps up field-by-field (a field = class_type + 1-based occurrence `ord` + param name)
-and emits one block per input, separated by `separator`, ready for the compare node's
-`settings` input.
+Feed it a `data` bundle (GEN_INFO_LIST) from a Get Accumulator (gen info), which collects one
+Generation Info `data` (GEN_INFO) dump per branch/image. It lines the dumps up field-by-field
+(a field = class_type + 1-based occurrence `ord` + param name) and emits one block per dump,
+separated by a '---' line, ready for the compare node's `settings` input.
 
 Modes:
   * all                   — every field.
@@ -25,7 +25,8 @@ import json
 import re
 from collections import OrderedDict
 
-_DATA_RE = re.compile(r"^data_(\d+)$")
+from ..util.separators import BLOCK_JOINER
+
 _SELECTOR_RE = re.compile(r"^\s*([^\[\].]+?)\s*(?:\[\s*(\d+)\s*\])?\s*(?:\.\s*(.+?))?\s*$")
 _ABSENT = "\x00absent"
 _MODES = ["all", "differences", "custom", "differences + custom"]
@@ -49,20 +50,25 @@ Modes:
 """
 
 
-def _idx(key):
-    m = _DATA_RE.match(key)
-    return int(m.group(1)) if m else 1 << 30
+def _parse_bundle(v):
+    """GEN_INFO_LIST -> list of dumps, each a list of {class_type, ord, params} entries.
 
-
-def _parse(v):
-    if isinstance(v, list):
-        return v
+    Accepts the JSON string (or already-decoded list) produced by Get Accumulator (gen info):
+    a list of per-image dumps. A bare single dump (list of entry dicts) is wrapped so callers
+    always get a list-of-dumps.
+    """
+    if v is None:
+        return []
     if isinstance(v, str):
         try:
-            return json.loads(v)
+            v = json.loads(v)
         except (ValueError, TypeError):
             return []
-    return []
+    if not isinstance(v, list):
+        return []
+    if v and isinstance(v[0], dict):
+        return [v]
+    return [d for d in v if isinstance(d, list)]
 
 
 def _norm(v):
@@ -121,14 +127,10 @@ class GenerationInfoFilter:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "data_1": ("GEN_INFO",),
+                "data": ("GEN_INFO_LIST", {"tooltip": "Bundle of per-image Generation Info dumps from a Get Accumulator (gen info). One block is emitted per dump, in accumulator index order."}),
                 "mode": (_MODES, {"default": "differences", "tooltip": "all = every field; differences = only fields that vary across inputs; custom = only fields in custom_fields; last = union of both."}),
                 "custom_fields": ("STRING", {"multiline": True, "default": "", "tooltip": "One selector per line: ClassType / ClassType[n] / ClassType[n].param / ClassType.param ([n] is the 1-based occurrence)."}),
-                "separator": ("STRING", {"default": "---", "tooltip": "Line placed between the per-image blocks. Match the compare node's settings_separator."}),
-                "skip_empty": ("BOOLEAN", {"default": True, "tooltip": "Skip empty / unconnected inputs (e.g. a bypassed branch) so the blocks stay aligned with the rest of the comparison."}),
-            },
-            "optional": {
-                "data_2": ("GEN_INFO",),
+                "skip_empty": ("BOOLEAN", {"default": True, "tooltip": "Skip empty dumps (e.g. a bypassed branch) so the blocks stay aligned with the rest of the comparison."}),
             },
         }
 
@@ -137,13 +139,10 @@ class GenerationInfoFilter:
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/util"
 
-    def run(self, mode="differences", custom_fields="", separator="---", skip_empty=True, **kwargs):
+    def run(self, data=None, mode="differences", custom_fields="", skip_empty=True):
         maps = []
-        for key in sorted((k for k in kwargs if _DATA_RE.match(k)), key=_idx):
-            v = kwargs.get(key)
-            if v is None:
-                continue
-            fm = _field_map(_parse(v))
+        for dump in _parse_bundle(data):
+            fm = _field_map(dump)
             if skip_empty and not fm:
                 continue
             maps.append(fm)
@@ -195,8 +194,7 @@ class GenerationInfoFilter:
             blocks.append("\n".join(lines))
             data_blocks.append(fields)
 
-        joiner = "\n" + (separator or "---") + "\n"
-        return (joiner.join(blocks), json.dumps(data_blocks, ensure_ascii=False), HELP)
+        return (BLOCK_JOINER.join(blocks), json.dumps(data_blocks, ensure_ascii=False), HELP)
 
 
 NODE_CLASS_MAPPINGS = {"GenerationInfoFilter": GenerationInfoFilter}

@@ -1,12 +1,17 @@
 import { app } from "../../scripts/app.js";
 
-// Set Results / Get Results — name-based accumulators (image + text pairs).
+// Set Results / Get Results — name-based accumulators (image + text + gen-info pairs).
 //   Set Results: labelled pass-through; index auto-increments on copy; title shows name+index.
 //   Get Results: a name dropdown (live list of Set names) + a "Collect" button that physically
 //                wires every matching Set's output into it (real links, in index order).
 const PAIRS = [
-  { set: "SetAccumImages", get: "GetAccumImages", slot: "image_", type: "IMAGE" },
-  { set: "SetAccumTexts",  get: "GetAccumTexts",  slot: "text_",  type: "STRING" },
+  { set: "SetAccumImages",   get: "GetAccumImages",   slot: "image_", type: "IMAGE" },
+  { set: "SetAccumTexts",    get: "GetAccumTexts",    slot: "text_",  type: "STRING" },
+  // Compare-tuned text pairs: same wiring as texts, but the Get joins with a fixed
+  // separator (prompts: a '---' line; captions: a newline) to match Image Compare.
+  { set: "SetAccumPrompts",  get: "GetAccumPrompts",  slot: "text_",  type: "STRING" },
+  { set: "SetAccumCaptions", get: "GetAccumCaptions", slot: "text_",  type: "STRING" },
+  { set: "SetAccumGenInfo",  get: "GetAccumGenInfo",  slot: "data_",  type: "GEN_INFO" },
 ];
 
 const wv = (node, name) => node.widgets?.find((w) => w.name === name);
@@ -39,6 +44,17 @@ function autoIndexSet(node, pair) {
   const others = node.graph._nodes.filter(
     (n) => n !== node && isType(n, pair.set) && wv(n, "name")?.value === nameW.value);
   if (others.length) idxW.value = Math.max(...others.map((n) => wv(n, "index")?.value ?? 0)) + 1;
+}
+
+// Re-collect every Get accumulator in the graph (any pair). Returns how many were wired.
+function collectAll(graph) {
+  if (!graph) return 0;
+  let n = 0;
+  for (const node of graph._nodes || []) {
+    const pair = PAIRS.find((p) => isType(node, p.get));
+    if (pair) { collect(node, pair); n++; }
+  }
+  return n;
 }
 
 function collect(getNode, pair) {
@@ -123,3 +139,21 @@ function registerPair(pair) {
 }
 
 for (const pair of PAIRS) registerPair(pair);
+
+// ---- Collect All: one button that (re)wires every Get accumulator in the graph ----
+app.registerExtension({
+  name: "Kinburg.CollectAllAccumulators",
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData.name !== "CollectAllAccumulators") return;
+    const onNodeCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      const r = onNodeCreated?.apply(this, arguments);
+      this.addWidget("button", "🔌 Collect All", null, () => {
+        const n = collectAll(this.graph);
+        this.title = `Collect All (${n})`;
+        this.setDirtyCanvas(true, true);
+      });
+      return r;
+    };
+  },
+});

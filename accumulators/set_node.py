@@ -1,4 +1,4 @@
-"""Set Results / Get Results — name-based accumulators (image pair).
+"""Set Results / Get Results — name-based accumulators (image / text / gen-info pairs).
 
 `Set Results (image)` is a labelled pass-through: connect your final image and give it an
 accumulator name + index. Copy the flow and the index auto-increments (frontend). A
@@ -51,5 +51,65 @@ class SetAccumTexts:
         return (text,)
 
 
-NODE_CLASS_MAPPINGS = {"SetAccumImages": SetAccumImages, "SetAccumTexts": SetAccumTexts}
-NODE_DISPLAY_NAME_MAPPINGS = {"SetAccumImages": "Set Accumulator (images)", "SetAccumTexts": "Set Accumulator (texts)"}
+class SetAccumPrompts:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"forceInput": True}),
+                "name": ("STRING", {"default": "PROMPTS", "tooltip": "Accumulator name. A Get Accumulator (prompts) with the same name collects every Set that shares it."}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 9999, "tooltip": "Position in the joined output. Auto-increments when you copy the node."}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
+    FUNCTION = "run"
+    CATEGORY = "Kinburg-Nodes/accumulators"
+
+    def run(self, text, name="", index=0):
+        return (text,)
+
+
+class SetAccumCaptions:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"forceInput": True}),
+                "name": ("STRING", {"default": "CAPTIONS", "tooltip": "Accumulator name. A Get Accumulator (captions) with the same name collects every Set that shares it."}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 9999, "tooltip": "Position in the joined output. Auto-increments when you copy the node."}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
+    FUNCTION = "run"
+    CATEGORY = "Kinburg-Nodes/accumulators"
+
+    def run(self, text, name="", index=0):
+        return (text,)
+
+
+class SetAccumGenInfo:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "data": ("GEN_INFO",),
+                "name": ("STRING", {"default": "SETTINGS", "tooltip": "Accumulator name. A Get Accumulator (gen info) with the same name collects every Set that shares it."}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 9999, "tooltip": "Position in the collected bundle. Auto-increments when you copy the node."}),
+            },
+        }
+
+    RETURN_TYPES = ("GEN_INFO",)
+    RETURN_NAMES = ("data",)
+    FUNCTION = "run"
+    CATEGORY = "Kinburg-Nodes/accumulators"
+
+    def run(self, data, name="", index=0):
+        return (data,)
+
+
+NODE_CLASS_MAPPINGS = {"SetAccumImages": SetAccumImages, "SetAccumTexts": SetAccumTexts, "SetAccumPrompts": SetAccumPrompts, "SetAccumCaptions": SetAccumCaptions, "SetAccumGenInfo": SetAccumGenInfo}
+NODE_DISPLAY_NAME_MAPPINGS = {"SetAccumImages": "Set Accumulator (images)", "SetAccumTexts": "Set Accumulator (texts)", "SetAccumPrompts": "Set Accumulator (prompts)", "SetAccumCaptions": "Set Accumulator (captions)", "SetAccumGenInfo": "Set Accumulator (gen info)"}

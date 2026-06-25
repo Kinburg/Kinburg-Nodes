@@ -1,25 +1,29 @@
 import sys
 import os
+import re
 import json
 import gc
 import glob
 import ctypes
 import traceback
 import importlib.util
+import importlib.metadata
 
 RESP_PREFIX = "@@LLM_RESPONSE@@"
 PROG_PREFIX = "@@LLM_PROGRESS@@"
 
 
 def _prepare_cuda():
-    """The cu124 llama-cpp-python wheel does NOT bundle the CUDA runtime, and the
+    """The prebuilt llama-cpp-python wheel does NOT bundle the CUDA runtime, and the
     llama_cpp loader opens llama.dll with a flag (LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)
     under which directories added via add_dll_directory are ignored when resolving
-    dependencies. So we PRELOAD the required CUDA DLLs by full path from torch\\lib
-    (cu129 -- backward compatible within CUDA 12.x). Once they are loaded into the
-    process, ggml-cuda.dll resolves them by name. torch itself is NOT imported
-    (find_spec only locates the module, it does not execute it), so no second CUDA
-    context is created."""
+    dependencies. So we PRELOAD the required CUDA DLLs by full path from torch\\lib.
+    Once they are loaded into the process, ggml-cuda.dll resolves them by name.
+    This only works when the wheel's CUDA *major* matches torch's (install.py picks
+    the matching wheel); ggml-cuda.dll links cudart64_<major>.dll by exact name, so a
+    cu124 wheel on a CUDA-13 torch can't be satisfied by cudart64_13.dll. torch itself
+    is NOT imported (find_spec only locates the module, it does not execute it), so no
+    second CUDA context is created."""
     try:
         spec = importlib.util.find_spec("torch")
         if not (spec and spec.origin):
@@ -36,6 +40,25 @@ def _prepare_cuda():
                     pass
     except Exception:
         pass
+
+
+def _import_hint():
+    """Actionable hint appended to an llama_cpp import failure -- almost always a
+    CUDA-major mismatch between the installed wheel and torch."""
+    cu = None
+    try:
+        v = importlib.metadata.version("torch")
+        m = re.search(r"\+cu(\d+)", v)
+        cu = m.group(1) if m else None
+    except Exception:
+        pass
+    hint = ("\n[Kinburg-Nodes] This usually means the installed llama-cpp-python was "
+            "built for a different CUDA version than torch. Re-run the installer with "
+            "THIS ComfyUI's python:\n"
+            "  python custom_nodes/Kinburg-Nodes/install.py")
+    if cu:
+        hint += f"\n(torch reports CUDA build cu{cu}.)"
+    return hint
 
 
 def _send(obj):
@@ -56,7 +79,56 @@ def _load_sig(req):
         int(req.get("n_batch", 512)),
         bool(req.get("flash_attn", False)),
         req.get("kv_cache_type", "f16"),
+        req.get("mmproj_path") or None,
+        (req.get("vision_handler") or "auto") if (req.get("mmproj_path") or "").strip() else None,
     )
+
+
+# Vision chat-handler key (sent by the node) -> class name in llama_cpp.llama_chat_format.
+# "auto" uses MTMD, llama.cpp's generic multimodal loader, which handles most modern vision
+# GGUFs from the mmproj metadata; the rest are family-specific fallbacks.
+_HANDLER_MAP = {
+    "auto": "MTMDChatHandler",
+    "llava-1.5": "Llava15ChatHandler",
+    "llava-1.6": "Llava16ChatHandler",
+    "qwen2-vl": "Qwen25VLChatHandler",
+    "minicpm-v-2.6": "MiniCPMv26ChatHandler",
+    "moondream": "MoondreamChatHandler",
+    "nanollava": "NanoLlavaChatHandler",
+    "llama3-vision": "Llama3VisionAlphaChatHandler",
+    "obsidian": "ObsidianChatHandler",
+    "gemma": "Gemma4ChatHandler",
+}
+
+
+def _make_chat_handler(req):
+    """Build a vision chat handler for the request's mmproj, or None for a text-only run."""
+    mmproj = (req.get("mmproj_path") or "").strip()
+    if not mmproj:
+        return None
+    import inspect
+    from llama_cpp import llama_chat_format as cf
+    key = (req.get("vision_handler") or "auto").strip().lower()
+    cls = getattr(cf, _HANDLER_MAP.get(key, "MTMDChatHandler"), None) or cf.MTMDChatHandler
+    kwargs = {"clip_model_path": mmproj, "verbose": bool(req.get("verbose", False))}
+    try:  # MTMD takes use_gpu; the legacy handlers don't
+        if "use_gpu" in inspect.signature(cls.__init__).parameters:
+            kwargs["use_gpu"] = int(req.get("n_gpu_layers", -1)) != 0
+    except Exception:
+        pass
+    return cls(**kwargs)
+
+
+def _user_content(req):
+    """User message content: text-only string, or a list of image_url parts + the text when
+    the request carries `images` (base64 data: URIs encoded by the node)."""
+    prompt = req.get("user_prompt", "")
+    images = req.get("images") or []
+    if not images:
+        return prompt
+    content = [{"type": "image_url", "image_url": {"url": u}} for u in images]
+    content.append({"type": "text", "text": prompt})
+    return content
 
 
 def _kv_type(llama_cpp, name):
@@ -73,11 +145,12 @@ def main():
         import llama_cpp
         from llama_cpp import Llama
     except Exception as e:
-        _send({"status": "error", "message": f"import llama_cpp failed: {e}",
+        _send({"status": "error", "message": f"import llama_cpp failed: {e}{_import_hint()}",
                "traceback": traceback.format_exc()})
         return
 
     llm = None
+    chat_handler = None
     current_sig = None
 
     while True:
@@ -103,10 +176,12 @@ def main():
                 if llm is not None:
                     del llm
                     llm = None
+                    chat_handler = None  # drop the projector/clip context too
                     gc.collect()
                 kv = req.get("kv_cache_type", "f16")
                 kv_type = _kv_type(llama_cpp, kv)
                 flash = bool(req.get("flash_attn", False)) or kv != "f16"
+                chat_handler = _make_chat_handler(req)  # None for a text-only model
                 llm = Llama(
                     model_path=req["model_path"],
                     n_ctx=int(req.get("n_ctx", 4096)),
@@ -116,6 +191,7 @@ def main():
                     flash_attn=flash,
                     type_k=kv_type,
                     type_v=kv_type,
+                    chat_handler=chat_handler,
                     verbose=bool(req.get("verbose", False)),
                 )
                 current_sig = sig
@@ -124,7 +200,7 @@ def main():
             sys_prompt = (req.get("system_prompt") or "").strip()
             if sys_prompt:
                 messages.append({"role": "system", "content": sys_prompt})
-            messages.append({"role": "user", "content": req.get("user_prompt", "")})
+            messages.append({"role": "user", "content": _user_content(req)})
 
             gen_kwargs = dict(
                 messages=messages,
