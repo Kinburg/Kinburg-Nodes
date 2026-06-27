@@ -86,6 +86,51 @@ image's own top-left pixel color so it blends in. The background is `background_
 (HEX), or a connected `background_image` (stretched to the output size, first frame).
 Category `Kinburg-Nodes/image`.
 
+### `loops/` — flexible iteration
+ComfyUI's execution graph is acyclic, so these cover the two practical loop shapes, both with
+**auto-growing wildcard `*` state slots** (the node shows only the connected slots plus one
+spare; drag in any type, a matching slot appears — on inputs *and* outputs):
+
+**`For Each (Open)` / `For Each (Collect)`** — iterate a batch/list **one element at a time**,
+on the same graph-expansion engine as Repeat. Feed Open any iterables (image/mask batches,
+LATENT batches, lists…); each iteration it emits a single **`element_*`** (the idx-th item of
+each input) plus `index` / `total`, iterating to the **shortest** input. Build your body off
+the `element_*` outputs (e.g. a collage from `element_0` + `element_1`) and wire the result(s)
+into Collect's **`result_*`** inputs; Collect accumulates each iteration's results and, when the
+loop ends, emits each `collected_*` as the gathered Python list. Feeding that into a **`List
+Output`** node turns it into a real per-item ComfyUI list — so different-sized images travel
+separately (a Preview shows N images, one per item; a Save writes each). The **🔗 Add / link
+Close** button on Open wires the whole chain: it creates Collect (linked by `flow`) plus a List
+Output on `collected_0`. (A list output can't be emitted from inside the loop itself — ComfyUI
+flattens list outputs during graph expansion — so the fan-out lives in this node just past it.)
+Category `Kinburg-Nodes/loops`.
+
+**`List Output`** fans a value that holds a Python list into a proper ComfyUI list (one item per
+element). For Each (Collect) pairs with it, but it's a handy standalone converter too.
+
+**`Repeat (Open)` / `Repeat (Close)`** — a real iterative loop with **carried state**, built on
+ComfyUI's graph expansion: each pass, Close clones the loop body wired back into the next
+iteration, all inside one queue run. Wire your starting values into `Open`, read `index` inside
+the body, and feed the updated values into `Close`; after `count` iterations `Close` outputs the
+final state. The **🔗 Add / link Close** button on `Open` spawns the matching Close and wires the
+`flow` (and `index`) links for you, so you never hand-draw the feedback. `count` must stay a
+widget value (it's read when the loop expands). Category `Kinburg-Nodes/loops`.
+
+**`While (Open)` / `While (Close)`** — the same engine, condition-driven instead of counted.
+Close has a `condition` (BOOLEAN) input computed in the loop body: the loop keeps going while
+it's True and stops the moment it's False, with `max_iterations` on Open as a hard safety cap.
+Same wildcard state slots and 🔗 auto-pairing as Repeat. Category `Kinburg-Nodes/loops`.
+
+**`Get by Index`** takes the index-th element of anything indexable — an IMAGE/MASK batch (→ a
+1-frame batch), a LATENT batch (→ one latent, other keys preserved), a list, a string, or any
+other tensor — so inside a loop you can feed a whole batch in and pull out the current frame by
+`index`. Negative indices count from the end; `out_of_range` is `clamp` / `wrap` (cycle) /
+`error`. It also outputs `length` (the container size), handy for driving a loop's `count`.
+
+**`Delay`** passes any value straight through after pausing `seconds` (with an optional console
+`label`). Drop it into a wire inside a loop body to slow iterations down and watch the loop run.
+Category `Kinburg-Nodes/loops`.
+
 ### `util/` — Date String, Unlim Text Concat, Color Picker
 **`Date String`** appends the current **date** (and optionally **time**) to a string, with
 selectable formats. Handy for building save paths: e.g. `project/2026-06-20` (a folder per
@@ -120,8 +165,8 @@ mute/bypass them when you're not measuring. Category `Kinburg-Nodes/util`.
 
 ### `gen_info/` — Generation Info, Generation Info Filter
 **`Generation Info`** lists the settings of the branch that produced an output. Pass your
-sampler / latent / image output through its `passthrough` slot (tap it downstream of where
-your branches converge — e.g. the sampler output — so the upstream walk reaches them all);
+**`LATENT`** through its `passthrough` slot (tap it downstream of where your branches
+converge — e.g. the sampler's latent output — so the upstream walk reaches them all);
 the node reads ComfyUI's hidden `PROMPT`, walks upstream, and lists the upstream nodes'
 widget values (`[RandomNoise] noise_seed: …`, `[KSamplerSelect] sampler_name: …`, etc.). The
 dump shows on the node, collapsed by default — click to expand. Outputs a human dump (`info`)
@@ -157,6 +202,20 @@ comment) with free-text search and a by-setting-field filter; rows link back to 
 comparison. You can **edit in place** (toggle status, set rating, add/remove tags, edit the
 comment — saved straight to the DB), **export** the filtered view to CSV / Markdown / HTML,
 and **delete a run** (removing its rows and image files).
+
+### `lora/` — Lora Trigger Loader, Lora Unlim Accumulator
+Stack any number of LoRAs (with their trigger words) onto a model in one node. **`Lora Trigger
+Loader`** is pure config: a searchable LoRA dropdown, `strength_model` + `strength_clip`, and an
+optional `trigger` word; its single `lora` output (type `KINBURG_LORA`) carries that spec —
+nothing is loaded yet. **`Lora Unlim Accumulator`** takes a `model` (+ optional `clip`) and a
+`prompt` (input only — wire it in), plus an auto-growing list of `lora_*` inputs fed by the
+loaders (the `clip` input sits above the first LoRA). It loads and applies each LoRA in slot
+order — to the model with `strength_model`, and to CLIP with `strength_clip` when a CLIP is
+connected (otherwise model-only) — appends the non-empty trigger words to the prompt (in their
+own paragraph after a blank line, comma-separated among themselves), and outputs the patched
+`model` / `clip` / `prompt`. A LoRA with no effective strength (off) is skipped entirely —
+neither applied nor does its trigger word get added. Loaded files are cached per run. Category
+`Kinburg-Nodes/lora`.
 
 ### `accumulators/` — Set / Get Results (name-based accumulators)
 For collecting parallel branches without manual batch wiring. **`Set Results (image)`** is a

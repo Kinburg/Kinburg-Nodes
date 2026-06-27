@@ -1,6 +1,6 @@
 """Generation Info — inspect the settings of the branch that produced an output.
 
-Pass your sampler / latent / image output through this node. It reads ComfyUI's hidden
+Pass your LATENT (e.g. the sampler's output) through this node. It reads ComfyUI's hidden
 PROMPT (the resolved graph), walks upstream from that link, and lists every upstream node's
 widget values — both as a human-readable dump on the node (`info`) and as machine-readable
 structured data (`data`, a JSON string, type GEN_INFO) for the Generation Info Filter node.
@@ -11,15 +11,6 @@ of the same class (so a repeated node like PrimitiveString can be addressed as
 """
 import json
 from collections import deque
-
-
-class AnyType(str):
-    """ComfyUI wildcard idiom — compares equal to every type."""
-    def __ne__(self, other):
-        return False
-
-
-ANY = AnyType("*")
 
 
 def _is_link(v):
@@ -56,12 +47,12 @@ class GenerationInfo:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "passthrough": (ANY, {"tooltip": "Pass your sampler / latent / image output through here — tap it downstream of where the branches converge (e.g. the sampler output) so the upstream walk reaches them all. The node lists every upstream node's widget settings."}),
+                "passthrough": ("LATENT", {"tooltip": "Pass your LATENT through here — tap it downstream of where the branches converge (e.g. the sampler's LATENT output) so the upstream walk reaches them all. The node lists every upstream node's widget settings."}),
             },
             "hidden": {"prompt": "PROMPT", "unique_id": "UNIQUE_ID"},
         }
 
-    RETURN_TYPES = (ANY, "STRING", "GEN_INFO")
+    RETURN_TYPES = ("LATENT", "STRING", "GEN_INFO")
     RETURN_NAMES = ("passthrough", "info", "data")
     FUNCTION = "run"
     OUTPUT_NODE = True
@@ -95,7 +86,7 @@ class GenerationInfo:
     @staticmethod
     def _render(data):
         if not data:
-            return "(no upstream settings — connect 'passthrough' to your sampler / latent / image output)"
+            return "(no upstream settings — connect 'passthrough' to your LATENT, e.g. the sampler output)"
         lines = []
         for e in data:
             params = ", ".join(f"{k}: {_fmt_value(v)}" for k, v in e["params"].items())
