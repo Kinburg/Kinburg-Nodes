@@ -27,13 +27,14 @@ fails. `image_max_side` downscales images before they're sent to the worker. Com
 share one worker process. Node: **`Local LLM (GGUF, vision)`** (category `Kinburg-Nodes/LLM`).
 
 ### `image_compare/` — Image Compare (HTML)
-Takes a batch of images + short labels (`captions`) + full generation prompts (`prompts`)
+Takes a batch **or an image list** (different sizes are fine — e.g. from Get Accumulator (images
+list)) + short labels (`captions`) + full generation prompts (`prompts`)
 and produces an interactive HTML comparison page — grid (columns + max row height),
 before/after slider, opacity overlay, A/B flip, pixel difference, synced loupe, lightbox,
 drag-to-reorder, and per-result **review** controls — a **hide**/reject button (with a
 toolbar toggle to show/hide hidden results), a **star rating** (1–5), **tags**, and a
-**comment** box — plus a "Save page" button and a batch of images with the captions drawn on
-them. The review state (hide / rating / tags / comment) persists across reloads of the served
+**comment** box — plus a "Save page" button and an `images_captioned` output (a *list*, so
+mixed-size inputs stay separate) with the captions drawn on each image. The review state (hide / rating / tags / comment) persists across reloads of the served
 page (browser localStorage). Save
 options: `output_dir` (any folder; the page is served straight from there, no copies),
 `save_captioned_images`, `save_prompts_txt`. Only `images` is required; the text inputs are
@@ -225,7 +226,11 @@ labelled pass-through: connect a flow's final image and give it an accumulator `
 **Collect** button that physically wires every matching Set's output into it (real links, in
 `index` order) and batches them (reusing Unlim Image Batch: `mode` /
 `pad_color` / `skip_empty`). Plug `Get Results` where an image batch used to go (e.g. Image
-Compare). Press Collect again after adding/removing Set nodes. A **text pair** —
+Compare). A sibling **`Get Accumulator (images list)`** collects from the *same* Set nodes but
+returns a **list** instead of a batch, so accumulated images of different sizes coexist (feed it
+straight into Image Compare, which now takes a batch or a list). Press Collect again after adding/removing Set nodes — it rebuilds the links from
+scratch and **only wires active Sets** (a Set in Bypass or Mute is skipped, so it drops out on
+re-collect). A **text pair** —
 **`Set Results (text)`** / **`Get Results (text)`** — works the same way and joins the
 collected texts with a `separator` (reusing Unlim Text Concat) in index order. Two
 compare-tuned twins of the text pair drop the separator field entirely and hardcode the
@@ -240,7 +245,11 @@ by branch. The wiring is plain links, so execution and caching are completely st
 
 **`Collect All Accumulators`** is a one-button helper for big workflows: a standalone node
 whose single **🔌 Collect All** button (re)wires *every* Get Accumulator in the graph at once,
-so you don't have to visit each one after scaling the workflow. Category
+so you don't have to visit each one after scaling the workflow. Like the per-node Collect, it
+rebuilds links from scratch and wires only **active** Sets — bypass or mute a Set and re-collect
+to drop it from every accumulator. Its **`auto_collect`** toggle (on by default) re-collects
+automatically right before the workflow is queued, so the run always reflects the current
+(non-bypassed) Sets; turn it off to collect only on the button press. Category
 `Kinburg-Nodes/accumulators`.
 
 ## Installation

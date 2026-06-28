@@ -43,16 +43,35 @@ except Exception as e:  # pragma: no cover
 
 
 # ----------------------------------------------------------------------------- helpers
-def _tensors_to_pil(images):
-    """ComfyUI IMAGE tensor [B,H,W,C] float 0-1 -> list of PIL.Image (RGB)."""
-    arr = images.cpu().numpy()
-    return [Image.fromarray((np.clip(im, 0.0, 1.0) * 255.0).astype(np.uint8)) for im in arr]
+def _first(v, default=None):
+    """INPUT_IS_LIST wraps every input in a list; take the first element (or default)."""
+    if isinstance(v, list):
+        return v[0] if v else default
+    return v
 
 
-def _pil_to_tensor_batch(pils):
+def _images_to_pils(images):
+    """Flatten the `images` input (a list under INPUT_IS_LIST whose elements are IMAGE batch
+    tensors or single frames, possibly of different sizes) into one flat list of PIL (RGB).
+    Accepts a batch tensor and a ComfyUI image list alike."""
+    pils = []
+    for v in (images if isinstance(images, list) else [images]):
+        if v is None:
+            continue
+        arr = v.cpu().numpy() if hasattr(v, "cpu") else np.asarray(v)
+        if arr.ndim == 3:
+            arr = arr[None, ...]
+        for im in arr:
+            pils.append(Image.fromarray((np.clip(im, 0.0, 1.0) * 255.0).astype(np.uint8)).convert("RGB"))
+    return pils
+
+
+def _pils_to_tensor_list(pils):
+    """PILs -> a list of single-frame IMAGE tensors [1,H,W,C]. Used for the `images_captioned`
+    output (OUTPUT_IS_LIST), so different-sized images stay separate — no batching/padding."""
     import torch
-    arrs = [np.asarray(p.convert("RGB")).astype(np.float32) / 255.0 for p in pils]
-    return torch.from_numpy(np.stack(arrs))
+    return [torch.from_numpy(np.asarray(p.convert("RGB")).astype(np.float32) / 255.0)[None, ...]
+            for p in pils]
 
 
 def _b64_png(pil):
@@ -224,7 +243,7 @@ class ImageCompare:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
+                "images": ("IMAGE", {"tooltip": "Images to compare — a batch OR an image list (e.g. from Get Accumulator (images list)); different sizes are fine."}),
                 "title": ("STRING", {"default": "Image comparison"}),
                 "columns": ("INT", {"default": 3, "min": 1, "max": 12, "tooltip": "Default number of columns in Grid mode"}),
                 "overlay_captions": ("BOOLEAN", {"default": True, "tooltip": "Draw captions onto the 'images_captioned' output"}),
@@ -245,6 +264,10 @@ class ImageCompare:
             },
         }
 
+    INPUT_IS_LIST = True  # gather the whole batch/list into ONE page (don't run per-image)
+    # images_captioned is a LIST (one frame per image), so mixed sizes stay separate; the two
+    # string outputs are single values.
+    OUTPUT_IS_LIST = (True, False, False)
     RETURN_TYPES = ("IMAGE", "STRING", "STRING")
     RETURN_NAMES = ("images_captioned", "html_path", "url")
     FUNCTION = "run"
@@ -257,8 +280,28 @@ class ImageCompare:
             prompts="", show_prompts=False,
             output_dir="", save_prompts_txt=False,
             show_settings=True, settings_data="", report_db=""):
-        pils = _tensors_to_pil(images)
+        # INPUT_IS_LIST: every input arrives wrapped in a list. Unwrap the scalar widgets and
+        # flatten the images (a batch or a list, possibly mixed sizes) into one list of PIL.
+        title = _first(title, "Image comparison")
+        columns = int(_first(columns, 3))
+        overlay_captions = bool(_first(overlay_captions, True))
+        caption_position = _first(caption_position, "bottom")
+        font_size = int(_first(font_size, 0))
+        filename_prefix = _first(filename_prefix, "compare")
+        save_captioned_images = bool(_first(save_captioned_images, False))
+        captions = _first(captions, "") or ""
+        prompts = _first(prompts, "") or ""
+        show_prompts = bool(_first(show_prompts, False))
+        output_dir = _first(output_dir, "") or ""
+        save_prompts_txt = bool(_first(save_prompts_txt, False))
+        show_settings = bool(_first(show_settings, True))
+        settings_data = _first(settings_data, "") or ""
+        report_db = _first(report_db, "") or ""
+
+        pils = _images_to_pils(images)
         n = len(pils)
+        if n == 0:
+            return self._err("no images connected", [])
 
         # Report prep: save clean per-image PNGs to a stable, run-scoped folder and gather a
         # run_id + resolved DB path. The page's "Save run to report" button uses these; the
@@ -346,7 +389,8 @@ class ImageCompare:
                         for p, c, col, band in zip(pils, caps, cap_colors, cap_bands)]
         else:
             cap_pils = [p.convert("RGB") for p in pils]
-        out_tensor = _pil_to_tensor_batch(cap_pils)
+        # images_captioned is a list output — one frame per image, any sizes, no padding.
+        out_tensor = _pils_to_tensor_list(cap_pils)
 
         if save_captioned_images or save_prompts_txt:
             saved = 0
@@ -372,7 +416,8 @@ class ImageCompare:
 
     def _err(self, msg, pils):
         print(f"[ImageCompare] ERROR: {msg}")
-        out = _pil_to_tensor_batch([p.convert("RGB") for p in pils]) if pils else None
+        # images_captioned is OUTPUT_IS_LIST -> output 0 must be a list (empty if no images).
+        out = _pils_to_tensor_list([p.convert("RGB") for p in pils]) if pils else []
         return {"ui": {"compare_url": [""], "compare_path": [""]},
                 "result": (out, f"[ERROR] {msg}", "")}
 

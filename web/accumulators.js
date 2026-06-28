@@ -5,7 +5,9 @@ import { app } from "../../scripts/app.js";
 //   Get Results: a name dropdown (live list of Set names) + a "Collect" button that physically
 //                wires every matching Set's output into it (real links, in index order).
 const PAIRS = [
-  { set: "SetAccumImages",   get: "GetAccumImages",   slot: "image_", type: "IMAGE" },
+  { set: "SetAccumImages",   get: "GetAccumImages",     slot: "image_", type: "IMAGE" },
+  // Same Set, a second Get that returns a LIST instead of a batch (different sizes coexist).
+  { set: "SetAccumImages",   get: "GetAccumImagesList", slot: "image_", type: "IMAGE" },
   { set: "SetAccumTexts",    get: "GetAccumTexts",    slot: "text_",  type: "STRING" },
   // Compare-tuned text pairs: same wiring as texts, but the Get joins with a fixed
   // separator (prompts: a '---' line; captions: a newline) to match Image Compare.
@@ -16,6 +18,9 @@ const PAIRS = [
 
 const wv = (node, name) => node.widgets?.find((w) => w.name === name);
 const isType = (node, t) => node.comfyClass === t || node.type === t;
+// Only active nodes are collected; Bypass (mode 4) and Mute (mode 2) are skipped, so toggling a
+// Set's mode and re-collecting wires it in or drops it out.
+const isActive = (node) => (node.mode ?? 0) === 0;
 
 function retitle(node, pair) {
   const nm = (wv(node, "name")?.value ?? "").trim();
@@ -68,7 +73,7 @@ function collect(getNode, pair) {
   let count = 0;
   if (name) {
     const sets = graph._nodes
-      .filter((n) => isType(n, pair.set) && (wv(n, "name")?.value || "").trim() === name && n.inputs?.[0]?.link != null)
+      .filter((n) => isType(n, pair.set) && isActive(n) && (wv(n, "name")?.value || "").trim() === name && n.inputs?.[0]?.link != null)
       .sort((a, b) => (wv(a, "index")?.value ?? 0) - (wv(b, "index")?.value ?? 0));
     sets.forEach((s, i) => {
       getNode.addInput(`${pair.slot}${i + 1}`, pair.type);
@@ -80,12 +85,14 @@ function collect(getNode, pair) {
   getNode.setDirtyCanvas(true, true);
 }
 
-function registerPair(pair) {
-  // ---- Set node: auto-index (menu-add + paste) and live title ----
+// ---- Set node: auto-index (menu-add + paste) and live title. Registered once per Set class,
+// since one Set can now feed several Get types (e.g. images batch + images list). ----
+function registerSet(setClass) {
+  const pair = { set: setClass };  // Set-side helpers only need the set class
   app.registerExtension({
-    name: `Kinburg.${pair.set}`,
+    name: `Kinburg.${setClass}`,
     async beforeRegisterNodeDef(nodeType, nodeData) {
-      if (nodeData.name !== pair.set) return;
+      if (nodeData.name !== setClass) return;
       const onAdded = nodeType.prototype.onAdded;
       nodeType.prototype.onAdded = function () {
         const r = onAdded?.apply(this, arguments);
@@ -111,8 +118,10 @@ function registerPair(pair) {
       };
     },
   });
+}
 
-  // ---- Get node: dropdown of Set names (auto-collects on pick) + Collect button ----
+// ---- Get node: dropdown of Set names (auto-collects on pick) + Collect button ----
+function registerGet(pair) {
   app.registerExtension({
     name: `Kinburg.${pair.get}`,
     async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -138,11 +147,33 @@ function registerPair(pair) {
   });
 }
 
-for (const pair of PAIRS) registerPair(pair);
+for (const setClass of new Set(PAIRS.map((p) => p.set))) registerSet(setClass);
+for (const pair of PAIRS) registerGet(pair);
 
 // ---- Collect All: one button that (re)wires every Get accumulator in the graph ----
 app.registerExtension({
   name: "Kinburg.CollectAllAccumulators",
+  async setup() {
+    // Auto-collect before the prompt is queued, whenever a Collect All node has its toggle on.
+    // Runs synchronously before the original queuePrompt builds the prompt, so the freshly
+    // (re)wired links are the ones that get queued. Idempotent — patched only once.
+    const orig = app.queuePrompt;
+    if (typeof orig === "function" && !orig.__kinburgAutoCollect) {
+      const patched = async function (...args) {
+        try {
+          const g = app.graph;
+          const on = (g?._nodes || []).some(
+            (n) => isType(n, "CollectAllAccumulators") && wv(n, "auto_collect")?.value);
+          if (on) collectAll(g);
+        } catch (e) {
+          console.error("[Kinburg] auto-collect before queue failed:", e);
+        }
+        return orig.apply(this, args);
+      };
+      patched.__kinburgAutoCollect = true;
+      app.queuePrompt = patched;
+    }
+  },
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData.name !== "CollectAllAccumulators") return;
     const onNodeCreated = nodeType.prototype.onNodeCreated;

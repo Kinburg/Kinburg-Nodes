@@ -7,6 +7,7 @@ import json
 import re
 
 from ..image_batch.batch_node import UnlimImageBatch
+from ..image_batch.list_node import UnlimImageList
 from ..util.text_concat import UnlimTextConcat
 from ..util.separators import BLOCK_JOINER
 
@@ -61,6 +62,30 @@ class GetAccumImages:
     def run(self, name="", mode="as is", pad_color="#000000", skip_empty=True, **kwargs):
         # kwargs carries the frontend-wired image_1, image_2, … links — batch them.
         return UnlimImageBatch().run(mode=mode, pad_color=pad_color, skip_empty=skip_empty, **kwargs)
+
+
+class GetAccumImagesList:
+    """Like Get Accumulator (images), but returns a ComfyUI image *list* instead of a batch, so
+    accumulated images of different sizes coexist (no crop/pad). Collects from the same Set
+    Accumulator (images) nodes by name."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "name": ("STRING", {"default": "IMAGES", "tooltip": "Accumulator name to collect — must match the Set Accumulator (images) nodes. Press 'Collect' to (re)wire after adding/removing Sets."}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "run"
+    CATEGORY = "Kinburg-Nodes/accumulators"
+
+    def run(self, name="", **kwargs):
+        # kwargs carries the frontend-wired image_1, image_2, … links — emit them as a list
+        # (each batch split into single frames), so different sizes travel separately.
+        return UnlimImageList().run(**kwargs)
 
 
 class GetAccumTexts:
@@ -168,19 +193,23 @@ class GetAccumGenInfo:
 
 class CollectAllAccumulators:
     """One-button helper — its frontend 'Collect All' button (re)wires every Get Accumulator
-    in the graph at once. No execution role; purely an editor convenience (web/accumulators.js).
+    in the graph at once. With `auto_collect` on, the frontend also re-collects automatically
+    right before the workflow is queued. No execution role; purely an editor convenience
+    (web/accumulators.js).
     """
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {}}
+        return {"required": {
+            "auto_collect": ("BOOLEAN", {"default": True, "tooltip": "On: re-collect every accumulator automatically right before the workflow runs. Off: only when you press the button."}),
+        }}
 
     RETURN_TYPES = ()
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/accumulators"
 
-    def run(self):
+    def run(self, auto_collect=True):
         return ()
 
 
-NODE_CLASS_MAPPINGS = {"GetAccumImages": GetAccumImages, "GetAccumTexts": GetAccumTexts, "GetAccumPrompts": GetAccumPrompts, "GetAccumCaptions": GetAccumCaptions, "GetAccumGenInfo": GetAccumGenInfo, "CollectAllAccumulators": CollectAllAccumulators}
-NODE_DISPLAY_NAME_MAPPINGS = {"GetAccumImages": "Get Accumulator (images)", "GetAccumTexts": "Get Accumulator (texts)", "GetAccumPrompts": "Get Accumulator (prompts)", "GetAccumCaptions": "Get Accumulator (captions)", "GetAccumGenInfo": "Get Accumulator (gen info)", "CollectAllAccumulators": "Collect All Accumulators"}
+NODE_CLASS_MAPPINGS = {"GetAccumImages": GetAccumImages, "GetAccumImagesList": GetAccumImagesList, "GetAccumTexts": GetAccumTexts, "GetAccumPrompts": GetAccumPrompts, "GetAccumCaptions": GetAccumCaptions, "GetAccumGenInfo": GetAccumGenInfo, "CollectAllAccumulators": CollectAllAccumulators}
+NODE_DISPLAY_NAME_MAPPINGS = {"GetAccumImages": "Get Accumulator (images)", "GetAccumImagesList": "Get Accumulator (images list)", "GetAccumTexts": "Get Accumulator (texts)", "GetAccumPrompts": "Get Accumulator (prompts)", "GetAccumCaptions": "Get Accumulator (captions)", "GetAccumGenInfo": "Get Accumulator (gen info)", "CollectAllAccumulators": "Collect All Accumulators"}
