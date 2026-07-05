@@ -296,6 +296,49 @@ def _apply_directive(user_prompt, thinking_directive, custom_directive):
     return user_prompt, directive
 
 
+def _parse_extra_args(text):
+    """Parse the extra_load_args field into a dict of Llama() kwargs.
+
+    Accepts either a JSON object, or one `key=value` per line (blank / `#` lines skipped);
+    values are parsed with ast.literal_eval (so 8, 1.0, True, [1,1], "str" keep their type),
+    falling back to a bare string. Raises ValueError on malformed input.
+    """
+    text = (text or "").strip()
+    if not text:
+        return {}
+    if text.startswith("{"):
+        obj = json.loads(text)
+        if not isinstance(obj, dict):
+            raise ValueError("extra_load_args JSON must be an object, e.g. {\"n_threads\": 8}")
+        return obj
+    import ast
+    out = {}
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        if "=" not in ln:
+            raise ValueError(f"extra_load_args: expected key=value, got: {ln!r}")
+        k, v = ln.split("=", 1)
+        k, v = k.strip(), v.strip()
+        if not k:
+            raise ValueError(f"extra_load_args: empty key in line: {ln!r}")
+        try:
+            out[k] = ast.literal_eval(v)
+        except Exception:
+            out[k] = v  # bare, unquoted string value
+    return out
+
+
+def _with_context(system_prompt, context):
+    """Append a reference-context block (e.g. from Context Collector) to the system prompt."""
+    ctx = (context or "").strip()
+    if not ctx:
+        return system_prompt
+    base = (system_prompt or "").rstrip()
+    return (base + "\n\n" + ctx) if base else ctx
+
+
 def _apply_output_format(output_format, grammar, system_prompt):
     """Expand the built-in ideogram4_json preset; return (format, grammar, system_prompt)."""
     if output_format == "ideogram4_json":
@@ -403,6 +446,7 @@ class LocalLLMTextGGUF:
                 "model_path": ("STRING", {"default": "", "tooltip": "Full path to a .gguf, used when 'model' is the placeholder. Lets you load models from anywhere on disk. Surrounding quotes (e.g. from Windows 'Copy as path') are stripped automatically."}),
                 "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
                 "user_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "context": ("STRING", {"multiline": True, "default": "", "tooltip": "Reference material appended to the system prompt — e.g. character cards from Context Collector. Type it here or wire in a STRING. The model uses it to expand named subjects in the prompt. Empty = ignored."}),
                 "max_tokens": ("INT", {"default": 512, "min": 16, "max": 32768, "step": 16}),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "top_p": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -424,6 +468,7 @@ class LocalLLMTextGGUF:
                 "custom_directive": ("STRING", {"default": "", "tooltip": "Directive text appended to the prompt when thinking_directive = custom (e.g. /no_think)"}),
                 "output_format": (["text", "json_object", "gbnf_grammar", "ideogram4_json"], {"default": "text", "tooltip": "Output: free text · valid JSON (json_object) · custom GBNF grammar (field below) · ideogram4_json = built-in nested Ideogram JSON. Grammar modes run without the live progress bar"}),
                 "grammar": ("STRING", {"multiline": True, "default": "", "tooltip": "GBNF grammar text, used when output_format = gbnf_grammar"}),
+                "extra_load_args": ("STRING", {"multiline": True, "default": "", "tooltip": "Advanced: extra keyword args for llama-cpp-python's Llama() loader. One per line as key=value (e.g. n_threads=8, main_gpu=0, rope_freq_base=1000000, tensor_split=[1,1]) or a JSON object. These are Python-binding args, NOT llama.cpp CLI flags — e.g. '--spec-type draft-mtp' has no effect here. Unknown keys are ignored (logged to console). Changing this reloads the model."}),
             },
         }
 
@@ -435,8 +480,8 @@ class LocalLLMTextGGUF:
     def run(self, model, model_path, system_prompt, user_prompt, max_tokens, temperature,
             top_p, top_k, min_p, repeat_penalty, stop, n_ctx, n_gpu_layers, n_batch,
             flash_attn, kv_cache_type, seed, unload_comfy_models, unload_llm_after_run,
-            strip_think, thinking_directive="model default", custom_directive="",
-            output_format="text", grammar="", answer_marker=""):
+            strip_think, context="", thinking_directive="model default", custom_directive="",
+            output_format="text", grammar="", answer_marker="", extra_load_args=""):
 
         # Resolve the model: a real dropdown selection wins; else the manual path (quotes
         # stripped so a Windows "Copy as path" value works as-is).
@@ -444,6 +489,12 @@ class LocalLLMTextGGUF:
         if not resolved or not os.path.isfile(resolved):
             return _err(f"Model file not found: {resolved or '(none selected)'}")
 
+        try:
+            extra = _parse_extra_args(extra_load_args)
+        except ValueError as e:
+            return _err(str(e))
+
+        system_prompt = _with_context(system_prompt, context)
         user_prompt, directive = _apply_directive(user_prompt, thinking_directive, custom_directive)
         eff_format, eff_grammar, eff_system = _apply_output_format(output_format, grammar, system_prompt)
 
@@ -466,10 +517,12 @@ class LocalLLMTextGGUF:
             "seed": seed,
             "output_format": eff_format,
             "grammar": eff_grammar,
+            "extra_load_args": extra,
             "verbose": False,
         }
         load_sig = (resolved, int(n_ctx), int(n_gpu_layers), int(n_batch),
-                    bool(flash_attn), kv_cache_type, None, None)
+                    bool(flash_attn), kv_cache_type, None, None,
+                    json.dumps(extra, sort_keys=True, default=str))
 
         return _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
                                     unload_llm_after_run, directive, strip_think,
@@ -503,9 +556,9 @@ class LocalLLMVisionGGUF:
     def run(self, model, model_path, mmproj, mmproj_path, vision_handler, image, image_max_side,
             system_prompt, user_prompt, max_tokens, temperature, top_p, top_k, min_p,
             repeat_penalty, stop, n_ctx, n_gpu_layers, n_batch, flash_attn, kv_cache_type,
-            seed, unload_comfy_models, unload_llm_after_run, strip_think,
+            seed, unload_comfy_models, unload_llm_after_run, strip_think, context="",
             thinking_directive="model default", custom_directive="", output_format="text",
-            grammar="", answer_marker=""):
+            grammar="", answer_marker="", extra_load_args=""):
 
         resolved = _resolve_path(model, model_path)
         if not resolved or not os.path.isfile(resolved):
@@ -514,11 +567,16 @@ class LocalLLMVisionGGUF:
         if not mmproj_resolved or not os.path.isfile(mmproj_resolved):
             return _err(f"mmproj file not found: {mmproj_resolved or '(none selected)'} — vision needs the model's mmproj .gguf.", VISION_HELP_TEXT)
         try:
+            extra = _parse_extra_args(extra_load_args)
+        except ValueError as e:
+            return _err(str(e), VISION_HELP_TEXT)
+        try:
             images = _encode_images(image, int(image_max_side))
         except Exception as e:
             return _err(f"Failed to encode image(s): {e}", VISION_HELP_TEXT)
 
         handler_key = _VISION_HANDLER_KEY.get(vision_handler, "auto")
+        system_prompt = _with_context(system_prompt, context)
         user_prompt, directive = _apply_directive(user_prompt, thinking_directive, custom_directive)
         eff_format, eff_grammar, eff_system = _apply_output_format(output_format, grammar, system_prompt)
 
@@ -544,10 +602,12 @@ class LocalLLMVisionGGUF:
             "seed": seed,
             "output_format": eff_format,
             "grammar": eff_grammar,
+            "extra_load_args": extra,
             "verbose": False,
         }
         load_sig = (resolved, int(n_ctx), int(n_gpu_layers), int(n_batch),
-                    bool(flash_attn), kv_cache_type, mmproj_resolved, handler_key)
+                    bool(flash_attn), kv_cache_type, mmproj_resolved, handler_key,
+                    json.dumps(extra, sort_keys=True, default=str))
 
         return _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
                                     unload_llm_after_run, directive, strip_think,

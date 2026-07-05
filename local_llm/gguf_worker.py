@@ -81,7 +81,31 @@ def _load_sig(req):
         req.get("kv_cache_type", "f16"),
         req.get("mmproj_path") or None,
         (req.get("vision_handler") or "auto") if (req.get("mmproj_path") or "").strip() else None,
+        json.dumps(req.get("extra_load_args") or {}, sort_keys=True, default=str),
     )
+
+
+def _merge_extra_load_args(base, extra):
+    """Merge user-supplied Llama() kwargs into `base`, keeping only names Llama.__init__
+    accepts (unless it takes **kwargs). Unknown keys are dropped with a console note so a
+    typo or a CLI-only flag can't crash the loader."""
+    if not extra:
+        return base
+    import inspect
+    from llama_cpp import Llama
+    try:
+        params = inspect.signature(Llama.__init__).parameters
+        accepted = set(params)
+        has_var_kw = any(p.kind == p.VAR_KEYWORD for p in params.values())
+    except (ValueError, TypeError):
+        accepted, has_var_kw = set(), True  # can't introspect -> pass everything through
+    for k, v in extra.items():
+        if has_var_kw or k in accepted:
+            base[k] = v          # user args override the defaults above
+        else:
+            sys.stdout.write(f"[LocalLLM worker] ignoring unknown Llama() arg: {k}\n")
+            sys.stdout.flush()
+    return base
 
 
 # Vision chat-handler key (sent by the node) -> class name in llama_cpp.llama_chat_format.
@@ -182,7 +206,7 @@ def main():
                 kv_type = _kv_type(llama_cpp, kv)
                 flash = bool(req.get("flash_attn", False)) or kv != "f16"
                 chat_handler = _make_chat_handler(req)  # None for a text-only model
-                llm = Llama(
+                load_kwargs = dict(
                     model_path=req["model_path"],
                     n_ctx=int(req.get("n_ctx", 4096)),
                     n_gpu_layers=int(req.get("n_gpu_layers", -1)),
@@ -194,6 +218,8 @@ def main():
                     chat_handler=chat_handler,
                     verbose=bool(req.get("verbose", False)),
                 )
+                _merge_extra_load_args(load_kwargs, req.get("extra_load_args") or {})
+                llm = Llama(**load_kwargs)
                 current_sig = sig
 
             messages = []

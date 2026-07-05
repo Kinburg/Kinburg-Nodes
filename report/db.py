@@ -14,7 +14,7 @@ import sqlite3
 import json
 import time
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS results (
   run_id INTEGER NOT NULL,
   idx INTEGER, image_path TEXT, caption TEXT, prompt TEXT,
   settings_text TEXT, settings_json TEXT,
-  status TEXT, rating INTEGER, comment TEXT, created_at TEXT,
+  status TEXT, rating INTEGER, comment TEXT,
+  time_text TEXT, time_seconds REAL, created_at TEXT,
   FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS result_settings (
@@ -52,8 +53,26 @@ def _connect(db_path):
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_DDL)
+    _migrate(conn)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
+
+
+def _migrate(conn):
+    """Add columns introduced after v1 to pre-existing DBs (CREATE TABLE IF NOT EXISTS
+    won't touch an already-created table). Each ADD COLUMN is idempotent via a presence
+    check, so this is safe to run on every connect."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(results)").fetchall()}
+    for name, decl in (("time_text", "TEXT"), ("time_seconds", "REAL")):
+        if name not in have:
+            conn.execute(f"ALTER TABLE results ADD COLUMN {name} {decl}")
+
+
+def _to_float(v):
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _field_pairs(fields):
@@ -101,11 +120,12 @@ def upsert_run(db_path, run, results):
         for r in results:
             fields = r.get("settings_fields")
             cur.execute(
-                "INSERT INTO results(run_id, idx, image_path, caption, prompt, settings_text, settings_json, status, rating, comment, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO results(run_id, idx, image_path, caption, prompt, settings_text, settings_json, status, rating, comment, time_text, time_seconds, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (run_id, r.get("idx"), r.get("image_path", ""), r.get("caption", ""), r.get("prompt", ""),
                  r.get("settings", ""), json.dumps(fields, ensure_ascii=False) if fields is not None else "",
-                 r.get("status", "keep"), int(r.get("rating") or 0), r.get("comment", ""), now))
+                 r.get("status", "keep"), int(r.get("rating") or 0), r.get("comment", ""),
+                 r.get("time", "") or r.get("time_text", ""), _to_float(r.get("time_seconds")), now))
             rid = cur.lastrowid
             for k, v in _field_pairs(fields):
                 cur.execute("INSERT INTO result_settings(result_id, key, value) VALUES (?,?,?)", (rid, k, v))
@@ -183,7 +203,7 @@ def fetch_results(db_path):
         cur = conn.cursor()
         rows = cur.execute(
             "SELECT r.id, r.idx, r.image_path, r.caption, r.prompt, r.settings_text,"
-            "       r.status, r.rating, r.comment, r.created_at,"
+            "       r.status, r.rating, r.comment, r.time_text, r.time_seconds, r.created_at,"
             "       ru.run_key, ru.title, ru.html_url, ru.created_at"
             " FROM results r JOIN runs ru ON ru.id = r.run_id"
             " ORDER BY ru.created_at DESC, r.idx ASC").fetchall()
@@ -196,8 +216,9 @@ def fetch_results(db_path):
             results.append({
                 "id": rid, "idx": row[1], "image_path": row[2], "caption": row[3], "prompt": row[4],
                 "settings_text": row[5], "status": row[6], "rating": row[7], "comment": row[8],
-                "created_at": row[9], "run_key": row[10], "run_title": row[11], "run_url": row[12],
-                "run_created": row[13], "settings": settings, "tags": tags,
+                "time_text": row[9], "time_seconds": row[10],
+                "created_at": row[11], "run_key": row[12], "run_title": row[13], "run_url": row[14],
+                "run_created": row[15], "settings": settings, "tags": tags,
             })
         keys = [k for (k,) in cur.execute("SELECT DISTINCT key FROM result_settings ORDER BY key").fetchall()]
         tags_all = [t for (t,) in cur.execute("SELECT DISTINCT tag FROM result_tags ORDER BY tag").fetchall()]

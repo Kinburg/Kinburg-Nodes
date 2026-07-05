@@ -13,8 +13,12 @@ ideal right before image generation. Features: streaming progress bar, token cou
 `finish_reason`, a separate `thoughts` output, reasoning control (Qwen3 `/no_think` and a
 configurable `answer_marker` for models that reason without `<think>` tags), `min_p` /
 `stop`, flash attention, KV-cache quantization, and structured output (JSON / GBNF / a
-built-in Ideogram prompt grammar). Node: **`Local LLM (GGUF, text)`** (category
-`Kinburg-Nodes/LLM`).
+built-in Ideogram prompt grammar). An **`extra_load_args`** field passes advanced keyword
+args straight to llama-cpp-python's `Llama()` loader — `key=value` per line (e.g.
+`n_threads=8`, `main_gpu=0`, `tensor_split=[1,1]`, `rope_freq_base=1000000`) or a JSON object;
+unknown keys are ignored and changing it reloads the model. Note these are **Python-binding
+args, not llama.cpp CLI flags** — CLI-only flags like `--spec-type draft-mtp` have no effect
+here. Node: **`Local LLM (GGUF, text)`** (category `Kinburg-Nodes/LLM`).
 
 **`Local LLM (GGUF, vision)`** is the multimodal twin — same engine, sampling, reasoning
 split and output formats, plus an **`image`** input and a second model path for the
@@ -25,6 +29,44 @@ Gemma 3, SmolVLM, …) straight from the mmproj — only switch to a specific fa
 fails. `image_max_side` downscales images before they're sent to the worker. Combine it with
 `output_format = json_object` to get a structured description of an image. Both LLM nodes
 share one worker process. Node: **`Local LLM (GGUF, vision)`** (category `Kinburg-Nodes/LLM`).
+
+**`Local LLM (server client, text)`** is a different beast: instead of the Python binding it
+talks HTTP to an OpenAI-compatible LLM **server**, so you get the server's **full command
+line**. A **`backend`** selector picks:
+- **llama-server (launch)** — launches llama.cpp's `llama-server`; `extra_args` reaches any
+  llama.cpp flag, e.g. `--spec-type draft-mtp` (MTP speculative decoding), `--flash-attn`,
+  `--model-draft path/to/draft.gguf`.
+- **koboldcpp (launch)** — launches `koboldcpp` with its own flag names (`--model`,
+  `--contextsize`, `--gpulayers`) plus Kobold extras via `extra_args` (readiness via
+  `/v1/models`; usual port 5001).
+- **connect to running server** — launches nothing; set **`base_url`** (e.g.
+  `http://localhost:5001`) and it calls a server you already run — koboldcpp's GUI, LM Studio,
+  Ollama, vLLM, a remote box…
+
+For the launch backends point **`server_binary`** at the executable (download it yourself —
+neither is bundled). A launched server starts on demand, is reused while
+backend/binary/model/`n_ctx`/`n_gpu_layers`/`host`/`port`/`extra_args` stay the same, and is
+shut down on exit — or after each run when **`keep_alive`** is off, to free VRAM. Sampling, the
+reasoning split (separate **`thoughts`** output, `strip_think`, `answer_marker`), reasoning
+directives and structured output (`output_format` / `grammar`, incl. the Ideogram preset) match
+the llama-cpp-python text node, so its full output set is here too (`text` / `thoughts` /
+`finish_reason` / token counts / `gen_seconds` / `help`) plus a `server_log` tail for
+troubleshooting. `unload_comfy_models` frees image models first; `ready_path` overrides the
+health probe. Text only. Node: **`Local LLM (server client, text)`** (category
+`Kinburg-Nodes/LLM`).
+
+### `context/` — Character Card, Context Collector
+Feed an LLM node reference material so it weaves named subjects into an expanded image prompt.
+**`Character Card`** has fields (name, gender, age, eyes, hair, build, outfit, distinctive
+features, free-form notes…) and outputs one tidy Markdown block, **skipping every empty
+field**. **`Context Collector`** gathers any number of cards / text chunks (auto-growing
+`item_N` inputs, empties skipped) under a `title` and wraps them in a delimited block —
+`<context>…</context>`, a custom tag, a Markdown heading, or none — so the model can tell
+reference data from the instruction. Wire its `context` output into an LLM node's new
+**`context`** input (present on all three LLM nodes; it's appended to the system prompt). Then a
+prompt like *"Vasya and Kolya drink tea in a cafe"* comes back expanded with each character's
+looks. Note: the diffusion model still has its own limits binding attributes across multiple
+people. Category `Kinburg-Nodes/LLM`.
 
 ### `image_compare/` — Image Compare (HTML)
 Takes a batch **or an image list** (different sizes are fine — e.g. from Get Accumulator (images
@@ -132,7 +174,7 @@ other tensor — so inside a loop you can feed a whole batch in and pull out the
 `label`). Drop it into a wire inside a loop body to slow iterations down and watch the loop run.
 Category `Kinburg-Nodes/loops`.
 
-### `util/` — Date String, Unlim Text Concat, Color Picker
+### `util/` — Date String, Unlim Text Concat, Color Picker, Any/Combo to String
 **`Date String`** appends the current **date** (and optionally **time**) to a string, with
 selectable formats. Handy for building save paths: e.g. `project/2026-06-20` (a folder per
 day) or `.../2026-06-20/17-05` (per minute). The `/` separator creates subfolders; `_`/`-`
@@ -149,6 +191,15 @@ Concat (newline) → the compare node's `captions`. Category `Kinburg-Nodes/util
 **`Color Picker`** is the handy color control from Color Caption (a 10-swatch palette + a
 native color picker, or type a HEX) as a standalone node. Outputs the normalized `#RRGGBB`
 string plus its `R` / `G` / `B` components. Category `Kinburg-Nodes/util`.
+
+**`Any to String`** / **`Combo to String`** convert a value into a real `STRING` you can feed
+into text/preview/prompt nodes. **`Any to String`** has a wildcard `*` input for values that
+already connect loosely. **`Combo to String`** solves the specific case ComfyUI blocks by
+design: a **COMBO** output (e.g. the core `Primitive` node in combo mode) refuses to wire into
+a `STRING` input. Connect the Primitive's COMBO output into `Combo to String` (a small frontend
+patch in `web/combo_to_string.js` allows the link and pushes the selected value in), and its
+`string` output carries the value — e.g. `ru` — wherever you need it. Category
+`Kinburg-Nodes/util`.
 
 ### `timer/` — Start Timer, Stop Timer
 **`Start Timer`** / **`Stop Timer`** measure the wall-clock time of a slice of a workflow.
@@ -251,6 +302,41 @@ to drop it from every accumulator. Its **`auto_collect`** toggle (on by default)
 automatically right before the workflow is queued, so the run always reflects the current
 (non-bypassed) Sets; turn it off to collect only on the button press. Category
 `Kinburg-Nodes/accumulators`.
+
+### `prompt_presets/` — Prompt Presets
+**`Prompt Presets`** is five preset **dropdowns** — **Camera**, **Aesthetics**, **Light**,
+**Medium**, **Background** — each emitting a `STRING` prompt fragment (five outputs, one per
+dropdown). Every dropdown ships with curated built-in presets (e.g. *Camera → Cinematic
+Anamorphic*, *Light → Rembrandt*, *Aesthetics → Cyberpunk*) plus a `🚫 None` option that
+resolves to an empty string. Selecting a preset resolves to its fragment at run time; wire the
+outputs into your prompt builder / text concat.
+
+You can **add your own** presets (**➕ Add preset** — pick a category, name it, type the
+fragment; re-using an existing name edits it) and **save the current selection as a setup**
+(**💾 Save setup** — name a favourite combination of all five dropdowns). The **⚙ setup**
+selector at the top of the node re-applies any saved setup in one click, and **🗑 Manage**
+lists your setups and custom presets for deletion (built-ins can't be removed). Custom presets
+and setups are persisted on disk (`prompt_presets/data/store.json`, git-ignored) via
+`PromptServer` routes under `/kinburg/presets`, so they survive restarts and appear across all
+`Prompt Presets` nodes without an object-info reload. Category `Kinburg-Nodes/prompt`.
+
+### `list_ops/` — Insert / Remove for batches and lists
+Edit collections by position without rewiring. Two families:
+
+**Image batch** (a single `[B,H,W,C]` IMAGE tensor, frame-wise): **`Image Batch Insert`** puts an
+`image` (itself possibly a batch) into `batch` at a chosen spot — `position` = *at start / at end
+/ at index / after index* with a 0-based `index` (negative counts from the end, `-1` = last).
+Frames of a different size are reconciled losslessly like Unlim Image Batch (`mode` /
+`pad_color`). **`Image Batch Remove`** drops `count` frame(s) starting at `index` and returns both
+the `batch` remainder and the `removed` frames (`index` may be negative). Category
+`Kinburg-Nodes/image`.
+
+**Generic list** (a ComfyUI list of ANY type — images, strings, latents, ints…): **`List
+Insert`** inserts the `item` input into `list` at the chosen `position` / `index` (feed `item` a
+multi-item list to insert several at once); **`List Remove`** drops `count` item(s) at `index`
+and returns the `list` remainder plus the `removed` items. An item is one list element (a single
+value counts as a one-item list). Use these when items aren't same-size images — for frame-level
+edits of a same-size IMAGE batch, use the Image Batch nodes above. Category `Kinburg-Nodes/list`.
 
 ## Installation
 

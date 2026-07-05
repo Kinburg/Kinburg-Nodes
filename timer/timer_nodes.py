@@ -15,13 +15,7 @@ import time
 from datetime import datetime
 
 
-class AnyType(str):
-    """A type string that compares equal to everything — ComfyUI's wildcard idiom."""
-    def __ne__(self, other):
-        return False
-
-
-ANY = AnyType("*")
+from ..util.anytype import ANY
 
 
 def _hms(sec):

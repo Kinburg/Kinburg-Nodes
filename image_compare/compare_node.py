@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import json
 import uuid
 import base64
@@ -211,6 +212,52 @@ def _split_prompts(text, sep):
     return blocks
 
 
+_TIME_TOKEN_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?)?",
+    re.I)
+
+
+def _time_to_seconds(raw):
+    """Best-effort parse of a displayed time string into float seconds (for sorting).
+
+    Handles every Stop Timer format — 'HH:MM:SS' / 'MM:SS', '1h 2m 3s', '12.34 s',
+    '890 ms', the 'human' shorthand ('45.0s', '890ms') — plus a plain number (seconds).
+    Returns None when nothing parses, so callers can push those to the end when sorting.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    # Clock form: HH:MM:SS or MM:SS (only digits / colons / dot / spaces).
+    if ":" in s and re.fullmatch(r"[\d:.\s]+", s):
+        try:
+            total = 0.0
+            for part in s.split(":"):
+                total = total * 60 + float(part)
+            return total
+        except ValueError:
+            pass
+    # Token form: sum of value+unit chunks; a unitless number counts as seconds.
+    total, matched = 0.0, False
+    for m in _TIME_TOKEN_RE.finditer(s):
+        try:
+            v = float(m.group(1))
+        except (TypeError, ValueError):
+            continue
+        unit = (m.group(2) or "").lower()
+        matched = True
+        if unit in ("ms", "millisecond", "milliseconds"):
+            total += v / 1000.0
+        elif unit in ("m", "min", "mins", "minute", "minutes"):
+            total += v * 60.0
+        elif unit in ("h", "hr", "hrs", "hour", "hours"):
+            total += v * 3600.0
+        else:  # "", s, sec, secs, second, seconds
+            total += v
+    return total if matched else None
+
+
 def _server_port():
     try:
         from comfy.cli_args import args
@@ -256,6 +303,7 @@ class ImageCompare:
                 "captions": ("STRING", {"forceInput": True, "tooltip": "One caption per line, aligned with the image batch (e.g. from Get Accumulator (captions)). Missing lines become empty."}),
                 "prompts": ("STRING", {"forceInput": True, "tooltip": "Full generation prompts, one block per image separated by a '---' line (e.g. from Get Accumulator (prompts)). Shown on the page (toggleable). Multi-line prompts are fine."}),
                 "show_prompts": ("BOOLEAN", {"default": False, "tooltip": "Initial visibility of prompts on the page (can be toggled there too)"}),
+                "times": ("STRING", {"forceInput": True, "tooltip": "Per-image generation time — one entry per line, aligned with the image batch (e.g. Stop Timer's 'elapsed' collected via Get Accumulator (texts) with a newline separator). Shown under each image and used for the grid's 'Time' sort. Strings like '12.34 s', '1m 30s', '890 ms' or '00:01:30' are parsed for sorting."}),
                 "output_dir": ("STRING", {"default": "", "tooltip": "Custom save folder (absolute path). Empty = ComfyUI output. A served copy is also written to output so 'Open comparison' keeps working."}),
                 "save_prompts_txt": ("BOOLEAN", {"default": False, "tooltip": "Save each prompt to a .txt file named like its image"}),
                 "settings_data": ("GEN_SETTINGS", {"tooltip": "Structured per-image settings from Generation Info Filter's 'settings_data' output. Rendered under each image (one '[Class] param: value' line per field; toggleable) and stored by field (EAV) when you 'Save run to report'."}),
@@ -277,7 +325,7 @@ class ImageCompare:
     def run(self, images, title, columns, overlay_captions,
             caption_position, font_size, filename_prefix,
             captions="", save_captioned_images=False,
-            prompts="", show_prompts=False,
+            prompts="", show_prompts=False, times="",
             output_dir="", save_prompts_txt=False,
             show_settings=True, settings_data="", report_db=""):
         # INPUT_IS_LIST: every input arrives wrapped in a list. Unwrap the scalar widgets and
@@ -292,6 +340,7 @@ class ImageCompare:
         captions = _first(captions, "") or ""
         prompts = _first(prompts, "") or ""
         show_prompts = bool(_first(show_prompts, False))
+        times = _first(times, "") or ""
         output_dir = _first(output_dir, "") or ""
         save_prompts_txt = bool(_first(save_prompts_txt, False))
         show_settings = bool(_first(show_settings, True))
@@ -340,6 +389,12 @@ class ImageCompare:
         proms = _split_prompts(prompts, BLOCK_SEP)
         proms = (proms + [""] * n)[:n]
 
+        # Per-image generation time: one entry per line (like captions). Keep the display
+        # string as-is and precompute a numeric seconds value so the page can sort by it.
+        time_lines = [t.strip() for t in (times.split("\n") if times else [])]
+        time_lines = (time_lines + [""] * n)[:n]
+        time_secs = [_time_to_seconds(t) for t in time_lines]
+
         # Structured per-image settings (from Generation Info Filter) drive both the report
         # DB (stored by field) and the on-page settings text (rendered one line per field).
         try:
@@ -353,9 +408,10 @@ class ImageCompare:
 
         # Data for the interactive page uses the ORIGINAL (clean) images.
         items = [{"src": _b64_png(p), "caption": c, "prompt": pr, "settings": st,
+                  "time": tm, "time_seconds": ts,
                   "color": col, "band": band, "report_path": rpth, "settings_data": sd}
-                 for p, c, pr, st, col, band, rpth, sd in
-                 zip(pils, caps, proms, setts, cap_colors, cap_bands, report_paths, sdata)]
+                 for p, c, pr, st, tm, ts, col, band, rpth, sd in
+                 zip(pils, caps, proms, setts, time_lines, time_secs, cap_colors, cap_bands, report_paths, sdata)]
         cfg = {"title": title, "columns": int(columns), "show_prompts": bool(show_prompts),
                "show_settings": bool(show_settings), "run_id": run_id,
                "report_db": report_db_resolved, "items": items}

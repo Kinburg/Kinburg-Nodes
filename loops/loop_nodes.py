@@ -37,16 +37,7 @@ MAX_SLOTS = 10
 FLOW_TYPE = "KINBURG_LOOP_FLOW"
 
 
-class _AnyType(str):
-    """A type that compares equal to everything, so ComfyUI's link type-check always passes."""
-    def __eq__(self, _):
-        return True
-
-    def __ne__(self, _):
-        return False
-
-
-ANY = _AnyType("*")
+from ..util.anytype import ANY
 
 
 class _ByPassTuple(tuple):

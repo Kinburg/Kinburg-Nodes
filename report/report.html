@@ -9,7 +9,10 @@
   * { box-sizing:border-box; }
   body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
   header { position:sticky; top:0; z-index:5; background:var(--panel); padding:10px 14px; box-shadow:0 2px 8px #0006; }
-  h1 { font-size:16px; margin:0 0 8px; font-weight:600; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  .titlerow { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:0 0 8px; }
+  .kn-brand { color:var(--muted); font-size:12px; text-decoration:none; white-space:nowrap; flex:none; }
+  .kn-brand:hover { color:var(--accent); text-decoration:underline; }
   .bar { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
   .grp { display:flex; gap:4px; align-items:center; }
   .lbl { color:var(--muted); font-size:12px; }
@@ -26,6 +29,7 @@
   td.thumb { width:120px; } td.thumb img { width:110px; height:auto; max-height:110px; object-fit:contain; border-radius:4px; cursor:zoom-in; background:#000; display:block; }
   td.pre { white-space:pre-wrap; word-break:break-word; max-width:320px; }
   td.set { white-space:pre-wrap; word-break:break-word; max-width:280px; font-family:ui-monospace,Consolas,monospace; color:#bcd4e6; }
+  td.tnum { white-space:nowrap; color:#ffd479; font-variant-numeric:tabular-nums; }
   td.cmt { white-space:pre-wrap; word-break:break-word; max-width:240px; min-width:120px; cursor:text; outline:none; }
   td.cmt:focus { background:#4f8cff14; }
   .stat { font-weight:600; cursor:pointer; user-select:none; } .stat.keep { color:#43d17a; } .stat.reject { color:#e56e6e; }
@@ -42,7 +46,10 @@
 </head>
 <body>
 <header>
-  <h1 id="title">Investigate Report</h1>
+  <div class="titlerow">
+    <h1 id="title">Investigate Report</h1>
+    <a class="kn-brand" href="https://github.com/Kinburg/Kinburg-Nodes" target="_blank" rel="noopener" title="Generated with Kinburg-Nodes — ComfyUI custom nodes">⚙ Generated with Kinburg-Nodes</a>
+  </div>
   <div class="bar">
     <div class="grp"><span class="lbl">DB</span>
       <input id="db" style="width:240px" placeholder="(default reports.db)"><button id="load">Load</button></div>
@@ -79,6 +86,7 @@
     { k:'caption',     t:'Caption',  sort:r=>r.caption||'' },
     { k:'status',      t:'Status',   sort:r=>r.status||'' },
     { k:'rating',      t:'Rating',   sort:r=>r.rating||0 },
+    { k:'time',        t:'Time',     sort:r=> r.time_seconds==null?Infinity:+r.time_seconds },
     { k:'tags',        t:'Tags',     sort:r=>(r.tags||[]).join(',') },
     { k:'settings',    t:'Settings', sort:r=>r.settings_text||'' },
     { k:'prompt',      t:'Prompt',   sort:r=>r.prompt||'' },
@@ -145,6 +153,7 @@
         + `<td class="pre">${esc(r.caption)}</td>`
         + `<td><span class="stat ${stt}" data-act="status" title="click to toggle keep/reject">${stt}</span></td>`
         + `<td><span class="rate" data-act="rate">${starsHtml(r.rating)}</span></td>`
+        + `<td class="tnum">${esc(r.time_text||'')}</td>`
         + `<td class="tagcell">${tags}<input class="taginp" placeholder="+tag"></td>`
         + `<td class="set">${esc(r.settings_text)}</td>`
         + `<td class="pre">${esc(r.prompt)}</td>`
@@ -204,8 +213,8 @@
   }
 
   function doExport(fmt){
-    const cols = ['run_title','caption','status','rating','tags','settings_text','prompt','comment','run_created'];
-    const head = ['Run','Caption','Status','Rating','Tags','Settings','Prompt','Comment','When'];
+    const cols = ['run_title','caption','status','rating','time_text','tags','settings_text','prompt','comment','run_created'];
+    const head = ['Run','Caption','Status','Rating','Time','Tags','Settings','Prompt','Comment','When'];
     const cell = (r,c)=> c==='tags' ? (r.tags||[]).join('; ') : (r[c]==null?'':String(r[c]));
     let out='', mime='text/plain', ext='txt';
     if(fmt==='csv'){

@@ -10,7 +10,10 @@
   body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
   body.dragging, body.dragging * { user-select:none !important; -webkit-user-select:none !important; }
   header { position:sticky; top:0; z-index:5; background:var(--panel); padding:10px 14px; box-shadow:0 2px 8px #0006; }
-  h1 { font-size:16px; margin:0 0 8px; font-weight:600; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  .titlerow { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:0 0 8px; }
+  .kn-brand { color:var(--muted); font-size:12px; text-decoration:none; white-space:nowrap; flex:none; }
+  .kn-brand:hover { color:var(--accent); text-decoration:underline; }
   .toolbar { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; }
   .group { display:flex; gap:4px; align-items:center; }
   .group .lbl { color:var(--muted); font-size:12px; margin-right:2px; }
@@ -41,6 +44,10 @@
   .pairsettings { max-width:1000px; margin:6px auto 0; display:flex; gap:12px; }
   .pairsettings > div { flex:1; font-size:12px; color:#bcd4e6; white-space:pre-wrap; word-break:break-word; max-height:10em; overflow:auto; background:#0004; padding:6px 10px; border-radius:6px; }
   .hide-settings .settings, .hide-settings .pairsettings, .hide-settings #lightbox .lbsettings { display:none; }
+  .time { padding:4px 8px; font-size:12px; font-weight:600; color:#ffd479; white-space:pre-wrap; word-break:break-word; }
+  .pairtime { max-width:1000px; margin:6px auto 0; display:flex; gap:12px; }
+  .pairtime > div { flex:1; font-size:12px; color:#ffd479; background:#0004; padding:6px 10px; border-radius:6px; }
+  .hide-time .time, .hide-time .pairtime, .hide-time #lightbox .lbtime { display:none; }
   figure .kn-hidebtn { position:absolute; top:6px; right:6px; z-index:4; width:26px; height:26px; padding:0;
                        line-height:1; font-size:13px; border-radius:50%; background:#000a; color:#fff;
                        border:1px solid #ffffff33; cursor:pointer; opacity:.5; }
@@ -90,12 +97,17 @@
   #lightbox .lbsettings { position:absolute; top:14px; left:50%; transform:translateX(-50%); max-width:82vw;
                         max-height:26vh; overflow:auto; background:#000b; color:#bcd4e6; padding:6px 12px;
                         border-radius:6px; font-size:12px; white-space:pre-wrap; text-align:left; }
+  #lightbox .lbtime { position:absolute; top:14px; left:14px; background:#000b; color:#ffd479; padding:4px 10px;
+                        border-radius:6px; font-size:13px; font-weight:600; z-index:2; }
   .empty { color:var(--muted); padding:40px; text-align:center; }
 </style>
 </head>
 <body>
 <header>
-  <h1 id="title">Image comparison</h1>
+  <div class="titlerow">
+    <h1 id="title">Image comparison</h1>
+    <a class="kn-brand" href="https://github.com/Kinburg/Kinburg-Nodes" target="_blank" rel="noopener" title="Generated with Kinburg-Nodes — ComfyUI custom nodes">⚙ Generated with Kinburg-Nodes</a>
+  </div>
   <div class="toolbar">
     <div class="group" id="modes">
       <button data-mode="grid" class="active">Grid</button>
@@ -107,6 +119,7 @@
     <div class="group"><button id="capBtn" class="active">Captions</button>
       <button id="promptBtn" class="active">Prompts</button>
       <button id="settingsBtn" class="active">Settings</button>
+      <button id="timeBtn" class="active">Time</button>
       <button id="hiddenBtn" title="Show or hide the results you've marked hidden">Hidden: off</button>
       <button id="dlBtn" title="Download this page as a self-contained HTML file">⬇ Save page</button></div>
     <div class="group" id="reportctl"><span class="lbl">Report DB</span>
@@ -118,6 +131,14 @@
       <input type="number" id="cols" min="1" max="12" value="3" style="width:56px">
       <span class="lbl">Max h</span>
       <input type="number" id="rowH" min="80" max="4000" step="20" value="320" style="width:64px" title="Max image height in Grid (px)">
+      <span class="lbl">Sort</span>
+      <select id="sortSel" title="Grid order. Drag-to-reorder works in 'Original order'.">
+        <option value="orig">Original order</option>
+        <option value="time-asc">Time ↑ (fastest)</option>
+        <option value="time-desc">Time ↓ (slowest)</option>
+        <option value="rating-desc">Rating ↓</option>
+        <option value="caption">Caption A→Z</option>
+      </select>
       <button id="loupeBtn" title="Magnifier. Wheel = zoom, Ctrl/Alt + wheel = diameter">Loupe</button>
     </div>
     <div class="group" id="pairctl" style="display:none">
@@ -134,7 +155,7 @@
 <div id="stage"></div>
 <div id="loupeInfo"></div>
 
-<div id="lightbox"><button class="nav prev">‹</button><img><button class="nav next">›</button><div class="lbsettings"></div><div class="lbprompt"></div><div class="lbcap"></div></div>
+<div id="lightbox"><button class="nav prev">‹</button><img><button class="nav next">›</button><div class="lbtime"></div><div class="lbsettings"></div><div class="lbprompt"></div><div class="lbcap"></div></div>
 
 <script>
 const CONFIG = /*__COMPARE_DATA__*/null;
@@ -167,7 +188,8 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   const S = { mode:'grid', bg:'dark', caps:true, cols:data.columns||3,
               a:0, b:Math.min(1,items.length-1), opacity:50,
               loupe:false, loupeZoom:2.5, loupeSize:160, flipB:false, showHidden:false,
-              rowH:320, prompts:(data.show_prompts!==false), settings:(data.show_settings!==false) };
+              rowH:320, prompts:(data.show_prompts!==false), settings:(data.show_settings!==false),
+              time:true, sort:'orig' };
 
   const stage = document.getElementById('stage');
   const info = document.getElementById('loupeInfo');
@@ -182,6 +204,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   $('#capBtn').onclick=()=>{ S.caps=!S.caps; $('#capBtn').classList.toggle('active',S.caps); document.body.classList.toggle('hide-cap',!S.caps); };
   $('#promptBtn').onclick=()=>{ S.prompts=!S.prompts; $('#promptBtn').classList.toggle('active',S.prompts); document.body.classList.toggle('hide-prompt',!S.prompts); };
   $('#settingsBtn').onclick=()=>{ S.settings=!S.settings; $('#settingsBtn').classList.toggle('active',S.settings); document.body.classList.toggle('hide-settings',!S.settings); };
+  $('#timeBtn').onclick=()=>{ S.time=!S.time; $('#timeBtn').classList.toggle('active',S.time); document.body.classList.toggle('hide-time',!S.time); };
   function syncHiddenBtn(){ const n=items.filter(it=>it.hidden).length;
     $('#hiddenBtn').textContent = 'Hidden: '+(S.showHidden?'shown':'off')+(n?` (${n})`:'');
     $('#hiddenBtn').classList.toggle('active', S.showHidden); }
@@ -210,6 +233,8 @@ const CONFIG = /*__COMPARE_DATA__*/null;
         prompt: it.prompt || '',
         settings: it.settings || '',
         settings_fields: it.settings_data || null,
+        time: it.time || '',
+        time_seconds: (it.time_seconds==null ? null : it.time_seconds),
         status: it.hidden ? 'reject' : 'keep',
         rating: it.rating || 0,
         comment: it.comment || '',
@@ -229,6 +254,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   };
   $('#cols').value=S.cols; $('#cols').oninput=()=>{ S.cols=Math.max(1,+$('#cols').value||1); render(); };
   $('#rowH').value=S.rowH; $('#rowH').oninput=()=>{ S.rowH=Math.max(40,+$('#rowH').value||320); render(); };
+  $('#sortSel').value=S.sort; $('#sortSel').onchange=()=>{ S.sort=$('#sortSel').value; render(); };
   $('#loupeBtn').onclick=()=>{ S.loupe=!S.loupe; $('#loupeBtn').classList.toggle('active',S.loupe); if(!S.loupe) info.style.display='none'; render(); };
   $('#opacity').oninput=()=>{ S.opacity=+$('#opacity').value; const o=$('.over'); if(o) o.style.opacity=S.opacity/100; };
 
@@ -261,12 +287,35 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     else renderPair();
   }
 
+  // Grid display order. 'orig' keeps the (drag-reorderable) items order; the other modes
+  // sort a copy, always keeping the original index so the lightbox / selectors stay aligned.
+  // Missing time/rating sort to the end regardless of direction.
+  function orderedItems(){
+    const rows = items.map((it,i)=>({it,i}));
+    if(S.sort==='orig') return rows;
+    const num = v => (v==null || v==='' || isNaN(v)) ? null : +v;
+    const nullsLast = (x,y,dir)=>{
+      if(x==null && y==null) return 0;
+      if(x==null) return 1;
+      if(y==null) return -1;
+      return (x<y?-1:x>y?1:0)*dir;
+    };
+    const cmp = {
+      'time-asc':    (a,b)=> nullsLast(num(a.it.time_seconds), num(b.it.time_seconds), 1),
+      'time-desc':   (a,b)=> nullsLast(num(a.it.time_seconds), num(b.it.time_seconds), -1),
+      'rating-desc': (a,b)=> (b.it.rating||0)-(a.it.rating||0),
+      'caption':     (a,b)=> String(a.it.caption||'').localeCompare(String(b.it.caption||'')),
+    }[S.sort];
+    if(cmp) rows.sort(cmp);
+    return rows;
+  }
+
   function renderGrid(){
     const surf=document.createElement('div'); surf.className='surface bg-'+S.bg;
     const grid=document.createElement('div'); grid.id='grid';
     grid.style.gridTemplateColumns=`repeat(${S.cols},1fr)`;
     grid.style.setProperty('--row-h', S.rowH+'px');
-    items.forEach((it,i)=>{
+    orderedItems().forEach(({it,i})=>{
       if(it.hidden && !S.showHidden) return;
       const fig=document.createElement('figure');
       if(it.hidden) fig.classList.add('kn-result-hidden');
@@ -282,6 +331,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       if(it.color) cap.style.color=it.color;
       if(it.band) cap.style.background=it.band;
       fig.appendChild(cap);
+      if(it.time){ const tm=document.createElement('div'); tm.className='time'; tm.textContent='⏱ '+it.time; fig.appendChild(tm); }
       if(it.settings){ const se=document.createElement('div'); se.className='settings'; se.textContent=it.settings; fig.appendChild(se); }
       if(it.prompt){ const pr=document.createElement('div'); pr.className='prompt'; pr.textContent=it.prompt; fig.appendChild(pr); }
       const review=document.createElement('div'); review.className='kn-review';
@@ -294,7 +344,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       cm.addEventListener('input', ()=>{ it.comment=cm.value; cm.classList.toggle('has-text',!!cm.value); persist(); });
       fig.appendChild(cm);
       if(S.loupe){ const lp=document.createElement('div'); lp.className='loupe'; fig.appendChild(lp); }
-      if(!S.loupe) wireDrag(fig, i);
+      if(!S.loupe && S.sort==='orig') wireDrag(fig, i);
       grid.appendChild(fig);
     });
     surf.appendChild(grid); stage.innerHTML=''; stage.appendChild(surf);
@@ -408,6 +458,12 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       const sb=document.createElement('div'); sb.textContent='B: '+(B.settings||'—');
       ps.appendChild(sa); ps.appendChild(sb); surf.appendChild(ps);
     }
+    if(A.time||B.time){
+      const pt=document.createElement('div'); pt.className='pairtime';
+      const ta=document.createElement('div'); ta.textContent='A: ⏱ '+(A.time||'—');
+      const tb=document.createElement('div'); tb.textContent='B: ⏱ '+(B.time||'—');
+      pt.appendChild(ta); pt.appendChild(tb); surf.appendChild(pt);
+    }
     stage.innerHTML=''; stage.appendChild(surf);
   }
 
@@ -429,6 +485,9 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     if(it.band){ cap.style.background=it.band; cap.style.padding='4px 10px'; cap.style.borderRadius='6px';
                  cap.style.width='fit-content'; cap.style.maxWidth='90%'; cap.style.marginLeft='auto'; cap.style.marginRight='auto'; }
     surf.appendChild(cap);
+    if(it.time){ const tm=document.createElement('div'); tm.className='time';
+      tm.style.maxWidth='1000px'; tm.style.margin='6px auto 0'; tm.style.textAlign='center';
+      tm.textContent='⏱ '+it.time; surf.appendChild(tm); }
     if(it.prompt){ const pr=document.createElement('div'); pr.className='prompt';
       pr.style.maxWidth='1000px'; pr.style.margin='8px auto 0'; pr.style.borderTop='none';
       pr.textContent=it.prompt; surf.appendChild(pr); }
@@ -473,11 +532,12 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   }
 
   // lightbox
-  const lb=$('#lightbox'), lbImg=lb.querySelector('img'), lbCap=lb.querySelector('.lbcap'), lbProm=lb.querySelector('.lbprompt'), lbSet=lb.querySelector('.lbsettings'); let lbI=0;
+  const lb=$('#lightbox'), lbImg=lb.querySelector('img'), lbCap=lb.querySelector('.lbcap'), lbProm=lb.querySelector('.lbprompt'), lbSet=lb.querySelector('.lbsettings'), lbTime=lb.querySelector('.lbtime'); let lbI=0;
   function lbShow(){ const it=items[lbI]; lbImg.src=it.src; lbCap.textContent=it.caption||('image '+(lbI+1));
     lbCap.style.color=it.color||''; lbCap.style.background=it.band||'';
     lbProm.textContent=it.prompt||''; lbProm.style.display=it.prompt?'':'none';
-    lbSet.textContent=it.settings||''; lbSet.style.display=it.settings?'':'none'; }
+    lbSet.textContent=it.settings||''; lbSet.style.display=it.settings?'':'none';
+    lbTime.textContent=it.time?('⏱ '+it.time):''; lbTime.style.display=it.time?'':'none'; }
   function openLightbox(i){ lbI=i; lbShow(); lb.style.display='flex'; }
   function lbNav(d){ lbI=(lbI+d+items.length)%items.length; lbShow(); }
   lb.querySelector('.prev').onclick=e=>{e.stopPropagation();lbNav(-1);};
@@ -494,6 +554,8 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   $('#promptBtn').classList.toggle('active', S.prompts);
   document.body.classList.toggle('hide-settings', !S.settings);
   $('#settingsBtn').classList.toggle('active', S.settings);
+  document.body.classList.toggle('hide-time', !S.time);
+  $('#timeBtn').classList.toggle('active', S.time);
   syncHiddenBtn();
   syncCtl(); render();
 })();
