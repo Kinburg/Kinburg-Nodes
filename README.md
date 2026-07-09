@@ -5,7 +5,14 @@ the node mappings from the root `__init__.py`, and the sets are split into subpa
 
 ## What's inside
 
-### `local_llm/` — Local LLM (GGUF, text + vision)
+### `local_llm/` — Local LLM (GGUF)
+> **All the settings below live on the `Local LLM Settings (GGUF)` node** and reach the LLM node
+> through a single **`config`** link. There's now **one** node — **`Local LLM (GGUF)`** — with
+> `config` + `user_prompt`, plus an optional **`image`** input (connect it, with a `Vision Settings`
+> node on the config, for vision) and two optional connect-only overrides — **`system_override`**
+> (replaces the config's system prompt) and **`grammar_override`** (a GBNF grammar that forces
+> `gbnf_grammar` output). The chat node uses the same bundle. (See the Settings/chat section below.)
+
 Run a GGUF LLM right inside ComfyUI **with guaranteed VRAM unloading**: inference
 runs in a separate worker process, so when it exits the OS reclaims all of its VRAM —
 ideal right before image generation. Features: streaming progress bar, token counters
@@ -18,17 +25,17 @@ args straight to llama-cpp-python's `Llama()` loader — `key=value` per line (e
 `n_threads=8`, `main_gpu=0`, `tensor_split=[1,1]`, `rope_freq_base=1000000`) or a JSON object;
 unknown keys are ignored and changing it reloads the model. Note these are **Python-binding
 args, not llama.cpp CLI flags** — CLI-only flags like `--spec-type draft-mtp` have no effect
-here. Node: **`Local LLM (GGUF, text)`** (category `Kinburg-Nodes/LLM`).
+here. These options live on the **`Local LLM Settings (GGUF)`** node (see below).
 
-**`Local LLM (GGUF, vision)`** is the multimodal twin — same engine, sampling, reasoning
-split and output formats, plus an **`image`** input and a second model path for the
-projector **`mmproj`** `.gguf` (both files ship together in a vision model's repo; put them
-in `ComfyUI/models/llm`). `vision_handler = auto (MTMD)` uses llama.cpp's generic
-multimodal loader, which handles most modern vision GGUFs (LLaVA, Qwen2-VL, MiniCPM-V,
-Gemma 3, SmolVLM, …) straight from the mmproj — only switch to a specific family if auto
-fails. `image_max_side` downscales images before they're sent to the worker. Combine it with
-`output_format = json_object` to get a structured description of an image. Both LLM nodes
-share one worker process. Node: **`Local LLM (GGUF, vision)`** (category `Kinburg-Nodes/LLM`).
+The single **`Local LLM (GGUF)`** node runs it: wire a `config`, type a `user_prompt`, and read
+the outputs. **Vision** is built in — connect the optional **`image`** input and add a **`Vision
+Settings (GGUF)`** node (`mmproj` + `vision_handler = auto (MTMD)`, which handles most modern vision
+GGUFs — LLaVA, Qwen2-VL, MiniCPM-V, Gemma 3, SmolVLM, …) onto the config; without an mmproj a
+connected image raises a clear error. `image_max_side` (on Vision Settings) downscales before
+sending; pair vision with `output_format = json_object` for a structured image description. Two
+optional connect-only inputs override the config for that node: **`system_override`** (replaces the
+system prompt) and **`grammar_override`** (a GBNF grammar that replaces the config's grammar and
+forces `gbnf_grammar` output). Category `Kinburg-Nodes/LLM`.
 
 **`Local LLM (server client, text)`** is a different beast: instead of the Python binding it
 talks HTTP to an OpenAI-compatible LLM **server**, so you get the server's **full command
@@ -67,6 +74,39 @@ reference data from the instruction. Wire its `context` output into an LLM node'
 prompt like *"Vasya and Kolya drink tea in a cafe"* comes back expanded with each character's
 looks. Note: the diffusion model still has its own limits binding attributes across multiple
 people. Category `Kinburg-Nodes/LLM`.
+
+### `gguf_convert/` — Safetensors → GGUF converters
+Turn `.safetensors` weights into `.gguf` from inside ComfyUI. Two nodes (category
+`Kinburg-Nodes/GGUF`), one per model family, each with the same three outputs — **`gguf_path`**
+(the finished file, ready to wire into a loader), a **`log`** tail, and a **`help`**
+cheat-sheet. Conversion runs in ComfyUI's own Python; both stream progress to the console and
+the `log` output, and `force = off` returns an already-built output instead of redoing the work.
+
+**`Safetensors → GGUF (llama.cpp)`** converts a **language / multimodal LLM** with llama.cpp's
+`convert_hf_to_gguf.py`. **`source`** takes a HuggingFace repo id (`Qwen/Qwen2.5-0.5B-Instruct`),
+a `https://huggingface.co/owner/name` URL (downloaded for you via `huggingface_hub` — set
+`hf_token` for gated repos), a **local HF model folder** (`config.json` + tokenizer +
+`*.safetensors`), or a single `*.safetensors` file (its folder is used). `outtype` is the
+precision written (`f16` is the usual base), and an optional `quantize` pass shrinks it to a
+K-/I-quant (`Q4_K_M`, …) with **`llama-quantize`** — a compiled binary you provide (auto-listed
+from `ComfyUI/models/llm`, or set `quantize_binary_path`); `quantize = none` needs no binary at
+all. The llama.cpp scripts themselves are found via `llama_cpp_dir`, or **auto-cloned** into
+`ComfyUI/models/llm/llama.cpp` when `auto_clone` is on. The output drops straight into the Local
+LLM (GGUF) nodes. LLMs only — it can't read diffusion weights.
+
+**`Diffusion Safetensors → GGUF (city96)`** is the diffusion counterpart (Flux, SD3, SDXL, SD1,
+Aura, HiDream, Cosmos, LTXV, HunyuanVideo, Wan, Lumina2). It drives city96's **ComfyUI-GGUF**
+`tools/convert.py`: pick the diffusion checkpoint from `ComfyUI/models/diffusion_models` or
+`/unet` in the **`model`** dropdown, or point `model_path` at a local `.safetensors`, a HF file
+URL (`…/resolve/main/model.safetensors`), or an `owner/name::file.safetensors` spec. Step 1
+always writes an F16/BF16 gguf; an optional `quantize` pass (`Q4_K_S`, `Q8_0`, …) needs the
+**patched** `llama-quantize` from city96's llama.cpp fork (the stock one won't handle diffusion
+tensor shapes — build it per ComfyUI-GGUF/tools/README.md and set `quantize_binary_path`). For
+Wan 2.1 / HunyuanVideo, **`fix_5d_tensors = auto`** reads the model's architecture from the gguf
+and runs the required 5-D-tensor fix pass after quantization. The `tools/convert.py` is located
+via `tool_dir`, or from an installed `custom_nodes/ComfyUI-GGUF` (auto-cloned there when
+`auto_clone` is on — you'll want that node installed anyway, since its **Unet Loader (GGUF)** is
+what loads the result). Diffusion models only — for LLMs use the node above.
 
 ### `image_compare/` — Image Compare (HTML)
 Takes a batch **or an image list** (different sizes are fine — e.g. from Get Accumulator (images
@@ -338,6 +378,69 @@ and returns the `list` remainder plus the `removed` items. An item is one list e
 value counts as a one-item list). Use these when items aren't same-size images — for frame-level
 edits of a same-size IMAGE batch, use the Image Batch nodes above. Category `Kinburg-Nodes/list`.
 
+### `show_text/` — Show Text (Markdown)
+**`Show Text (Markdown)`** displays whatever you wire into it as text. Its `value` input is the
+wildcard `*` type, so **anything** connects — a STRING, a number, a COMBO, even a dict/list
+(rendered as pretty JSON) — and the node converts it to text (a whole batch/list is gathered
+into one view). A **markdown** toggle flips between a rendered markdown preview (headings,
+**bold**/*italic*, `code`, code blocks, lists, links, quotes, `---`) and an **editable raw
+textarea** you can tweak before saving — inside a fixed-size scroll box, so toggling never
+resizes the node. HTML in the text is escaped (safe to display).
+
+Unlike the core **Preview Text** node, the shown text is stored **in the workflow** (the node's
+`properties`), so it **survives switching between workflow tabs** in the desktop app instead of
+resetting. **💾 Save .md** writes the current text to disk via a `PromptServer` route
+(`/kinburg/showtext/save`): relative `save_path`s land under ComfyUI's `output` folder, a `.md`
+extension is added automatically, parent folders are created, and `{date}` / `{time}` /
+`{datetime}` placeholders expand to the current date/time. **`autosave`** does the same
+automatically on every run when a path is set. **📋 Copy** copies the text to the clipboard, and
+a small header shows a char/line counter. The converted text is also a **`text` (STRING) output**,
+so the node can sit inline in a wire and pass it downstream. Category `Kinburg-Nodes/util`.
+
+### Chat — `Local LLM Chat (GGUF)` + `Local LLM Settings (GGUF)`
+**`Local LLM Chat (GGUF)`** (in the `local_llm/` package) is a self-contained multi-turn chat node.
+It's deliberately bare — just the **chat window** (User/LLM bubbles in a fixed-height, scrollable
+box, so the node doesn't grow as the chat fills), the **`user_message`** field and the **Send /
+Approve / Clear** buttons. Everything about *how* to generate comes through a single **`config`**
+input.
+
+**`Local LLM Settings (GGUF)`** is that config node: it holds the options — model, system prompt,
+sampling, loader (`n_ctx` / `n_gpu_layers` / …), reasoning split, `output_format` / grammar,
+`extra_load_args`, unload toggles — plus two connect-only inputs: **`context`** (reference material
+appended to the system prompt — e.g. Character Card / Context Collector) and **`vision`** (from a
+**`Vision Settings (GGUF)`** node — `mmproj` / `vision_handler` / `image_max_side`; connect it only
+for vision). It emits everything as one `KINBURG_LLM_CONFIG` bundle. Wire its `config` output into
+any LLM node — the chat node **and** the text/vision nodes take the same bundle, so one Settings
+node can drive several.
+
+- **📨 Send** runs the workflow up to the chat node: `run()` generates a reply from the stored
+  history + your message (+ optional image), **streams it into the bubble live** (over a
+  `kinburg.chatllm` websocket event), and **blocks the downstream branch** (`ExecutionBlocker`) so
+  nothing past the node runs while you chat. Reasoning models: the `<think>…` stream shows in an
+  open **💭 thinking** block during generation, then collapses into a **💭 reasoning** toggle with
+  the answer as the main text (only the answer goes downstream). Each message has a **⧉ copy** button.
+- **✅ Approve** runs with the gate open: `run()` **skips generation** and emits the **last reply**
+  on the `text` output, so it flows downstream immediately (no re-generation, any seed).
+
+The dialogue lives in a hidden, serialized `history_json` widget (persists in the workflow;
+**🗑 Clear** wipes it). **Vision is optional:** the `image` input is on the **chat node** (attached
+to the current turn); set an `mmproj` on the Settings node to enable it — connecting an image with
+no `mmproj` set shows an error in the chat. `unload_llm_after_run` defaults **off** so the model
+stays in VRAM for fast back-and-forth. Chat outputs: `text` (the approved reply, gated) and a
+`help` cheat-sheet. Category `Kinburg-Nodes/LLM`.
+
+### `save_song/` — Save Song
+**`Save Song`** saves an **`audio`** clip (required) as a song, with an optional **`image`**
+cover and optional **`lyrics`** text (an input socket — wire a STRING in). The **`quality`** dropdown picks the audio format and
+bitrate — **FLAC** (lossless) or **MP3 / Opus** at a chosen bitrate — encoded with PyAV exactly
+like ComfyUI's own Save Audio (Opus is resampled to a supported rate automatically). The cover is
+written as a **JPEG** (its `image_quality` is adjustable), and the lyrics as a **`.txt`** — all
+three share one counter-based base name under `ComfyUI/output` (e.g. `songs/song_00001.flac`,
+`…_00001.jpg`, `…_00001.txt`). It returns the standard `audio` / `images` UI results, so ComfyUI
+shows a **native `<audio>` player and the cover preview** on the node **and** lists the saved
+files in **Media Assets** (just like the core Save Audio node). Outputs the `audio` passthrough
+plus the saved `path`. Category `Kinburg-Nodes/audio`.
+
 ## Installation
 
 1. Clone this repository into `ComfyUI/custom_nodes` (or install it through
@@ -349,6 +452,12 @@ edits of a same-size IMAGE batch, use the Image Batch nodes above. Category `Kin
    <ComfyUI>/.venv/Scripts/python.exe <ComfyUI>/custom_nodes/Kinburg-Nodes/install.py
    ```
    The Image Compare and Date String nodes need nothing extra.
+3. The **GGUF converters** use packages that already ship with ComfyUI (`huggingface_hub`,
+   `gguf`, `torch`, `safetensors`) and fetch the conversion scripts themselves (`git` on PATH,
+   `auto_clone` on). Only **quantization** needs an external binary you provide: `llama-quantize`
+   for the LLM converter, or the **patched** `llama-quantize` from city96's llama.cpp fork for
+   the diffusion converter (see ComfyUI-GGUF/tools/README.md). Leaving `quantize = none` needs
+   nothing extra.
 
 Each node's parameters are documented in their tooltips. The Local LLM node also exposes a
 `help` output with a quick cheat-sheet — wire it to a "Preview as Text" node to read it.

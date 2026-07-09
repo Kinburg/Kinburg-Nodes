@@ -11,6 +11,12 @@ NODE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKER = os.path.join(NODE_DIR, "gguf_worker.py")
 RESP_PREFIX = "@@LLM_RESPONSE@@"
 PROG_PREFIX = "@@LLM_PROGRESS@@"
+TOK_PREFIX = "@@LLM_TOKEN@@"
+
+# Custom type of the config bundle emitted by Local LLM Settings and consumed by the LLM nodes.
+LLM_CONFIG = "KINBURG_LLM_CONFIG"
+# Vision sub-bundle (mmproj / handler / max side) that plugs optionally into Local LLM Settings.
+VISION_CONFIG = "KINBURG_VISION_CONFIG"
 PLACEHOLDER = "(use model_path field)"
 
 HELP_TEXT = """# Local LLM (GGUF) — quick help
@@ -200,7 +206,7 @@ def _ensure_worker(load_sig):
     return _start_worker(load_sig)
 
 
-def _request(proc, req, progress_cb=None):
+def _request(proc, req, progress_cb=None, token_cb=None):
     try:
         proc.stdin.write(json.dumps(req, ensure_ascii=True) + "\n")
         proc.stdin.flush()
@@ -219,6 +225,13 @@ def _request(proc, req, progress_cb=None):
             if progress_cb is not None:
                 try:
                     progress_cb(int(line[len(PROG_PREFIX):].strip()))
+                except Exception:
+                    pass
+            continue
+        if line.startswith(TOK_PREFIX):
+            if token_cb is not None:
+                try:
+                    token_cb(json.loads(line[len(TOK_PREFIX):]))
                 except Exception:
                     pass
             continue
@@ -372,7 +385,8 @@ def _encode_images(image, max_side):
 
 
 def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
-                         unload_llm_after_run, directive, strip_think, answer_marker, help_text):
+                         unload_llm_after_run, directive, strip_think, answer_marker, help_text,
+                         token_cb=None):
     """Shared core for both LLM nodes: optionally free ComfyUI VRAM, talk to the worker with a
     live token progress bar, then split reasoning out and return the 10-output tuple."""
     if unload_comfy_models:
@@ -402,11 +416,11 @@ def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
         try:
             t0 = time.perf_counter()
             proc = _ensure_worker(load_sig)
-            data = _request(proc, req, _progress)
+            data = _request(proc, req, _progress, token_cb)
             if (data.get("status") == "error"
                     and "worker exited" in data.get("message", "")):
                 proc = _start_worker(load_sig)
-                data = _request(proc, req, _progress)
+                data = _request(proc, req, _progress, token_cb)
             gen_seconds = round(time.perf_counter() - t0, 2)
         except Exception as e:
             _shutdown_worker()
@@ -437,38 +451,135 @@ def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
     return _err(data.get("message", "unknown"), help_text)
 
 
-class LocalLLMTextGGUF:
+def _base_config_widgets():
+    """The model / sampling / loader / reasoning / output widgets carried by the Local LLM
+    Settings node. The LLM nodes read these from the config bundle instead of hosting them."""
+    return {
+        "model": (_list_models(), {"tooltip": "Pick a .gguf from ComfyUI/models/llm. Choose the placeholder to type any path in model_path"}),
+        "model_path": ("STRING", {"default": "", "tooltip": "Full path to a .gguf, used when 'model' is the placeholder. Surrounding quotes (e.g. from Windows 'Copy as path') are stripped automatically."}),
+        "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
+        "max_tokens": ("INT", {"default": 512, "min": 16, "max": 32768, "step": 16}),
+        "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.01}),
+        "top_p": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01}),
+        "top_k": ("INT", {"default": 40, "min": 0, "max": 32768}),
+        "min_p": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Min-p sampling. 0 = off. Try ~0.05 (often paired with top_p=1.0, top_k=0)"}),
+        "repeat_penalty": ("FLOAT", {"default": 1.1, "min": 1.0, "max": 2.0, "step": 0.01}),
+        "stop": ("STRING", {"multiline": True, "default": "", "tooltip": "Stop strings, one per line. Generation stops as soon as any is produced"}),
+        "n_ctx": ("INT", {"default": 4096, "min": 256, "max": 1048576, "step": 256}),
+        "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 1000, "tooltip": "-1 = all layers on GPU, 0 = all on CPU"}),
+        "n_batch": ("INT", {"default": 512, "min": 32, "max": 8192, "step": 32}),
+        "flash_attn": ("BOOLEAN", {"default": False, "tooltip": "Flash Attention: faster and a smaller KV cache (less VRAM)"}),
+        "kv_cache_type": (["f16", "q8_0", "q4_0"], {"default": "f16", "tooltip": "Quantize the KV cache to fit a bigger context in VRAM. q8_0/q4_0 auto-enable Flash Attention"}),
+        "seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff, "control_after_generate": True}),
+        "unload_comfy_models": ("BOOLEAN", {"default": True, "tooltip": "Unload ComfyUI (image) models from VRAM before running the LLM"}),
+        "unload_llm_after_run": ("BOOLEAN", {"default": False, "tooltip": "Free the LLM from VRAM after each run. Off (default) keeps it loaded for fast repeated runs / chat; turn ON in image workflows to free VRAM."}),
+        "strip_think": ("BOOLEAN", {"default": True, "tooltip": "Keep reasoning out of the 'text' output (it still goes to the 'thoughts' output). Off = leave raw reasoning in 'text'"}),
+        "answer_marker": ("STRING", {"default": "", "tooltip": "For models that print reasoning WITHOUT <think> tags: the answer is taken after the LAST occurrence of this marker, everything before goes to 'thoughts'. Empty = use <think> tags."}),
+        "thinking_directive": (["model default", "/no_think (Qwen3)", "/think (Qwen3)", "custom"], {"default": "model default", "tooltip": "Append a reasoning-control directive to the prompt. /no_think makes Qwen3-style models skip the <think> phase; 'custom' uses the field below."}),
+        "custom_directive": ("STRING", {"default": "", "tooltip": "Directive text appended to the prompt when thinking_directive = custom (e.g. /no_think)"}),
+        "output_format": (["text", "json_object", "gbnf_grammar", "ideogram4_json"], {"default": "text", "tooltip": "Output: free text · valid JSON · custom GBNF grammar (field below) · ideogram4_json. Grammar modes run without the live progress bar"}),
+        "grammar": ("STRING", {"multiline": True, "default": "", "tooltip": "GBNF grammar text, used when output_format = gbnf_grammar"}),
+        "extra_load_args": ("STRING", {"multiline": True, "default": "", "tooltip": "Advanced: extra keyword args for llama-cpp-python's Llama() loader. One per line as key=value or a JSON object. These are Python-binding args, NOT llama.cpp CLI flags. Unknown keys are ignored. Changing this reloads the model."}),
+    }
+
+
+def build_llm_request(cfg, user_prompt, image=None, history=None,
+                      system_override=None, grammar_override=None):
+    """From a KINBURG_LLM_CONFIG bundle + this call's prompt, build the worker request and its
+    load signature. `system_override` (a non-empty string) replaces the config's system_prompt;
+    `grammar_override` (a non-empty string) replaces the grammar and forces gbnf_grammar output.
+    Returns (error_str, None) on failure, else (None, ctx) where ctx holds the `req`, `load_sig`,
+    `help`, `directive`, and the `_generate_and_format` knobs."""
+    g = cfg.get if isinstance(cfg, dict) else (lambda k, d=None: d)
+
+    resolved = _resolve_path(g("model", PLACEHOLDER), g("model_path", ""))
+    if not resolved or not os.path.isfile(resolved):
+        return (f"Model file not found: {resolved or '(none selected)'} — check the Settings node.", None)
+
+    mmproj_resolved = _resolve_path(g("mmproj", PLACEHOLDER), g("mmproj_path", ""))
+    use_vision = False
+    if image is not None:
+        if mmproj_resolved and os.path.isfile(mmproj_resolved):
+            use_vision = True
+        else:
+            return ("An image is connected, but the Settings node has no mmproj set. "
+                    "Add an mmproj (vision projector .gguf) to use vision.", None)
+
+    try:
+        extra = _parse_extra_args(g("extra_load_args", ""))
+    except ValueError as e:
+        return (str(e), None)
+
+    images = []
+    if use_vision:
+        try:
+            images = _encode_images(image, int(g("image_max_side", 1024)))
+        except Exception as e:
+            return (f"Failed to encode image(s): {e}", None)
+
+    up, directive = _apply_directive(user_prompt, g("thinking_directive", "model default"), g("custom_directive", ""))
+    # A connected system_override replaces the config's persona; context is still appended.
+    sys_base = (system_override if (isinstance(system_override, str) and system_override.strip())
+                else g("system_prompt", "You are a helpful assistant."))
+    system = _with_context(sys_base, g("context", ""))
+    eff_format, eff_grammar, eff_system = _apply_output_format(g("output_format", "text"), g("grammar", ""), system)
+    # A connected grammar_override wins: use it and force GBNF-constrained output.
+    if isinstance(grammar_override, str) and grammar_override.strip():
+        eff_format, eff_grammar = "gbnf_grammar", grammar_override
+
+    req = {
+        "model_path": resolved, "system_prompt": eff_system, "user_prompt": up,
+        "max_tokens": int(g("max_tokens", 512)), "temperature": float(g("temperature", 0.7)),
+        "top_p": float(g("top_p", 0.95)), "top_k": int(g("top_k", 40)),
+        "min_p": float(g("min_p", 0.0)), "repeat_penalty": float(g("repeat_penalty", 1.1)),
+        "stop": [s for s in (g("stop", "") or "").splitlines() if s.strip()],
+        "n_ctx": int(g("n_ctx", 4096)), "n_gpu_layers": int(g("n_gpu_layers", -1)),
+        "n_batch": int(g("n_batch", 512)), "flash_attn": bool(g("flash_attn", False)),
+        "kv_cache_type": g("kv_cache_type", "f16"), "seed": int(g("seed", 0)),
+        "output_format": eff_format, "grammar": eff_grammar,
+        "extra_load_args": extra, "verbose": False,
+    }
+    if history:
+        req["history"] = history
+    handler_key = _VISION_HANDLER_KEY.get(g("vision_handler", "auto (MTMD)"), "auto")
+    if use_vision:
+        req["mmproj_path"] = mmproj_resolved
+        req["vision_handler"] = handler_key
+        req["images"] = images
+
+    load_sig = (resolved, req["n_ctx"], req["n_gpu_layers"], req["n_batch"], req["flash_attn"],
+                req["kv_cache_type"], mmproj_resolved if use_vision else None,
+                handler_key if use_vision else None,
+                json.dumps(extra, sort_keys=True, default=str))
+
+    ctx = {
+        "req": req, "load_sig": load_sig,
+        "help": VISION_HELP_TEXT if use_vision else HELP_TEXT, "directive": directive,
+        "max_tokens": req["max_tokens"],
+        "unload_comfy": bool(g("unload_comfy_models", True)),
+        "unload_llm": bool(g("unload_llm_after_run", False)),
+        "strip_think": bool(g("strip_think", True)),
+        "answer_marker": g("answer_marker", ""),
+    }
+    return (None, ctx)
+
+
+class LocalLLMGGUF:
+    """One-shot GGUF LLM. All settings come from a Local LLM Settings (GGUF) `config`. Text by
+    default; connect an `image` (with an mmproj on the Settings node, via Vision Settings) for
+    vision. An optional `system_override` replaces the config's system prompt for this node."""
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (_list_models(), {"tooltip": "Pick a .gguf from ComfyUI/models/llm. Choose the placeholder to type any path in model_path"}),
-                "model_path": ("STRING", {"default": "", "tooltip": "Full path to a .gguf, used when 'model' is the placeholder. Lets you load models from anywhere on disk. Surrounding quotes (e.g. from Windows 'Copy as path') are stripped automatically."}),
-                "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
-                "user_prompt": ("STRING", {"multiline": True, "default": ""}),
-                "context": ("STRING", {"multiline": True, "default": "", "tooltip": "Reference material appended to the system prompt — e.g. character cards from Context Collector. Type it here or wire in a STRING. The model uses it to expand named subjects in the prompt. Empty = ignored."}),
-                "max_tokens": ("INT", {"default": 512, "min": 16, "max": 32768, "step": 16}),
-                "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.01}),
-                "top_p": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "top_k": ("INT", {"default": 40, "min": 0, "max": 32768}),
-                "min_p": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Min-p sampling. 0 = off. Try ~0.05 (often paired with top_p=1.0, top_k=0)"}),
-                "repeat_penalty": ("FLOAT", {"default": 1.1, "min": 1.0, "max": 2.0, "step": 0.01}),
-                "stop": ("STRING", {"multiline": True, "default": "", "tooltip": "Stop strings, one per line. Generation stops as soon as any is produced"}),
-                "n_ctx": ("INT", {"default": 4096, "min": 256, "max": 1048576, "step": 256}),
-                "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 1000, "tooltip": "-1 = all layers on GPU, 0 = all on CPU"}),
-                "n_batch": ("INT", {"default": 512, "min": 32, "max": 8192, "step": 32}),
-                "flash_attn": ("BOOLEAN", {"default": False, "tooltip": "Flash Attention: faster and a smaller KV cache (less VRAM)"}),
-                "kv_cache_type": (["f16", "q8_0", "q4_0"], {"default": "f16", "tooltip": "Quantize the KV cache to fit a bigger context in VRAM. q8_0/q4_0 auto-enable Flash Attention"}),
-                "seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff, "control_after_generate": True}),
-                "unload_comfy_models": ("BOOLEAN", {"default": True, "tooltip": "Unload ComfyUI (image) models from VRAM before running the LLM"}),
-                "unload_llm_after_run": ("BOOLEAN", {"default": True, "tooltip": "Free the LLM from VRAM after generating. Turn OFF to keep it loaded for faster repeated runs"}),
-                "strip_think": ("BOOLEAN", {"default": True, "tooltip": "Keep reasoning out of the 'text' output (it still goes to the 'thoughts' output). Off = leave raw reasoning in 'text'"}),
-                "answer_marker": ("STRING", {"default": "", "tooltip": "For models that print reasoning WITHOUT <think> tags: the answer is taken after the LAST occurrence of this marker, everything before goes to 'thoughts'. Empty = use <think> tags. Tip: instruct the model to print this exact marker right before its final answer."}),
-                "thinking_directive": (["model default", "/no_think (Qwen3)", "/think (Qwen3)", "custom"], {"default": "model default", "tooltip": "Append a reasoning-control directive to the prompt. /no_think makes Qwen3-style models skip the <think> phase; 'custom' uses the field below. No effect on models without such a switch"}),
-                "custom_directive": ("STRING", {"default": "", "tooltip": "Directive text appended to the prompt when thinking_directive = custom (e.g. /no_think)"}),
-                "output_format": (["text", "json_object", "gbnf_grammar", "ideogram4_json"], {"default": "text", "tooltip": "Output: free text · valid JSON (json_object) · custom GBNF grammar (field below) · ideogram4_json = built-in nested Ideogram JSON. Grammar modes run without the live progress bar"}),
-                "grammar": ("STRING", {"multiline": True, "default": "", "tooltip": "GBNF grammar text, used when output_format = gbnf_grammar"}),
-                "extra_load_args": ("STRING", {"multiline": True, "default": "", "tooltip": "Advanced: extra keyword args for llama-cpp-python's Llama() loader. One per line as key=value (e.g. n_threads=8, main_gpu=0, rope_freq_base=1000000, tensor_split=[1,1]) or a JSON object. These are Python-binding args, NOT llama.cpp CLI flags — e.g. '--spec-type draft-mtp' has no effect here. Unknown keys are ignored (logged to console). Changing this reloads the model."}),
+                "config": (LLM_CONFIG, {"tooltip": "Wire a 'Local LLM Settings (GGUF)' node here — it carries the model, system prompt, sampling, reasoning, output format, etc."}),
+                "user_prompt": ("STRING", {"multiline": True, "default": "", "tooltip": "The prompt / question for the model."}),
+            },
+            "optional": {
+                "image": ("IMAGE", {"tooltip": "Optional image(s) for vision — needs an mmproj on the Settings node (Vision Settings). Omit for a text-only run."}),
+                "system_override": ("STRING", {"forceInput": True, "tooltip": "Optional: replaces the config's system_prompt for this node (connect-only). Context still applies."}),
+                "grammar_override": ("STRING", {"forceInput": True, "tooltip": "Optional: a GBNF grammar (connect-only) that replaces the config's grammar and forces gbnf_grammar output for this node."}),
             },
         }
 
@@ -477,142 +588,15 @@ class LocalLLMTextGGUF:
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
-    def run(self, model, model_path, system_prompt, user_prompt, max_tokens, temperature,
-            top_p, top_k, min_p, repeat_penalty, stop, n_ctx, n_gpu_layers, n_batch,
-            flash_attn, kv_cache_type, seed, unload_comfy_models, unload_llm_after_run,
-            strip_think, context="", thinking_directive="model default", custom_directive="",
-            output_format="text", grammar="", answer_marker="", extra_load_args=""):
-
-        # Resolve the model: a real dropdown selection wins; else the manual path (quotes
-        # stripped so a Windows "Copy as path" value works as-is).
-        resolved = _resolve_path(model, model_path)
-        if not resolved or not os.path.isfile(resolved):
-            return _err(f"Model file not found: {resolved or '(none selected)'}")
-
-        try:
-            extra = _parse_extra_args(extra_load_args)
-        except ValueError as e:
-            return _err(str(e))
-
-        system_prompt = _with_context(system_prompt, context)
-        user_prompt, directive = _apply_directive(user_prompt, thinking_directive, custom_directive)
-        eff_format, eff_grammar, eff_system = _apply_output_format(output_format, grammar, system_prompt)
-
-        req = {
-            "model_path": resolved,
-            "system_prompt": eff_system,
-            "user_prompt": user_prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "top_k": top_k,
-            "min_p": min_p,
-            "repeat_penalty": repeat_penalty,
-            "stop": [s for s in (stop or "").splitlines() if s.strip()],
-            "n_ctx": n_ctx,
-            "n_gpu_layers": n_gpu_layers,
-            "n_batch": n_batch,
-            "flash_attn": flash_attn,
-            "kv_cache_type": kv_cache_type,
-            "seed": seed,
-            "output_format": eff_format,
-            "grammar": eff_grammar,
-            "extra_load_args": extra,
-            "verbose": False,
-        }
-        load_sig = (resolved, int(n_ctx), int(n_gpu_layers), int(n_batch),
-                    bool(flash_attn), kv_cache_type, None, None,
-                    json.dumps(extra, sort_keys=True, default=str))
-
-        return _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
-                                    unload_llm_after_run, directive, strip_think,
-                                    answer_marker, HELP_TEXT)
+    def run(self, config, user_prompt, image=None, system_override=None, grammar_override=None):
+        err, ctx = build_llm_request(config, user_prompt, image=image,
+                                     system_override=system_override, grammar_override=grammar_override)
+        if err:
+            return _err(err, VISION_HELP_TEXT if image is not None else HELP_TEXT)
+        return _generate_and_format(ctx["req"], ctx["load_sig"], ctx["max_tokens"], ctx["unload_comfy"],
+                                    ctx["unload_llm"], ctx["directive"], ctx["strip_think"],
+                                    ctx["answer_marker"], ctx["help"])
 
 
-class LocalLLMVisionGGUF:
-    """Multimodal twin of the text node: same engine + sampling, plus an mmproj projector and
-    an image input. Shares the worker and the generation core; only the loader inputs differ."""
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        # Reuse the text node's widgets verbatim (single source of truth) and inject the
-        # vision-only inputs right after model_path so the shared params can't drift.
-        req = {}
-        for k, v in LocalLLMTextGGUF.INPUT_TYPES()["required"].items():
-            req[k] = v
-            if k == "model_path":
-                req["mmproj"] = (_list_mmproj(), {"tooltip": "Projector mmproj .gguf from ComfyUI/models/llm (mmproj-named files first). Choose the placeholder to type any path in mmproj_path."})
-                req["mmproj_path"] = ("STRING", {"default": "", "tooltip": "Full path to the mmproj .gguf, used when 'mmproj' is the placeholder. Surrounding quotes are stripped."})
-                req["vision_handler"] = (_VISION_HANDLER_LABELS, {"default": "auto (MTMD)", "tooltip": "auto (MTMD) is llama.cpp's generic multimodal loader and handles most modern vision GGUFs. Switch to the model's family only if auto fails to load it or returns garbage."})
-                req["image"] = ("IMAGE", {"tooltip": "Image(s) to analyze. A batch sends every frame to the model."})
-                req["image_max_side"] = ("INT", {"default": 1024, "min": 0, "max": 4096, "step": 64, "tooltip": "Downscale each image so its longest side is at most this many px before sending (the model resizes internally anyway). 0 = full size."})
-        return {"required": req}
-
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "STRING", "INT", "INT")
-    RETURN_NAMES = ("text", "thoughts", "finish_reason", "sys_tokens", "user_tokens", "output_tokens", "gen_seconds", "help", "thoughts_tokens", "answer_tokens")
-    FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
-
-    def run(self, model, model_path, mmproj, mmproj_path, vision_handler, image, image_max_side,
-            system_prompt, user_prompt, max_tokens, temperature, top_p, top_k, min_p,
-            repeat_penalty, stop, n_ctx, n_gpu_layers, n_batch, flash_attn, kv_cache_type,
-            seed, unload_comfy_models, unload_llm_after_run, strip_think, context="",
-            thinking_directive="model default", custom_directive="", output_format="text",
-            grammar="", answer_marker="", extra_load_args=""):
-
-        resolved = _resolve_path(model, model_path)
-        if not resolved or not os.path.isfile(resolved):
-            return _err(f"Model file not found: {resolved or '(none selected)'}", VISION_HELP_TEXT)
-        mmproj_resolved = _resolve_path(mmproj, mmproj_path)
-        if not mmproj_resolved or not os.path.isfile(mmproj_resolved):
-            return _err(f"mmproj file not found: {mmproj_resolved or '(none selected)'} — vision needs the model's mmproj .gguf.", VISION_HELP_TEXT)
-        try:
-            extra = _parse_extra_args(extra_load_args)
-        except ValueError as e:
-            return _err(str(e), VISION_HELP_TEXT)
-        try:
-            images = _encode_images(image, int(image_max_side))
-        except Exception as e:
-            return _err(f"Failed to encode image(s): {e}", VISION_HELP_TEXT)
-
-        handler_key = _VISION_HANDLER_KEY.get(vision_handler, "auto")
-        system_prompt = _with_context(system_prompt, context)
-        user_prompt, directive = _apply_directive(user_prompt, thinking_directive, custom_directive)
-        eff_format, eff_grammar, eff_system = _apply_output_format(output_format, grammar, system_prompt)
-
-        req = {
-            "model_path": resolved,
-            "mmproj_path": mmproj_resolved,
-            "vision_handler": handler_key,
-            "images": images,
-            "system_prompt": eff_system,
-            "user_prompt": user_prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "top_k": top_k,
-            "min_p": min_p,
-            "repeat_penalty": repeat_penalty,
-            "stop": [s for s in (stop or "").splitlines() if s.strip()],
-            "n_ctx": n_ctx,
-            "n_gpu_layers": n_gpu_layers,
-            "n_batch": n_batch,
-            "flash_attn": flash_attn,
-            "kv_cache_type": kv_cache_type,
-            "seed": seed,
-            "output_format": eff_format,
-            "grammar": eff_grammar,
-            "extra_load_args": extra,
-            "verbose": False,
-        }
-        load_sig = (resolved, int(n_ctx), int(n_gpu_layers), int(n_batch),
-                    bool(flash_attn), kv_cache_type, mmproj_resolved, handler_key,
-                    json.dumps(extra, sort_keys=True, default=str))
-
-        return _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
-                                    unload_llm_after_run, directive, strip_think,
-                                    answer_marker, VISION_HELP_TEXT)
-
-
-NODE_CLASS_MAPPINGS = {"LocalLLMTextGGUF": LocalLLMTextGGUF, "LocalLLMVisionGGUF": LocalLLMVisionGGUF}
-NODE_DISPLAY_NAME_MAPPINGS = {"LocalLLMTextGGUF": "Local LLM (GGUF, text)", "LocalLLMVisionGGUF": "Local LLM (GGUF, vision)"}
+NODE_CLASS_MAPPINGS = {"LocalLLMGGUF": LocalLLMGGUF}
+NODE_DISPLAY_NAME_MAPPINGS = {"LocalLLMGGUF": "Local LLM (GGUF)"}

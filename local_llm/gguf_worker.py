@@ -11,6 +11,7 @@ import importlib.metadata
 
 RESP_PREFIX = "@@LLM_RESPONSE@@"
 PROG_PREFIX = "@@LLM_PROGRESS@@"
+TOK_PREFIX = "@@LLM_TOKEN@@"
 
 
 def _prepare_cuda():
@@ -68,6 +69,12 @@ def _send(obj):
 
 def _progress(n):
     sys.stdout.write(PROG_PREFIX + str(n) + "\n")
+    sys.stdout.flush()
+
+
+def _token(s):
+    # JSON-encode so newlines in the delta don't break the one-line protocol.
+    sys.stdout.write(TOK_PREFIX + json.dumps(s, ensure_ascii=True) + "\n")
     sys.stdout.flush()
 
 
@@ -226,6 +233,12 @@ def main():
             sys_prompt = (req.get("system_prompt") or "").strip()
             if sys_prompt:
                 messages.append({"role": "system", "content": sys_prompt})
+            # Prior chat turns (empty for the single-shot text/vision nodes). Images ride on the
+            # final user message only (added via _user_content below).
+            for m in (req.get("history") or []):
+                r, c = m.get("role"), m.get("content", "")
+                if r in ("user", "assistant") and isinstance(c, str) and c:
+                    messages.append({"role": r, "content": c})
             messages.append({"role": "user", "content": _user_content(req)})
 
             gen_kwargs = dict(
@@ -257,6 +270,7 @@ def main():
             n = 0
             finish_reason = ""
             if use_stream:
+                stream_text = bool(req.get("stream_text"))
                 for chunk in llm.create_chat_completion(**gen_kwargs):
                     ch = chunk["choices"][0]
                     piece = (ch.get("delta") or {}).get("content")
@@ -264,6 +278,8 @@ def main():
                         parts.append(piece)
                         n += 1
                         _progress(n)
+                        if stream_text:
+                            _token(piece)
                     if ch.get("finish_reason"):
                         finish_reason = ch["finish_reason"]
                 text = "".join(parts)
