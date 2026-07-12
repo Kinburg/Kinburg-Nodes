@@ -441,6 +441,23 @@ shows a **native `<audio>` player and the cover preview** on the node **and** li
 files in **Media Assets** (just like the core Save Audio node). Outputs the `audio` passthrough
 plus the saved `path`. Category `Kinburg-Nodes/audio`.
 
+### `group_control/` — Group Control
+**`Group Control 🎚️`** is a client-side control panel for enabling/bypassing workflow **groups by
+name**. It lists every *unique* group title in the graph, one row each, with a switch that flips
+all groups carrying that name between **`ALWAYS`** (active) and **`BYPASS`** (skipped) at once —
+so naming three groups `Upscale` and toggling one row turns the whole set off together (the row
+shows a `×N` badge for how many groups share the name). "Toggling a group" rewrites the `mode` of
+the nodes inside it, exactly like ComfyUI's own *Set Group Nodes to…* menu, so the state is baked
+into the target nodes and travels with the workflow — no extra serialization, survives a reload.
+**Nesting is supported**: membership is resolved by bounding box, so an outer group automatically
+covers the nodes of any group nested inside it, and nested names are shown **indented** by depth.
+The list **grows and rebuilds itself** as you add, rename or delete groups (it polls the graph),
+and a mixed selection (some nodes in a group active, some not) shows a `MIXED` marker. Extras:
+**`all on`** / **`all off`** buttons, and a **right-click** on any switch sets **`MUTE`** (Never)
+instead of Bypass. The node has no inputs or outputs and never runs on the backend — it's excluded
+from the prompt and only manipulates other nodes' modes on the client before the run. Category
+`Kinburg-Nodes/util`.
+
 ## Installation
 
 1. Clone this repository into `ComfyUI/custom_nodes` (or install it through
