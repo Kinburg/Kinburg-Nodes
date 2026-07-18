@@ -87,6 +87,10 @@ DEFAULTS = {
 
 CATEGORIES = list(DEFAULTS.keys())
 
+# The five slots' default categories — out of the box the node looks like the classic five.
+SLOT_DEFAULT_CATS = ["camera", "aesthetics", "light", "medium", "background"]
+N_SLOTS = 5
+
 _LOCK = threading.Lock()
 
 
@@ -96,15 +100,16 @@ def _store_path():
 
 
 def _load_user():
-    """The user layer as {"categories": {...}, "setups": {...}}; {} when absent/corrupt."""
+    """User layer: {"categories": {...}, "cat_order": [...], "setups": {...}}."""
     try:
         with open(_store_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         data = {}
     cats = data.get("categories") if isinstance(data.get("categories"), dict) else {}
+    order = [c for c in (data.get("cat_order") or []) if isinstance(c, str)]
     setups = data.get("setups") if isinstance(data.get("setups"), dict) else {}
-    return {"categories": cats, "setups": setups}
+    return {"categories": cats, "cat_order": order, "setups": setups}
 
 
 def _save_user(data):
@@ -116,21 +121,39 @@ def _save_user(data):
     os.replace(tmp, p)
 
 
+def _user_cat_names(user):
+    """User (non-built-in) category names, in order: cat_order first, then any stray keys."""
+    names = [c for c in user["cat_order"] if c not in DEFAULTS]
+    for c in user["categories"]:
+        if c not in DEFAULTS and c not in names:
+            names.append(c)
+    return names
+
+
+def category_list():
+    """All category names in display order: built-ins first, then user-added."""
+    return list(DEFAULTS.keys()) + _user_cat_names(_load_user())
+
+
 def categories_merged():
-    """Built-in presets with the user's own presets layered on top, per category."""
-    user = _load_user()["categories"]
+    """Every category -> {preset name: fragment}: built-ins with the user's presets layered on
+    top, plus any user-created categories."""
+    user = _load_user()
     out = {}
     for cat, presets in DEFAULTS.items():
         merged = dict(presets)
-        for name, text in (user.get(cat) or {}).items():
+        for name, text in (user["categories"].get(cat) or {}).items():
             if isinstance(name, str) and isinstance(text, str):
                 merged[name] = text
         out[cat] = merged
+    for cat in _user_cat_names(user):
+        out[cat] = {name: text for name, text in (user["categories"].get(cat) or {}).items()
+                    if isinstance(name, str) and isinstance(text, str)}
     return out
 
 
 def options_for(cat):
-    """Dropdown values for a category: NONE first, then preset names (built-in + user)."""
+    """Dropdown values for a category: NONE first, then its preset names."""
     return [NONE] + list(categories_merged().get(cat, {}).keys())
 
 
@@ -141,21 +164,39 @@ def resolve(cat, name):
     return categories_merged().get(cat, {}).get(name, "")
 
 
+def _normalize_setups(user):
+    """Setups as {name: [{"cat","preset"}, ...]}. Converts the legacy {cat: preset} format
+    (keyed by the classic five categories) into the per-slot list."""
+    out = {}
+    for name, val in (user["setups"] or {}).items():
+        if isinstance(val, list):
+            out[name] = [{"cat": str(s.get("cat", "")), "preset": str(s.get("preset", NONE))}
+                         for s in val if isinstance(s, dict)]
+        elif isinstance(val, dict):
+            out[name] = [{"cat": c, "preset": str(val.get(c, NONE))} for c in SLOT_DEFAULT_CATS]
+    return out
+
+
 def full_data():
-    """Everything the frontend needs: merged presets, which names are built-in, and setups."""
+    """Everything the frontend needs: merged presets, category order, which names/categories are
+    built-in (can't be deleted/renamed), and the saved setups."""
     user = _load_user()
     return {
         "none": NONE,
-        "order": CATEGORIES,
+        "order": category_list(),
         "categories": categories_merged(),
         "builtins": {cat: list(p.keys()) for cat, p in DEFAULTS.items()},
-        "setups": user["setups"],
+        "builtin_cats": list(DEFAULTS.keys()),
+        "setups": _normalize_setups(user),
+        "n_slots": N_SLOTS,
     }
 
 
 def upsert_preset(cat, name, text, delete=False):
-    """Add/update (or delete) a user preset. Built-in names can't be deleted."""
-    if cat not in DEFAULTS:
+    """Add/update (or delete) a user preset in any category (built-in or user-created).
+    Built-in preset names can't be deleted."""
+    cat = (cat or "").strip()
+    if cat not in category_list():
         raise ValueError(f"unknown category: {cat}")
     name = (name or "").strip()
     if not name or name == NONE:
@@ -164,10 +205,10 @@ def upsert_preset(cat, name, text, delete=False):
         data = _load_user()
         cat_user = data["categories"].setdefault(cat, {})
         if delete:
-            if name in DEFAULTS[cat] and name not in cat_user:
+            if cat in DEFAULTS and name in DEFAULTS[cat] and name not in cat_user:
                 raise ValueError("cannot delete a built-in preset")
             cat_user.pop(name, None)
-            if not cat_user:
+            if not cat_user and cat in DEFAULTS:
                 data["categories"].pop(cat, None)
         else:
             cat_user[name] = text or ""
@@ -175,8 +216,64 @@ def upsert_preset(cat, name, text, delete=False):
     return full_data()
 
 
-def upsert_setup(name, values, delete=False):
-    """Save/delete a named setup (a chosen preset name per category)."""
+def add_category(name):
+    """Create a new (empty) user category."""
+    name = (name or "").strip()
+    if not name or name == NONE:
+        raise ValueError("category name is required")
+    if name in category_list():
+        raise ValueError(f"category already exists: {name}")
+    with _LOCK:
+        data = _load_user()
+        if name not in data["cat_order"]:
+            data["cat_order"].append(name)
+        data["categories"].setdefault(name, {})
+        _save_user(data)
+    return full_data()
+
+
+def rename_category(name, new_name):
+    """Rename a user category (built-ins can't be renamed). Setups following it are updated."""
+    name, new_name = (name or "").strip(), (new_name or "").strip()
+    if name in DEFAULTS:
+        raise ValueError("cannot rename a built-in category")
+    if not new_name or new_name == NONE:
+        raise ValueError("new category name is required")
+    if new_name in category_list():
+        raise ValueError(f"category already exists: {new_name}")
+    with _LOCK:
+        data = _load_user()
+        if name not in _user_cat_names(data):
+            raise ValueError(f"unknown user category: {name}")
+        data["cat_order"] = [new_name if c == name else c for c in data["cat_order"]]
+        if new_name not in data["cat_order"]:
+            data["cat_order"].append(new_name)
+        if name in data["categories"]:
+            data["categories"][new_name] = data["categories"].pop(name)
+        for slots in data["setups"].values():
+            if isinstance(slots, list):
+                for s in slots:
+                    if isinstance(s, dict) and s.get("cat") == name:
+                        s["cat"] = new_name
+        _save_user(data)
+    return full_data()
+
+
+def delete_category(name):
+    """Delete a user category (built-ins can't be deleted)."""
+    name = (name or "").strip()
+    if name in DEFAULTS:
+        raise ValueError("cannot delete a built-in category")
+    with _LOCK:
+        data = _load_user()
+        data["cat_order"] = [c for c in data["cat_order"] if c != name]
+        data["categories"].pop(name, None)
+        _save_user(data)
+    return full_data()
+
+
+def upsert_setup(name, slots, delete=False):
+    """Save/delete a named setup — a per-slot list of {cat, preset}."""
     name = (name or "").strip()
     if not name:
         raise ValueError("setup name is required")
@@ -185,7 +282,8 @@ def upsert_setup(name, values, delete=False):
         if delete:
             data["setups"].pop(name, None)
         else:
-            values = values or {}
-            data["setups"][name] = {c: (values.get(c) or NONE) for c in DEFAULTS}
+            data["setups"][name] = [
+                {"cat": str(s.get("cat", "")), "preset": str(s.get("preset", NONE))}
+                for s in (slots or []) if isinstance(s, dict)]
         _save_user(data)
     return full_data()

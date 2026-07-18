@@ -39,6 +39,7 @@ class CharacterCard:
         for key, label in _FIELDS:
             fields[key] = ("STRING", dict(opt, tooltip=f"{label}. " + opt["tooltip"]))
         fields["notes"] = ("STRING", {"multiline": True, "default": "", "tooltip": "Anything else (personality, accessories, scars…). Added verbatim under the card."})
+        fields["save_preset_as"] = ("STRING", {"default": "", "tooltip": "Type a name to save this card to the Card Presets library on the next run. Works whether the fields are typed OR wired in from outside (saved at run time). Empty = don't save. (Re-runs overwrite the same name.)"})
         return {"required": fields}
 
     RETURN_TYPES = ("STRING",)
@@ -46,7 +47,7 @@ class CharacterCard:
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
-    def run(self, name="", notes="", **kwargs):
+    def run(self, name="", notes="", save_preset_as="", **kwargs):
         lines = []
         for key, label in _FIELDS:
             v = (kwargs.get(key) or "").strip()
@@ -54,15 +55,29 @@ class CharacterCard:
                 lines.append(f"- {label}: {v}")
         notes = (notes or "").strip()
 
-        # Nothing filled in -> emit an empty string so Context Collector skips this card.
-        if not lines and not notes:
-            return ("",)
+        result = ""
+        if lines or notes:
+            header = (name or "").strip() or "Character"
+            block = [f"### {header}"] + lines
+            if notes:
+                block.append(notes)
+            result = "\n".join(block)
 
-        header = (name or "").strip() or "Character"
-        block = [f"### {header}"] + lines
-        if notes:
-            block.append(notes)
-        return ("\n".join(block),)
+        # Backend save: captures the values as resolved at run time (typed OR wired in), which a
+        # frontend button can't see. Overwrites the same name on re-runs.
+        sp = (save_preset_as or "").strip()
+        if sp and result:
+            try:
+                from ..card_presets.store import upsert
+                values = {"name": name or "", "notes": notes}
+                for key, _ in _FIELDS:
+                    values[key] = (kwargs.get(key) or "")
+                upsert(sp, "character", values)
+                print(f"[CharacterCard] saved preset '{sp}'")
+            except Exception as e:
+                print(f"[CharacterCard] save preset '{sp}' failed: {e}")
+
+        return (result,)
 
 
 NODE_CLASS_MAPPINGS = {"CharacterCard": CharacterCard}

@@ -3,6 +3,7 @@ import sys
 import json
 import re
 import time
+import hashlib
 import atexit
 import threading
 import subprocess
@@ -184,6 +185,10 @@ atexit.register(_shutdown_worker)
 def _start_worker(load_sig):
     global _worker_proc, _worker_sig
     _shutdown_worker()
+    # Force the worker's stdio to UTF-8 too (belt-and-suspenders with its own reconfigure), so
+    # the ensure_ascii=False protocol round-trips non-ASCII cleanly on Windows.
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.Popen(
         [sys.executable, WORKER, "--serve"],
         stdin=subprocess.PIPE,
@@ -193,6 +198,7 @@ def _start_worker(load_sig):
         encoding="utf-8",
         bufsize=1,
         cwd=NODE_DIR,
+        env=env,
     )
     _worker_proc = proc
     _worker_sig = load_sig
@@ -206,9 +212,96 @@ def _ensure_worker(load_sig):
     return _start_worker(load_sig)
 
 
+def count_tokens(cfg, text):
+    """Count tokens of `text` under the config's model tokenizer, via the worker (vocab-only —
+    no weights/VRAM). Returns (token_count, error_str); token_count is -1 on error. Reuses a
+    running worker without disturbing any loaded generation model."""
+    g = cfg.get if isinstance(cfg, dict) else (lambda k, d=None: d)
+    resolved = _resolve_path(g("model", PLACEHOLDER), g("model_path", ""))
+    if not resolved or not os.path.isfile(resolved):
+        return (-1, f"Model file not found: {resolved or '(none selected)'} — check the Settings node.")
+    req = {"cmd": "count", "model_path": resolved, "text": text or ""}
+    with _worker_lock:
+        try:
+            proc = (_worker_proc if (_worker_proc is not None and _worker_proc.poll() is None)
+                    else _start_worker(("__count__",)))
+            data = _request(proc, req)
+            if data.get("status") == "error" and "worker exited" in data.get("message", ""):
+                data = _request(_start_worker(("__count__",)), req)
+        except Exception as e:
+            _shutdown_worker()
+            return (-1, f"Worker communication failed: {e}")
+    if data.get("status") == "success":
+        return (int(data.get("token_count", 0)), "")
+    print("[LocalLLM] token count error:\n", data.get("traceback", ""))
+    return (-1, data.get("message", "unknown error"))
+
+
+def count_prompt(cfg, user_prompt, image=None):
+    """Exact prompt token count (text + chat template + image tokens) via a 1-token prefill on
+    the full model — loads the vision projector when an `image` is given (Path B). The measuring
+    context is forced large enough that the prefill can't overflow n_ctx. Returns
+    (prompt_tokens, error); prompt_tokens is -1 on error."""
+    base = cfg if isinstance(cfg, dict) else {}
+    cfg2 = dict(base)
+    cfg2["n_ctx"] = max(int(base.get("n_ctx", 4096) or 4096), 8192)  # headroom for the probe
+    err, ctx = build_llm_request(cfg2, user_prompt, image=image)
+    if err:
+        return (-1, err)
+    req = ctx["req"]
+    req["count_only"] = True
+    with _worker_lock:
+        try:
+            proc = _ensure_worker(ctx["load_sig"])
+            data = _request(proc, req)
+            if data.get("status") == "error" and "worker exited" in data.get("message", ""):
+                data = _request(_start_worker(ctx["load_sig"]), req)
+        except Exception as e:
+            _shutdown_worker()
+            return (-1, f"Worker communication failed: {e}")
+    if data.get("status") == "success":
+        return (int(data.get("prompt_tokens", 0)), "")
+    print("[LocalLLM] count_prompt error:\n", data.get("traceback", ""))
+    return (-1, data.get("message", "unknown error"))
+
+
+def count_image_tokens(cfg, image):
+    """Lean per-image token count via mtmd (clip only — no LLM weights, no decode). `image` is an
+    IMAGE tensor/batch. Returns (list[int] per frame | None, error). None/error → caller should
+    fall back to the full-model prefill (this path needs the clip to tokenize weight-free, which
+    a given build may not support)."""
+    g = cfg.get if isinstance(cfg, dict) else (lambda k, d=None: d)
+    model = _resolve_path(g("model", PLACEHOLDER), g("model_path", ""))
+    if not model or not os.path.isfile(model):
+        return (None, f"model file not found: {model or '(none selected)'}")
+    mmproj = _resolve_path(g("mmproj", PLACEHOLDER), g("mmproj_path", ""))
+    if not mmproj or not os.path.isfile(mmproj):
+        return (None, "no mmproj (vision) in the config — connect a Vision Settings node")
+    try:
+        uris = _encode_images(image, int(g("image_max_side", 1024)))
+    except Exception as e:
+        return (None, f"image encode failed: {e}")
+    req = {"cmd": "count_mtmd", "model_path": model, "mmproj_path": mmproj,
+           "n_gpu_layers": int(g("n_gpu_layers", -1)), "images": uris}
+    with _worker_lock:
+        try:
+            proc = (_worker_proc if (_worker_proc is not None and _worker_proc.poll() is None)
+                    else _start_worker(("__count__",)))
+            data = _request(proc, req)
+            if data.get("status") == "error" and "worker exited" in data.get("message", ""):
+                data = _request(_start_worker(("__count__",)), req)
+        except Exception as e:
+            _shutdown_worker()
+            return (None, f"Worker communication failed: {e}")
+    if data.get("status") == "success":
+        return ([int(x) for x in data.get("image_tokens", [])], "")
+    print("[LocalLLM] count_image_tokens error:\n", data.get("traceback", ""))
+    return (None, data.get("message", "unknown error"))
+
+
 def _request(proc, req, progress_cb=None, token_cb=None):
     try:
-        proc.stdin.write(json.dumps(req, ensure_ascii=True) + "\n")
+        proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
         proc.stdin.flush()
     except Exception as e:
         return {"status": "error", "message": f"worker exited (write failed: {e})"}
@@ -379,16 +472,21 @@ def _encode_images(image, max_side):
             pil = pil.resize((max(1, round(pil.width * s)), max(1, round(pil.height * s))),
                              Image.Resampling.LANCZOS)
         buf = io.BytesIO()
-        pil.save(buf, format="PNG")
-        uris.append("data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii"))
+        # JPEG (q92) instead of PNG: far smaller base64 payload over the pipe and faster to
+        # encode; the vision model resizes/re-encodes internally, so q92 is visually lossless
+        # for image understanding. (pil is already RGB above, so no alpha to worry about.)
+        pil.save(buf, format="JPEG", quality=92)
+        uris.append("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"))
     return uris
 
 
 def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
                          unload_llm_after_run, directive, strip_think, answer_marker, help_text,
-                         token_cb=None):
+                         token_cb=None, show_progress=True):
     """Shared core for both LLM nodes: optionally free ComfyUI VRAM, talk to the worker with a
-    live token progress bar, then split reasoning out and return the 10-output tuple."""
+    live token progress bar, then split reasoning out and return the 10-output tuple.
+    `show_progress=False` suppresses the per-token progress bar — used by callers (e.g. the
+    Vision Judge) that drive their own image-level progress bar for the whole node."""
     if unload_comfy_models:
         try:
             import comfy.model_management as mm
@@ -398,11 +496,12 @@ def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
             print(f"[LocalLLM] unload_all_models failed: {e}")
 
     pbar = None
-    try:
-        from comfy.utils import ProgressBar
-        pbar = ProgressBar(max_tokens)
-    except Exception:
-        pbar = None
+    if show_progress:
+        try:
+            from comfy.utils import ProgressBar
+            pbar = ProgressBar(max_tokens)
+        except Exception:
+            pbar = None
 
     def _progress(n):
         if pbar is not None:
@@ -480,7 +579,23 @@ def _base_config_widgets():
         "output_format": (["text", "json_object", "gbnf_grammar", "ideogram4_json"], {"default": "text", "tooltip": "Output: free text · valid JSON · custom GBNF grammar (field below) · ideogram4_json. Grammar modes run without the live progress bar"}),
         "grammar": ("STRING", {"multiline": True, "default": "", "tooltip": "GBNF grammar text, used when output_format = gbnf_grammar"}),
         "extra_load_args": ("STRING", {"multiline": True, "default": "", "tooltip": "Advanced: extra keyword args for llama-cpp-python's Llama() loader. One per line as key=value or a JSON object. These are Python-binding args, NOT llama.cpp CLI flags. Unknown keys are ignored. Changing this reloads the model."}),
+        "chat_template_path": ("STRING", {"default": "", "tooltip": "Advanced: path to a chat_template.jinja file that OVERRIDES the model's built-in chat template. Empty (default) = use the template embedded in the GGUF, which is correct for almost every model. Only needed when a model ships a broken/missing embedded template, or you want a specific template variant. TEXT models only — ignored when an mmproj (vision) is active, since vision uses its own formatting. Surrounding quotes are stripped. Changing this reloads the model."}),
     }
+
+
+# Per-node override for freeing the model after a run, independent of the shared config.
+UNLOAD_MODES = ["config default", "unload after run", "keep loaded"]
+
+
+def resolve_unload(mode, cfg):
+    """Resolve a node's `unload_after_run` selector to a bool. 'config default' follows the
+    Settings node's `unload_llm_after_run`; the other two force the choice for THIS node only."""
+    if mode == "unload after run":
+        return True
+    if mode == "keep loaded":
+        return False
+    g = cfg.get if isinstance(cfg, dict) else (lambda k, d=None: d)
+    return bool(g("unload_llm_after_run", False))
 
 
 def build_llm_request(cfg, user_prompt, image=None, history=None,
@@ -517,6 +632,22 @@ def build_llm_request(cfg, user_prompt, image=None, history=None,
         except Exception as e:
             return (f"Failed to encode image(s): {e}", None)
 
+    # Optional chat-template override: a chat_template.jinja that REPLACES the model's embedded
+    # template. Read here (not in the worker) so a bad path fails with a clean node error. Text
+    # models only — the vision path uses its own mtmd handler, so we skip it there.
+    chat_template = ""
+    ct_path = (g("chat_template_path", "") or "").strip().strip('"').strip("'").strip()
+    if ct_path and not use_vision:
+        if not os.path.isfile(ct_path):
+            return (f"chat_template_path not found: {ct_path}", None)
+        try:
+            with open(ct_path, "r", encoding="utf-8") as f:
+                chat_template = f.read()
+        except Exception as e:
+            return (f"chat_template_path: cannot read '{ct_path}': {e}", None)
+        if not chat_template.strip():
+            return (f"chat_template_path is empty: {ct_path}", None)
+
     up, directive = _apply_directive(user_prompt, g("thinking_directive", "model default"), g("custom_directive", ""))
     # A connected system_override replaces the config's persona; context is still appended.
     sys_base = (system_override if (isinstance(system_override, str) and system_override.strip())
@@ -538,6 +669,7 @@ def build_llm_request(cfg, user_prompt, image=None, history=None,
         "kv_cache_type": g("kv_cache_type", "f16"), "seed": int(g("seed", 0)),
         "output_format": eff_format, "grammar": eff_grammar,
         "extra_load_args": extra, "verbose": False,
+        "chat_template": chat_template,
     }
     if history:
         req["history"] = history
@@ -550,7 +682,8 @@ def build_llm_request(cfg, user_prompt, image=None, history=None,
     load_sig = (resolved, req["n_ctx"], req["n_gpu_layers"], req["n_batch"], req["flash_attn"],
                 req["kv_cache_type"], mmproj_resolved if use_vision else None,
                 handler_key if use_vision else None,
-                json.dumps(extra, sort_keys=True, default=str))
+                json.dumps(extra, sort_keys=True, default=str),
+                hashlib.sha1(chat_template.encode("utf-8")).hexdigest() if chat_template else "")
 
     ctx = {
         "req": req, "load_sig": load_sig,
@@ -580,6 +713,7 @@ class LocalLLMGGUF:
                 "image": ("IMAGE", {"tooltip": "Optional image(s) for vision — needs an mmproj on the Settings node (Vision Settings). Omit for a text-only run."}),
                 "system_override": ("STRING", {"forceInput": True, "tooltip": "Optional: replaces the config's system_prompt for this node (connect-only). Context still applies."}),
                 "grammar_override": ("STRING", {"forceInput": True, "tooltip": "Optional: a GBNF grammar (connect-only) that replaces the config's grammar and forces gbnf_grammar output for this node."}),
+                "unload_after_run": (UNLOAD_MODES, {"default": "config default", "tooltip": "Free the model from VRAM after THIS node runs, without touching the shared config. 'config default' follows the Settings node; 'unload after run' frees VRAM (a different model runs next); 'keep loaded' stays warm (the same model runs next)."}),
             },
         }
 
@@ -588,13 +722,15 @@ class LocalLLMGGUF:
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
-    def run(self, config, user_prompt, image=None, system_override=None, grammar_override=None):
+    def run(self, config, user_prompt, image=None, system_override=None, grammar_override=None,
+            unload_after_run="config default"):
         err, ctx = build_llm_request(config, user_prompt, image=image,
                                      system_override=system_override, grammar_override=grammar_override)
         if err:
             return _err(err, VISION_HELP_TEXT if image is not None else HELP_TEXT)
+        unload_llm = resolve_unload(unload_after_run, config)
         return _generate_and_format(ctx["req"], ctx["load_sig"], ctx["max_tokens"], ctx["unload_comfy"],
-                                    ctx["unload_llm"], ctx["directive"], ctx["strip_think"],
+                                    unload_llm, ctx["directive"], ctx["strip_think"],
                                     ctx["answer_marker"], ctx["help"])
 
 

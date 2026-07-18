@@ -8,6 +8,10 @@ import { app } from "../../scripts/app.js";
 // baked into the target nodes and travels with the workflow. Nesting is resolved by bounding
 // box: an outer group covers the nodes of any group nested inside it, and nested names are
 // shown indented. The panel polls the graph so the list grows/rebuilds as groups change.
+//
+// The rows can be reordered: "sort" sorts by name (toggling A–Z / Z–A; right-click restores the
+// original order), or drag a row by its ⠿ handle. The chosen order is saved on the node
+// (node.properties._kbOrder) so it travels with the workflow; it's purely cosmetic.
 
 const CLASS = "KinburgGroupControl";
 
@@ -75,6 +79,112 @@ function collectEntries() {
     e.groups.push(g);
   }
   return [...byName.values()];
+}
+
+// -------------------------------------------------------------------- ordering (sort / drag)
+// The desired row order is a list of group names saved on the node (node.properties._kbOrder),
+// so it serializes with the workflow and survives a reload. It's UI-only and never touches the
+// prompt. Both the "sort" button and drag-to-reorder write into this same list.
+function setOrder(node, names) {
+  node.properties = node.properties || {};
+  node.properties._kbOrder = names;
+}
+
+// Reorder entries to match the saved order. Names not in the list keep their natural
+// first-appearance order, placed after the ones that are (so new groups show up at the bottom).
+function applyOrder(entries, node) {
+  const order = node.properties && node.properties._kbOrder;
+  if (!Array.isArray(order) || !order.length) return entries;
+  const pos = new Map(order.map((n, i) => [n, i]));
+  const orig = new Map(entries.map((e, i) => [e.name, i]));
+  const big = order.length + entries.length;
+  return entries.slice().sort((a, b) => {
+    const pa = pos.has(a.name) ? pos.get(a.name) : big + orig.get(a.name);
+    const pb = pos.has(b.name) ? pos.get(b.name) : big + orig.get(b.name);
+    return pa - pb;
+  });
+}
+
+// Sort by name; each click flips A→Z / Z→A. Natural (numeric-aware) collation.
+function sortByName(node) {
+  const asc = !(node.properties && node.properties._kbSortAsc === true);
+  const names = collectEntries()
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  if (!asc) names.reverse();
+  setOrder(node, names);
+  node.properties._kbSortAsc = asc;
+  rebuild(node);
+}
+
+// Drop the custom order — back to first-appearance order.
+function clearOrder(node) {
+  if (node.properties) {
+    delete node.properties._kbOrder;
+    delete node.properties._kbSortAsc;
+  }
+  rebuild(node);
+}
+
+// Pointer-driven drag reorder from a row's grip handle. Reorders the DOM live as the pointer
+// moves, then commits the new row order to node.properties on release. paint()/rebuild() are
+// held off while dragging (see refresh) so the list DOM isn't rebuilt mid-drag.
+//
+// Pointer capture and the move/up listeners live on the LIST, never on the row/handle: the
+// dragged row is reparented by insertBefore on every step, which momentarily detaches it and
+// would drop capture held on it — the drag would then stall after one move and never get its
+// pointerup (so the highlight would stick). The list stays put, so capture survives the drag.
+function attachDrag(node, row, handle) {
+  handle.addEventListener("pointerdown", (downEvt) => {
+    if (downEvt.button !== 0) return; // left button only
+    if (node._kbDragging) return;     // ignore a second pointer mid-drag
+    downEvt.preventDefault();
+    downEvt.stopPropagation();
+
+    const list = node._kbEls && node._kbEls.list;
+    if (!list) return;
+    node._kbDragging = true;
+    handle.style.cursor = "grabbing";
+    const prevBg = row.style.background;
+    const prevOpacity = row.style.opacity;
+    row.style.opacity = "0.55";
+    row.style.background = "#2b6cb055";
+    const pid = downEvt.pointerId;
+    try { list.setPointerCapture(pid); } catch (e) { /* not fatal */ }
+
+    const onMove = (e) => {
+      const y = e.clientY;
+      let before = null;
+      for (const sib of list.children) {
+        if (sib === row) continue;
+        const r = sib.getBoundingClientRect();
+        if (y < r.top + r.height / 2) { before = sib; break; }
+      }
+      if (before) {
+        if (before !== row.nextElementSibling) list.insertBefore(row, before);
+      } else if (list.lastElementChild !== row) {
+        list.appendChild(row);
+      }
+    };
+
+    const finish = () => {
+      list.removeEventListener("pointermove", onMove);
+      list.removeEventListener("pointerup", finish);
+      list.removeEventListener("pointercancel", finish);
+      try { list.releasePointerCapture(pid); } catch (e) { /* already released */ }
+      handle.style.cursor = "grab";
+      row.style.opacity = prevOpacity;
+      row.style.background = prevBg;
+      node._kbDragging = false;
+      const names = [...list.children].map((c) => c._kbEntry && c._kbEntry.name).filter(Boolean);
+      setOrder(node, names);
+      app.graph?.setDirtyCanvas(true, true);
+    };
+
+    list.addEventListener("pointermove", onMove);
+    list.addEventListener("pointerup", finish);
+    list.addEventListener("pointercancel", finish);
+  });
 }
 
 // Aggregate on/off state across every node of every same-named group.
@@ -152,6 +262,19 @@ function buildPanel(node) {
     b.onclick = (e) => { e.preventDefault(); fn(); };
     return b;
   };
+  const sortBtn = mkBtn(
+    "sort ⇅",
+    "Sort groups by name — click toggles A–Z / Z–A. Right-click: restore original order. " +
+    "You can also drag rows by the ⠿ handle to reorder manually.",
+    () => {
+      sortByName(node);
+      sortBtn.textContent = node.properties && node.properties._kbSortAsc ? "A–Z" : "Z–A";
+    });
+  sortBtn.oncontextmenu = (e) => {
+    e.preventDefault();
+    clearOrder(node);
+    sortBtn.textContent = "sort ⇅";
+  };
   const allOn = mkBtn("all on", "Set every group to Always", () => {
     for (const e of node._kbEntries || []) applyMode(e, ALWAYS());
     refresh(node);
@@ -160,7 +283,7 @@ function buildPanel(node) {
     for (const e of node._kbEntries || []) applyMode(e, BYPASS());
     refresh(node);
   });
-  header.append(title, count, allOn, allOff);
+  header.append(title, count, sortBtn, allOn, allOff);
 
   const list = document.createElement("div");
   list.style.cssText = "display:flex;flex-direction:column;gap:3px;";
@@ -178,7 +301,7 @@ function buildPanel(node) {
 function rebuild(node) {
   const els = node._kbEls;
   if (!els) return;
-  const entries = collectEntries();
+  const entries = applyOrder(collectEntries(), node);
   node._kbEntries = entries;
   els.list.innerHTML = "";
   els.count.textContent = entries.length ? `${entries.length}` : "";
@@ -189,6 +312,13 @@ function rebuild(node) {
     row.style.cssText =
       "display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:5px;" +
       `background:#00000022;margin-left:${entry.depth * 14}px;`;
+
+    const grip = document.createElement("span");
+    grip.textContent = "⠿";
+    grip.title = "Drag to reorder";
+    grip.style.cssText =
+      "flex:0 0 auto;cursor:grab;color:#666;font-size:13px;line-height:1;padding:0 1px;" +
+      "user-select:none;touch-action:none;";
 
     const dot = document.createElement("span");
     dot.style.cssText =
@@ -221,7 +351,8 @@ function rebuild(node) {
 
     row._kbEntry = entry;
     row._kbSwitch = sw;
-    row.append(dot, name, sw);
+    row.append(grip, dot, name, sw);
+    attachDrag(node, row, grip);
     els.list.appendChild(row);
   }
   paint(node);
@@ -245,6 +376,7 @@ function paint(node) {
 
 // Rebuild if the layout changed, otherwise just repaint the switches.
 function refresh(node) {
+  if (node._kbDragging) return; // don't rebuild/repaint the list out from under a drag
   const sig = signature();
   if (sig !== node._kbSig) { node._kbSig = sig; rebuild(node); }
   else paint(node);
@@ -272,6 +404,18 @@ app.registerExtension({
       setTimeout(tick, 50);
 
       if ((node.size?.[1] || 0) < 200) node.setSize([Math.max(node.size?.[0] || 0, 300), 260]);
+      return r;
+    };
+
+    // A saved workflow restores node.properties (incl. _kbOrder) via configure(), which may run
+    // AFTER the first poll tick has already locked _kbSig to the current group layout — and since
+    // the order isn't part of the signature, no later rebuild would re-apply it. Reset _kbSig here
+    // (properties are populated by now) so the next tick rebuilds and honors the saved order.
+    const onConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function () {
+      const r = onConfigure?.apply(this, arguments);
+      this._kbSig = null;
+      if (this.graph) refresh(this);
       return r;
     };
 

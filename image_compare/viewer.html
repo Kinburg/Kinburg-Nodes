@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Image comparison</title>
 <style>
-  :root { --bg:#1b1b1f; --fg:#e7e7ea; --panel:#2a2a30; --accent:#4f8cff; --muted:#9a9aa2; }
+  :root { --bg:#1b1b1f; --fg:#e7e7ea; --panel:#2a2a30; --accent:#4f8cff; --muted:#9a9aa2; --row-h:320px; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
   body.dragging, body.dragging * { user-select:none !important; -webkit-user-select:none !important; }
@@ -48,6 +48,19 @@
   .pairtime { max-width:1000px; margin:6px auto 0; display:flex; gap:12px; }
   .pairtime > div { flex:1; font-size:12px; color:#ffd479; background:#0004; padding:6px 10px; border-radius:6px; }
   .hide-time .time, .hide-time .pairtime, .hide-time #lightbox .lbtime { display:none; }
+  .metric { padding:4px 8px; font-size:12px; font-weight:600; color:#c3a6ff; white-space:pre-wrap; word-break:break-word; }
+  .pairmetric { max-width:1000px; margin:6px auto 0; display:flex; gap:12px; }
+  .pairmetric > div { flex:1; font-size:12px; color:#c3a6ff; background:#0004; padding:6px 10px; border-radius:6px; }
+  .hide-metrics .metric, .hide-metrics .pairmetric, .hide-metrics #lightbox .lbmetric { display:none; }
+  .judge { padding:5px 8px; font-size:12px; border-top:1px solid #ffffff14; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .judge-stars { color:#ffce54; letter-spacing:1px; }
+  .judge-badge { font-weight:600; }
+  .judge-tags { display:flex; flex-wrap:wrap; gap:4px; }
+  .judge-tag { background:#a06cff22; border:1px solid #a06cff66; border-radius:9px; padding:0 7px; font-size:11px; color:#c9b3ff; }
+  .judge-comment { flex-basis:100%; color:var(--muted); font-style:italic; }
+  .pairjudge { max-width:1000px; margin:6px auto 0; display:flex; gap:12px; }
+  .pairjudge > div { flex:1; font-size:12px; color:#c9b3ff; background:#0004; padding:6px 10px; border-radius:6px; }
+  .hide-judge .judge, .hide-judge .pairjudge { display:none; }
   figure .kn-hidebtn { position:absolute; top:6px; right:6px; z-index:4; width:26px; height:26px; padding:0;
                        line-height:1; font-size:13px; border-radius:50%; background:#000a; color:#fff;
                        border:1px solid #ffffff33; cursor:pointer; opacity:.5; }
@@ -69,7 +82,8 @@
   .kn-taginp { width:60px; background:#00000022; border:1px solid #ffffff1f; border-radius:8px; padding:2px 6px;
                font-size:11px; color:var(--fg); }
   .loupe { position:absolute; width:160px; height:160px; border:2px solid var(--accent); border-radius:50%;
-           pointer-events:none; display:none; background-repeat:no-repeat; box-shadow:0 4px 14px #0009; z-index:3; }
+           pointer-events:none; display:none; overflow:hidden; isolation:isolate; background-repeat:no-repeat; box-shadow:0 4px 14px #0009; z-index:3; }
+  .loupe-layer { position:absolute; inset:0; background-repeat:no-repeat; }
   #loupeInfo { position:fixed; right:12px; bottom:12px; background:#000c; color:#fff; padding:4px 10px;
                border-radius:6px; font-size:12px; display:none; z-index:6; }
   .viewwrap { display:flex; justify-content:center; }
@@ -99,7 +113,16 @@
                         border-radius:6px; font-size:12px; white-space:pre-wrap; text-align:left; }
   #lightbox .lbtime { position:absolute; top:14px; left:14px; background:#000b; color:#ffd479; padding:4px 10px;
                         border-radius:6px; font-size:13px; font-weight:600; z-index:2; }
+  #lightbox .lbmetric { position:absolute; top:14px; right:14px; background:#000b; color:#c3a6ff; padding:4px 10px;
+                        border-radius:6px; font-size:13px; font-weight:600; z-index:2; }
   .empty { color:var(--muted); padding:40px; text-align:center; }
+  #help { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; z-index:60; padding:20px; }
+  #help .box { background:var(--panel); color:var(--fg); max-width:720px; width:100%; max-height:85vh; overflow:auto;
+               border-radius:10px; padding:18px 22px; box-shadow:0 8px 40px #000b; font-size:13px; line-height:1.55; }
+  #help h2 { margin:0 0 10px; font-size:18px; }
+  #help h3 { margin:15px 0 3px; font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; }
+  #help p, #help ul { margin:4px 0; } #help ul { padding-left:20px; }
+  #help .hclose { float:right; background:#3a3a42; border:1px solid #4a4a52; color:var(--fg); border-radius:6px; cursor:pointer; padding:3px 10px; }
 </style>
 </head>
 <body>
@@ -120,8 +143,12 @@
       <button id="promptBtn" class="active">Prompts</button>
       <button id="settingsBtn" class="active">Settings</button>
       <button id="timeBtn" class="active">Time</button>
+      <button id="metricsBtn" class="active" title="Show/hide the SSIM · PSNR similarity metrics (shown when a reference was set)">Metrics</button>
+      <button id="judgeBtn" class="active" title="Show/hide the AI judge's verdict (shown when Vision LLM Judge data is connected)">🤖 Judge</button>
       <button id="hiddenBtn" title="Show or hide the results you've marked hidden">Hidden: off</button>
-      <button id="dlBtn" title="Download this page as a self-contained HTML file">⬇ Save page</button></div>
+      <button id="dlBtn" title="Download this page as a self-contained HTML file">⬇ Save page</button>
+      <button id="loupeBtn" title="Magnifier — works in all modes. Wheel = zoom, Ctrl/Alt + wheel = diameter">🔍 Loupe</button>
+      <button id="helpBtn" title="How this page works + what SSIM / PSNR mean">❔ Help</button></div>
     <div class="group" id="reportctl"><span class="lbl">Report DB</span>
       <input type="text" id="dbPath" style="width:240px" title="SQLite file this run is saved to">
       <button id="saveReportBtn" title="Save this run (images, settings, your verdicts/comments) to the report database">💾 Save run to report</button>
@@ -137,9 +164,10 @@
         <option value="time-asc">Time ↑ (fastest)</option>
         <option value="time-desc">Time ↓ (slowest)</option>
         <option value="rating-desc">Rating ↓</option>
+        <option value="sim-desc">Similarity ↓ (closest)</option>
+        <option value="sim-asc">Similarity ↑ (farthest)</option>
         <option value="caption">Caption A→Z</option>
       </select>
-      <button id="loupeBtn" title="Magnifier. Wheel = zoom, Ctrl/Alt + wheel = diameter">Loupe</button>
     </div>
     <div class="group" id="pairctl" style="display:none">
       <span class="lbl">A</span><select id="selA"></select>
@@ -155,7 +183,44 @@
 <div id="stage"></div>
 <div id="loupeInfo"></div>
 
-<div id="lightbox"><button class="nav prev">‹</button><img><button class="nav next">›</button><div class="lbtime"></div><div class="lbsettings"></div><div class="lbprompt"></div><div class="lbcap"></div></div>
+<div id="lightbox"><button class="nav prev">‹</button><img><button class="nav next">›</button><div class="lbtime"></div><div class="lbmetric"></div><div class="lbsettings"></div><div class="lbprompt"></div><div class="lbcap"></div></div>
+
+<div id="help"><div class="box">
+  <button class="hclose">✕ Close</button>
+  <h2>Image Compare — help</h2>
+  <p>Compare a set of images side by side and review them. Click any image to open it full-screen (← → to browse, Esc to close).</p>
+
+  <h3>Comparison modes</h3>
+  <ul>
+    <li><b>Grid</b> — every image at once.</li>
+    <li><b>Slider</b> — drag the divider to wipe between the A and B images.</li>
+    <li><b>Opacity</b> — fade B over A with the Opacity slider.</li>
+    <li><b>Flip</b> — toggle A↔B in place (click, Space, or ← →) to spot small changes.</li>
+    <li><b>Difference</b> — per-pixel difference of A and B; darker = more identical.</li>
+  </ul>
+  <p>Use the <b>A</b> / <b>B</b> selectors to choose which two images the pair/flip modes compare.</p>
+
+  <h3>Loupe (magnifier)</h3>
+  <p>Turn on <b>🔍 Loupe</b> and hover an image to magnify it — it works in <b>every</b> mode (in Slider/Opacity/Difference it magnifies both A and B with the same blend; in Grid it's synced across all images). <b>Wheel</b> = zoom, <b>Ctrl/Alt + wheel</b> = lens size.</p>
+
+  <h3>Panels &amp; review</h3>
+  <p>Header buttons toggle the <b>Captions</b>, <b>Prompts</b>, <b>Settings</b>, <b>Time</b>, <b>Metrics</b> and <b>🤖 Judge</b> panels; <b>Hidden</b> shows/hides results you rejected. In Grid you also set <b>Columns</b>, <b>Max h</b> (row height) and <b>Sort</b>, and can drag images to reorder in “Original order”.</p>
+  <p>Each image has your own review: a <b>★ rating</b>, <b>tags</b>, a <b>comment</b>, and a <b>✕ hide/reject</b> — all saved in this browser, so they survive reloads.</p>
+
+  <h3>Similarity metrics — SSIM &amp; PSNR</h3>
+  <p>Shown only when a <b>reference</b> image was provided on the node. They measure how <b>close</b> each image is to the reference — <i>not</i> how good it looks.</p>
+  <ul>
+    <li><b>PSNR</b> (dB) — pixel-level difference. Higher = more similar; <b>∞</b> = identical. Rough guide: &gt;40 near-identical, 30–40 minor differences, &lt;25 clearly different.</li>
+    <li><b>SSIM</b> (0–1) — structural similarity (luminance, contrast, structure), closer to how the eye judges likeness. 1 = identical; &gt;0.98 ≈ imperceptible, 0.9–0.98 slight, &lt;0.8 different.</li>
+  </ul>
+  <p>Sort by <b>Similarity</b> to rank closest→farthest. Handy for upscaling, img2img and restoration, or for checking how far a quantized model drifts from its baseline.</p>
+
+  <h3>🤖 Judge</h3>
+  <p>When a <b>Vision LLM Judge</b> is connected, each image shows the AI's read-only verdict — stars, tags and a comment — kept separate from your own review.</p>
+
+  <h3>Report &amp; saving</h3>
+  <p><b>Save run to report</b> stores this run (images, settings, your verdicts) to a SQLite database; <b>📊 Report</b> opens a browser over it. <b>⬇ Save page</b> downloads this comparison as a standalone HTML file (enable “embed images” on the node for a fully portable file).</p>
+</div></div>
 
 <script>
 const CONFIG = /*__COMPARE_DATA__*/null;
@@ -189,7 +254,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
               a:0, b:Math.min(1,items.length-1), opacity:50,
               loupe:false, loupeZoom:2.5, loupeSize:160, flipB:false, showHidden:false,
               rowH:320, prompts:(data.show_prompts!==false), settings:(data.show_settings!==false),
-              time:true, sort:'orig' };
+              time:true, metrics:true, judge:true, sort:'orig' };
 
   const stage = document.getElementById('stage');
   const info = document.getElementById('loupeInfo');
@@ -205,6 +270,12 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   $('#promptBtn').onclick=()=>{ S.prompts=!S.prompts; $('#promptBtn').classList.toggle('active',S.prompts); document.body.classList.toggle('hide-prompt',!S.prompts); };
   $('#settingsBtn').onclick=()=>{ S.settings=!S.settings; $('#settingsBtn').classList.toggle('active',S.settings); document.body.classList.toggle('hide-settings',!S.settings); };
   $('#timeBtn').onclick=()=>{ S.time=!S.time; $('#timeBtn').classList.toggle('active',S.time); document.body.classList.toggle('hide-time',!S.time); };
+  $('#metricsBtn').onclick=()=>{ S.metrics=!S.metrics; $('#metricsBtn').classList.toggle('active',S.metrics); document.body.classList.toggle('hide-metrics',!S.metrics); };
+  $('#judgeBtn').onclick=()=>{ S.judge=!S.judge; $('#judgeBtn').classList.toggle('active',S.judge); document.body.classList.toggle('hide-judge',!S.judge); };
+  const help=$('#help');
+  $('#helpBtn').onclick=()=>{ help.style.display='flex'; };
+  help.onclick=(e)=>{ if(e.target===help) help.style.display='none'; };
+  help.querySelector('.hclose').onclick=()=>{ help.style.display='none'; };
   function syncHiddenBtn(){ const n=items.filter(it=>it.hidden).length;
     $('#hiddenBtn').textContent = 'Hidden: '+(S.showHidden?'shown':'off')+(n?` (${n})`:'');
     $('#hiddenBtn').classList.toggle('active', S.showHidden); }
@@ -304,6 +375,8 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       'time-asc':    (a,b)=> nullsLast(num(a.it.time_seconds), num(b.it.time_seconds), 1),
       'time-desc':   (a,b)=> nullsLast(num(a.it.time_seconds), num(b.it.time_seconds), -1),
       'rating-desc': (a,b)=> (b.it.rating||0)-(a.it.rating||0),
+      'sim-desc':    (a,b)=> nullsLast(num(a.it.metric_ssim), num(b.it.metric_ssim), -1),
+      'sim-asc':     (a,b)=> nullsLast(num(a.it.metric_ssim), num(b.it.metric_ssim), 1),
       'caption':     (a,b)=> String(a.it.caption||'').localeCompare(String(b.it.caption||'')),
     }[S.sort];
     if(cmp) rows.sort(cmp);
@@ -332,6 +405,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       if(it.band) cap.style.background=it.band;
       fig.appendChild(cap);
       if(it.time){ const tm=document.createElement('div'); tm.className='time'; tm.textContent='⏱ '+it.time; fig.appendChild(tm); }
+      if(it.metrics){ const mt=document.createElement('div'); mt.className='metric'; mt.textContent='◈ '+it.metrics; fig.appendChild(mt); }
       if(it.settings){ const se=document.createElement('div'); se.className='settings'; se.textContent=it.settings; fig.appendChild(se); }
       if(it.prompt){ const pr=document.createElement('div'); pr.className='prompt'; pr.textContent=it.prompt; fig.appendChild(pr); }
       const review=document.createElement('div'); review.className='kn-review';
@@ -343,6 +417,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       cm.addEventListener('blur', ()=>{ fig.draggable=!S.loupe; });
       cm.addEventListener('input', ()=>{ it.comment=cm.value; cm.classList.toggle('has-text',!!cm.value); persist(); });
       fig.appendChild(cm);
+      const jb=buildJudge(it); if(jb) fig.appendChild(jb);
       if(S.loupe){ const lp=document.createElement('div'); lp.className='loupe'; fig.appendChild(lp); }
       if(!S.loupe && S.sort==='orig') wireDrag(fig, i);
       grid.appendChild(fig);
@@ -413,6 +488,37 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     redraw(); return wrap;
   }
 
+  // Read-only judge verdict (from the Vision LLM Judge node) — separate from the user's review.
+  function judgeColor(r){
+    r=Math.max(0,Math.min(1,r||0));
+    const stops=[[0,[192,57,43]],[0.5,[230,170,20]],[1,[39,174,96]]];
+    for(let k=0;k<stops.length-1;k++){ const [t0,c0]=stops[k], [t1,c1]=stops[k+1];
+      if(r<=t1||t1===1){ const f=t1===t0?0:(r-t0)/(t1-t0);
+        const c=c0.map((a,i)=>Math.round(a+(c1[i]-a)*f)); return `rgb(${c[0]},${c[1]},${c[2]})`; } }
+    return 'rgb(39,174,96)';
+  }
+  function buildJudge(it){
+    const j=it.judge; if(!j) return null;
+    const max=(+j.score_max)||5, score=(+j.score)||0, ratio=max?score/max:0;
+    const wrap=document.createElement('div'); wrap.className='judge';
+    const head=document.createElement('span'); head.textContent='🤖'; wrap.appendChild(head);
+    const filled=Math.max(0,Math.min(5,Math.round(ratio*5)));
+    const stars=document.createElement('span'); stars.className='judge-stars';
+    stars.textContent='★'.repeat(filled)+'☆'.repeat(5-filled); wrap.appendChild(stars);
+    const badge=document.createElement('span'); badge.className='judge-badge';
+    badge.textContent=`${score}/${max}`; badge.style.color=judgeColor(ratio); wrap.appendChild(badge);
+    if(Array.isArray(j.tags)&&j.tags.length){ const tw=document.createElement('span'); tw.className='judge-tags';
+      j.tags.forEach(t=>{ const c=document.createElement('span'); c.className='judge-tag'; c.textContent=t; tw.appendChild(c); }); wrap.appendChild(tw); }
+    if(j.comment){ const cm=document.createElement('div'); cm.className='judge-comment'; cm.textContent=j.comment; wrap.appendChild(cm); }
+    return wrap;
+  }
+  function judgeLine(it){
+    const j=it.judge; if(!j) return '';
+    const max=(+j.score_max)||5;
+    const tags=(Array.isArray(j.tags)&&j.tags.length)?' · '+j.tags.join(', '):'';
+    return `🤖 ★${(+j.score)||0}/${max}${tags}`+(j.comment?' — '+j.comment:'');
+  }
+
   function renderPair(){
     const A=items[S.a], B=items[S.b];
     const surf=document.createElement('div'); surf.className='surface bg-'+(S.mode==='diff'?'dark':S.bg);
@@ -429,23 +535,31 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     if(B.band) tagR.style.background=B.band;
     box.appendChild(tagL); box.appendChild(tagR);
 
+    const loupeLayers=[{src:A.src}];
     if(S.mode==='slider'){
       let pos=50;
       const div=document.createElement('div'); div.className='divider';
       const setPos=p=>{ pos=clamp(p,0,100); over.style.clipPath=`inset(0 0 0 ${pos}%)`; div.style.left=pos+'%'; };
       box.appendChild(div); setPos(50);
-      const drag=e=>{ const r=box.getBoundingClientRect(); const cx=e.touches?e.touches[0].clientX:e.clientX; setPos((cx-r.left)/r.width*100); };
-      box.onmousedown=e=>{ e.preventDefault(); document.body.classList.add('dragging'); drag(e);
-        const mv=ev=>{ev.preventDefault();drag(ev);};
-        const up=()=>{ document.body.classList.remove('dragging'); document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); };
-        document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up); };
-      box.ontouchmove=e=>{ e.preventDefault(); drag(e); };
+      if(!S.loupe){  // the loupe uses the pointer, so dragging is disabled while it's on
+        const drag=e=>{ const r=box.getBoundingClientRect(); const cx=e.touches?e.touches[0].clientX:e.clientX; setPos((cx-r.left)/r.width*100); };
+        box.onmousedown=e=>{ e.preventDefault(); document.body.classList.add('dragging'); drag(e);
+          const mv=ev=>{ev.preventDefault();drag(ev);};
+          const up=()=>{ document.body.classList.remove('dragging'); document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); };
+          document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up); };
+        box.ontouchmove=e=>{ e.preventDefault(); drag(e); };
+      }
+      // in the loupe, split the over layer at the image's mid-line
+      loupeLayers.push({src:B.src, apply:(d,c)=>{ const x=clamp((0.5-c.rx)*c.w*c.Z + c.SZ/2, 0, c.SZ); d.style.clipPath=`inset(0 0 0 ${x}px)`; }});
     } else if(S.mode==='opacity'){
       over.style.opacity=S.opacity/100;
+      loupeLayers.push({src:B.src, apply:(d)=>{ d.style.opacity=S.opacity/100; }});
     } else if(S.mode==='diff'){
       over.style.mixBlendMode='difference';
+      loupeLayers.push({src:B.src, apply:(d)=>{ d.style.mixBlendMode='difference'; }});
     }
     wrap.appendChild(box); surf.appendChild(wrap);
+    if(S.loupe) wireBoxLoupe(box, loupeLayers);
     if(A.prompt||B.prompt){
       const pp=document.createElement('div'); pp.className='pairprompt';
       const da=document.createElement('div'); da.textContent='A: '+(A.prompt||'—');
@@ -464,6 +578,18 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       const tb=document.createElement('div'); tb.textContent='B: ⏱ '+(B.time||'—');
       pt.appendChild(ta); pt.appendChild(tb); surf.appendChild(pt);
     }
+    if(A.metrics||B.metrics){
+      const pm=document.createElement('div'); pm.className='pairmetric';
+      const ma=document.createElement('div'); ma.textContent='A: ◈ '+(A.metrics||'—');
+      const mb=document.createElement('div'); mb.textContent='B: ◈ '+(B.metrics||'—');
+      pm.appendChild(ma); pm.appendChild(mb); surf.appendChild(pm);
+    }
+    if(A.judge||B.judge){
+      const pj=document.createElement('div'); pj.className='pairjudge';
+      const ja=document.createElement('div'); ja.textContent='A: '+(judgeLine(A)||'—');
+      const jb=document.createElement('div'); jb.textContent='B: '+(judgeLine(B)||'—');
+      pj.appendChild(ja); pj.appendChild(jb); surf.appendChild(pj);
+    }
     stage.innerHTML=''; stage.appendChild(surf);
   }
 
@@ -474,11 +600,11 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     const wrap=document.createElement('div'); wrap.className='viewwrap';
     const box=document.createElement('div'); box.className='vbox';
     const img=document.createElement('img'); img.className='base'; img.src=it.src;
-    img.style.cursor='pointer'; img.title='click to flip A↔B';
-    img.onclick=toggleFlip;
+    if(!S.loupe){ img.style.cursor='pointer'; img.title='click to flip A↔B'; img.onclick=toggleFlip; }
     box.appendChild(img);
     const tag=document.createElement('div'); tag.className='tag l'; tag.textContent=S.flipB?'B':'A'; box.appendChild(tag);
     wrap.appendChild(box); surf.appendChild(wrap);
+    if(S.loupe) wireBoxLoupe(box, [{src:it.src}]);
     const cap=document.createElement('div'); cap.className='cap';
     cap.textContent=(S.flipB?'B: ':'A: ')+(it.caption||('image '+(idx+1)));
     if(it.color) cap.style.color=it.color;
@@ -488,6 +614,11 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     if(it.time){ const tm=document.createElement('div'); tm.className='time';
       tm.style.maxWidth='1000px'; tm.style.margin='6px auto 0'; tm.style.textAlign='center';
       tm.textContent='⏱ '+it.time; surf.appendChild(tm); }
+    if(it.metrics){ const mt=document.createElement('div'); mt.className='metric';
+      mt.style.maxWidth='1000px'; mt.style.margin='6px auto 0'; mt.style.textAlign='center';
+      mt.textContent='◈ '+it.metrics; surf.appendChild(mt); }
+    { const jb=buildJudge(it); if(jb){ jb.style.maxWidth='1000px'; jb.style.margin='6px auto 0';
+        jb.style.justifyContent='center'; jb.style.borderTop='none'; surf.appendChild(jb); } }
     if(it.prompt){ const pr=document.createElement('div'); pr.className='prompt';
       pr.style.maxWidth='1000px'; pr.style.margin='8px auto 0'; pr.style.borderTop='none';
       pr.textContent=it.prompt; surf.appendChild(pr); }
@@ -531,13 +662,42 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     }, {passive:false});
   }
 
+  // Loupe for the pair / flip modes. `layers` is [{src, apply?}] painted bottom→top inside the
+  // lens; apply(el, {rx,ry,w,h,Z,SZ}) sets the mode's compositing (slider clip / opacity / blend).
+  function wireBoxLoupe(box, layers){
+    const ref=box.querySelector('img.base') || box.querySelector('img'); if(!ref) return;
+    const lp=document.createElement('div'); lp.className='loupe'; box.appendChild(lp);
+    const els=layers.map(L=>{ const d=document.createElement('div'); d.className='loupe-layer';
+      d.style.backgroundImage=`url(${L.src})`; lp.appendChild(d); return d; });
+    let lastRx=null,lastRy=null;
+    const show=(rx,ry)=>{ lastRx=rx; lastRy=ry; const Z=S.loupeZoom, SZ=S.loupeSize, w=ref.clientWidth, h=ref.clientHeight;
+      if(!w||!h) return;
+      lp.style.width=SZ+'px'; lp.style.height=SZ+'px'; lp.style.display='block';
+      lp.style.left=(rx*w-SZ/2)+'px'; lp.style.top=(ry*h-SZ/2)+'px';
+      els.forEach((d,i)=>{ d.style.clipPath=''; d.style.opacity=''; d.style.mixBlendMode='';
+        d.style.backgroundSize=(w*Z)+'px '+(h*Z)+'px';
+        d.style.backgroundPosition=`-${rx*w*Z-SZ/2}px -${ry*h*Z-SZ/2}px`;
+        if(layers[i].apply) layers[i].apply(d,{rx,ry,w,h,Z,SZ}); });
+      info.style.display='block'; info.textContent=`zoom ×${S.loupeZoom.toFixed(1)} · ⌀${S.loupeSize}px`;
+    };
+    const hide=()=>{ lp.style.display='none'; info.style.display='none'; };
+    ref.style.cursor='crosshair'; ref.onclick=null;
+    box.onmousemove=e=>{ const r=ref.getBoundingClientRect(); show((e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height); };
+    box.onmouseleave=hide;
+    box.addEventListener('wheel', e=>{ if(!S.loupe) return; e.preventDefault();
+      if(e.ctrlKey||e.altKey) S.loupeSize=clamp(S.loupeSize - Math.sign(e.deltaY)*16, 60, 480);
+      else S.loupeZoom=clamp(S.loupeZoom - Math.sign(e.deltaY)*0.25, 1.2, 10);
+      if(lastRx!=null) show(lastRx,lastRy); }, {passive:false});
+  }
+
   // lightbox
-  const lb=$('#lightbox'), lbImg=lb.querySelector('img'), lbCap=lb.querySelector('.lbcap'), lbProm=lb.querySelector('.lbprompt'), lbSet=lb.querySelector('.lbsettings'), lbTime=lb.querySelector('.lbtime'); let lbI=0;
+  const lb=$('#lightbox'), lbImg=lb.querySelector('img'), lbCap=lb.querySelector('.lbcap'), lbProm=lb.querySelector('.lbprompt'), lbSet=lb.querySelector('.lbsettings'), lbTime=lb.querySelector('.lbtime'), lbMet=lb.querySelector('.lbmetric'); let lbI=0;
   function lbShow(){ const it=items[lbI]; lbImg.src=it.src; lbCap.textContent=it.caption||('image '+(lbI+1));
     lbCap.style.color=it.color||''; lbCap.style.background=it.band||'';
     lbProm.textContent=it.prompt||''; lbProm.style.display=it.prompt?'':'none';
     lbSet.textContent=it.settings||''; lbSet.style.display=it.settings?'':'none';
-    lbTime.textContent=it.time?('⏱ '+it.time):''; lbTime.style.display=it.time?'':'none'; }
+    lbTime.textContent=it.time?('⏱ '+it.time):''; lbTime.style.display=it.time?'':'none';
+    lbMet.textContent=it.metrics?('◈ '+it.metrics):''; lbMet.style.display=it.metrics?'':'none'; }
   function openLightbox(i){ lbI=i; lbShow(); lb.style.display='flex'; }
   function lbNav(d){ lbI=(lbI+d+items.length)%items.length; lbShow(); }
   lb.querySelector('.prev').onclick=e=>{e.stopPropagation();lbNav(-1);};
@@ -546,6 +706,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   lbImg.onclick=e=>e.stopPropagation();
 
   document.addEventListener('keydown',e=>{
+    if(help.style.display==='flex'){ if(e.key==='Escape') help.style.display='none'; return; }
     if(lb.style.display==='flex'){ if(e.key==='Escape')lb.style.display='none'; if(e.key==='ArrowLeft')lbNav(-1); if(e.key==='ArrowRight')lbNav(1); return; }
     if(S.mode==='flip' && (e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' ')){ e.preventDefault(); toggleFlip(); }
   });
@@ -556,6 +717,10 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   $('#settingsBtn').classList.toggle('active', S.settings);
   document.body.classList.toggle('hide-time', !S.time);
   $('#timeBtn').classList.toggle('active', S.time);
+  document.body.classList.toggle('hide-metrics', !S.metrics);
+  $('#metricsBtn').classList.toggle('active', S.metrics);
+  document.body.classList.toggle('hide-judge', !S.judge);
+  $('#judgeBtn').classList.toggle('active', S.judge);
   syncHiddenBtn();
   syncCtl(); render();
 })();

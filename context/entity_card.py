@@ -20,6 +20,7 @@ class EntityCard:
             "required": {
                 "name": ("STRING", {"default": "", "tooltip": "The thing's name / label (e.g. 'Cafe', 'Bronze pitcher', 'Old town hall'). Becomes the card heading the LLM binds the description to. Empty = description is emitted on its own, with no heading."}),
                 "description": ("STRING", {"multiline": True, "default": "", "tooltip": "Free-form description of the entity — looks, materials, mood, signature details… Written verbatim under the heading. Empty (with an empty name) => nothing is emitted, so Context Collector skips this card."}),
+                "save_preset_as": ("STRING", {"default": "", "tooltip": "Type a name to save this card to the Card Presets library on the next run. Works whether the fields are typed OR wired in from outside (saved at run time). Empty = don't save."}),
             },
         }
 
@@ -28,21 +29,28 @@ class EntityCard:
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
-    def run(self, name="", description=""):
+    def run(self, name="", description="", save_preset_as=""):
         name = (name or "").strip()
         description = (description or "").strip()
 
-        # Nothing filled in -> emit an empty string so Context Collector skips this card.
         if not name and not description:
-            return ("",)
-        # No name -> just the free-form text (a loose note, no heading to bind to).
-        if not name:
-            return (description,)
+            result = ""
+        elif not name:
+            result = description  # no name -> just the free-form text (no heading to bind to)
+        else:
+            result = f"### {name}" + (("\n" + description) if description else "")
 
-        block = f"### {name}"
-        if description:
-            block += "\n" + description
-        return (block,)
+        # Backend save: captures values resolved at run time (typed OR wired in).
+        sp = (save_preset_as or "").strip()
+        if sp and (name or description):
+            try:
+                from ..card_presets.store import upsert
+                upsert(sp, "entity", {"name": name, "description": description})
+                print(f"[EntityCard] saved preset '{sp}'")
+            except Exception as e:
+                print(f"[EntityCard] save preset '{sp}' failed: {e}")
+
+        return (result,)
 
 
 NODE_CLASS_MAPPINGS = {"EntityCard": EntityCard}

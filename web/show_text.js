@@ -12,6 +12,30 @@ import { api } from "../../scripts/api.js";
 const CLASS = "KinburgShowText";
 const wv = (node, name) => node.widgets?.find((w) => w.name === name);
 
+// Hide the serialized `saved_text` carrier widget (single-line, so no stray DOM textarea).
+function hideWidget(node, name) {
+  const w = wv(node, name);
+  if (!w) return;
+  w.type = "hidden";
+  w.computeSize = () => [0, -4];
+  w.hidden = true;
+}
+
+// The node text lives in the serialized `saved_text` widget (so it reaches run() and the saved
+// workflow); properties.kb_text is kept as a display mirror (and for migrating old workflows).
+function getText(node) {
+  const w = wv(node, "saved_text");
+  if (w && typeof w.value === "string") return w.value;
+  return node.properties?.kb_text || "";
+}
+function setText(node, t) {
+  t = t == null ? "" : String(t);
+  node.properties = node.properties || {};
+  node.properties.kb_text = t;
+  const w = wv(node, "saved_text");
+  if (w) w.value = t;
+}
+
 // ---------------------------------------------------------------- minimal markdown renderer
 function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -142,12 +166,12 @@ function buildDisplay() {
 
 // ---------------------------------------------------------------- actions
 function copyText(node) {
-  const text = node.properties?.kb_text || "";
+  const text = getText(node);
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(() => {});
 }
 
 async function saveToDisk(node) {
-  const text = node.properties?.kb_text || "";
+  const text = getText(node);
   const path = (wv(node, "save_path")?.value || "").trim();
   if (!path) { alert("Set a save_path first (e.g. notes/report — it's saved as .md under ComfyUI/output)."); return; }
   try {
@@ -169,17 +193,21 @@ function setupNode(node) {
   injectStyle();
   node.properties = node.properties || {};
   if (node.properties.kb_text == null) node.properties.kb_text = "";
+  hideWidget(node, "saved_text");
+  // Seed the display mirror from the carrier if it already holds text (e.g. node cloned).
+  if (getText(node) && !node.properties.kb_text) node.properties.kb_text = getText(node);
 
   const { root, ta, pv, counter } = buildDisplay();
 
   const setCounter = (text) => {
     const n = text.length;
     const lines = text ? text.split(/\r\n|\r|\n/).length : 0;
-    counter.textContent = `${n} chars · ${lines} lines`;
+    const frozen = wv(node, "use_saved_text")?.value ? " · 🔒 saved" : "";
+    counter.textContent = `${n} chars · ${lines} lines${frozen}`;
   };
 
   const render = () => {
-    const text = node.properties.kb_text || "";
+    const text = getText(node);
     const isMd = wv(node, "markdown")?.value ?? true;
     if (isMd) {
       pv.innerHTML = renderMarkdown(text);
@@ -195,7 +223,7 @@ function setupNode(node) {
   node._kbRender = render;
 
   // Editing in raw mode updates the stored text (no re-render, so typing isn't interrupted).
-  ta.addEventListener("input", () => { node.properties.kb_text = ta.value; setCounter(ta.value); });
+  ta.addEventListener("input", () => { setText(node, ta.value); setCounter(ta.value); });
   // Keep canvas pan/zoom from eating interactions with the field.
   ta.addEventListener("pointerdown", (e) => e.stopPropagation());
   root.addEventListener("wheel", (e) => e.stopPropagation());
@@ -205,9 +233,12 @@ function setupNode(node) {
   node.addWidget("button", "📋 Copy", null, () => copyText(node), { serialize: false });
   node.addDOMWidget("kb_display", "kinburg_showtext", root, { serialize: false });
 
-  // Re-render when the markdown toggle flips.
+  // Re-render when the markdown toggle flips, or when the freeze toggle changes (updates the
+  // "🔒 saved" hint; the text itself is unchanged).
   const md = wv(node, "markdown");
   if (md) { const prev = md.callback; md.callback = function (...a) { const r = prev?.apply(this, a); render(); return r; }; }
+  const ust = wv(node, "use_saved_text");
+  if (ust) { const prev = ust.callback; ust.callback = function (...a) { const r = prev?.apply(this, a); render(); return r; }; }
 
   render();
   const w = Math.max(node.size?.[0] || 0, 340);
@@ -226,21 +257,27 @@ app.registerExtension({
       return r;
     };
 
-    // Fresh execution output → store it and re-render.
+    // Fresh execution output → store it (into the carrier + mirror) and re-render.
     const onExecuted = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function (message) {
       onExecuted?.apply(this, arguments);
       const t = message?.kinburg_showtext?.[0];
       if (t == null) return;
-      this.properties = this.properties || {};
-      this.properties.kb_text = String(t);
+      setText(this, t);
       this._kbRender?.();
     };
 
-    // Workflow load / tab switch restores properties → re-render from them.
+    // Workflow load / tab switch: reconcile the serialized carrier with the display mirror, then
+    // re-render. Old workflows (pre-carrier) only have properties.kb_text → seed the widget from
+    // it so their saved text still drives the output.
     const onConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {
       const r = onConfigure?.apply(this, arguments);
+      const w = wv(this, "saved_text");
+      if (w) {
+        if (w.value) { this.properties = this.properties || {}; this.properties.kb_text = w.value; }
+        else if (this.properties?.kb_text) { w.value = this.properties.kb_text; }
+      }
       this._kbRender?.();
       return r;
     };

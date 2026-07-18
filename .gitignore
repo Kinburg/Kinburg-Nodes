@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 /.claude/
 /prompt_presets/data/
+/card_presets/data/

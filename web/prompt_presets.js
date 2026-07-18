@@ -1,18 +1,29 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-// Prompt Presets — five preset dropdowns (camera/aesthetics/light/medium/background).
-// Dropdown values are served live from the backend store, so presets the user adds appear
-// without an object_info reload. A frontend-only "setup" selector applies a saved
-// combination; buttons add presets, save the current selection as a setup, and manage both.
+// Prompt Presets — five FLEXIBLE slots. Each slot has two dropdowns: a category selector
+// (cat_i) and a preset selector (preset_i, the presets of the chosen category). Categories and
+// presets are served live from the backend store, so edits appear without an object_info
+// reload. Buttons add presets, manage categories, save the current slots as a "setup", and
+// manage setups/custom presets. Output slot labels follow each slot's chosen category.
 
 const CLASS = "PromptPresets";
 const NONE = "🚫 None";
 
 // One shared cache of the store; refreshed after every edit and reused by all node instances.
 let STORE = { none: NONE, order: ["camera", "aesthetics", "light", "medium", "background"],
-              categories: {}, builtins: {}, setups: {} };
-const _label = { camera: "Camera", aesthetics: "Aesthetics", light: "Light", medium: "Medium", background: "Background" };
+              categories: {}, builtins: {}, builtin_cats: [], setups: {}, n_slots: 5 };
+
+const N = () => STORE.n_slots || 5;
+const catList = () => STORE.order || [];
+const presetOptions = (cat) => [NONE, ...Object.keys(STORE.categories?.[cat] || {})];
+const setupNames = () => Object.keys(STORE.setups || {}).sort();
+const isBuiltinCat = (c) => (STORE.builtin_cats || []).includes(c);
+const displayCat = (c) => (c ? c.charAt(0).toUpperCase() + c.slice(1) : c);
+
+const wv = (node, name) => node.widgets?.find((w) => w.name === name);
+const catW = (node, i) => wv(node, `cat_${i}`);
+const presetW = (node, i) => wv(node, `preset_${i}`);
 
 async function refreshStore() {
   try {
@@ -37,23 +48,47 @@ async function postJSON(path, body) {
   return j;
 }
 
-const catOptions = (cat) => [NONE, ...Object.keys(STORE.categories?.[cat] || {})];
-const setupNames = () => Object.keys(STORE.setups || {}).sort();
+// Set the preset dropdown's options from its slot's current category. Keep an unknown selection
+// (e.g. a preset just deleted) visible instead of dropping it.
+function syncPreset(node, i) {
+  const cw = catW(node, i), pw = presetW(node, i);
+  if (!pw) return;
+  const opts = presetOptions(cw?.value);
+  if (pw.value && !opts.includes(pw.value)) opts.push(pw.value);
+  if (!pw.options) pw.options = {};
+  pw.options.values = opts;
+}
 
-const wv = (node, name) => node.widgets?.find((w) => w.name === name);
+// The output slot label follows the slot's chosen category.
+function syncOutputLabel(node, i) {
+  const out = node.outputs?.[i - 1];
+  if (out) out.name = displayCat(catW(node, i)?.value) || `slot_${i}`;
+}
 
-// Push the current store into one node's dropdowns. We overwrite `options.values` with a
-// fresh array (rather than relying on a getter) so added/removed presets show up immediately,
-// regardless of how the frontend reads combo values.
+// A slot's category changed: reset the preset if it no longer exists in the new category.
+function onCatChanged(node, i) {
+  const cw = catW(node, i), pw = presetW(node, i);
+  if (pw) {
+    const opts = presetOptions(cw?.value);
+    if (!opts.includes(pw.value)) pw.value = NONE;
+  }
+  syncPreset(node, i);
+  syncOutputLabel(node, i);
+  node.setDirtyCanvas(true, true);
+}
+
+// Push the whole store into one node's dropdowns + output labels.
 function syncNode(node) {
-  for (const cat of STORE.order) {
-    const w = wv(node, cat);
-    if (!w) continue;
-    const opts = catOptions(cat);
-    // Keep an unknown selection (e.g. a preset just deleted) visible instead of dropping it.
-    if (w.value && !opts.includes(w.value)) opts.push(w.value);
-    if (!w.options) w.options = {};
-    w.options.values = opts;
+  for (let i = 1; i <= N(); i++) {
+    const cw = catW(node, i);
+    if (cw) {
+      const opts = [...catList()];
+      if (cw.value && !opts.includes(cw.value)) opts.push(cw.value); // keep a deleted cat visible
+      if (!cw.options) cw.options = {};
+      cw.options.values = opts;
+    }
+    syncPreset(node, i);
+    syncOutputLabel(node, i);
   }
   const s = wv(node, "⚙ setup");
   if (s) {
@@ -64,23 +99,27 @@ function syncNode(node) {
   node.setDirtyCanvas(true, true);
 }
 
-// Re-sync every PromptPresets node in the graph (after any store edit, here or elsewhere).
 function refreshAllNodes() {
   for (const n of app.graph?._nodes || []) {
     if (n.comfyClass === CLASS || n.type === CLASS) syncNode(n);
   }
 }
 
-// Apply a saved setup's preset names onto this node's category dropdowns.
+// Apply a saved setup (a per-slot list of {cat, preset}) onto this node's slots.
 function applySetup(node, name) {
   const setup = STORE.setups?.[name];
-  if (!setup) return;
-  for (const cat of STORE.order) {
-    const w = wv(node, cat);
-    if (!w) continue;
-    const want = setup[cat] || NONE;
-    w.value = catOptions(cat).includes(want) ? want : NONE;
-    w.callback?.(w.value);
+  if (!Array.isArray(setup)) return;
+  for (let i = 1; i <= N(); i++) {
+    const slot = setup[i - 1];
+    if (!slot) continue;
+    const cw = catW(node, i), pw = presetW(node, i);
+    if (cw && catList().includes(slot.cat)) cw.value = slot.cat;
+    if (pw) {
+      const opts = presetOptions(cw?.value);
+      pw.value = opts.includes(slot.preset) ? slot.preset : NONE;
+    }
+    syncPreset(node, i);
+    syncOutputLabel(node, i);
   }
   node.setDirtyCanvas(true, true);
 }
@@ -144,12 +183,17 @@ function footer(parent, ...buttons) {
   parent.appendChild(f);
 }
 
+function catSelect() {
+  const sel = styledInput(document.createElement("select"));
+  catList().forEach((c) => { const o = document.createElement("option"); o.value = c; o.textContent = displayCat(c); sel.appendChild(o); });
+  return sel;
+}
+
 // ---------------------------------------------------------------- dialogs
 function addPresetDialog(node) {
   modal("➕ Add / edit preset", (box, close) => {
     const catRow = row(box, "Category");
-    const sel = styledInput(document.createElement("select"));
-    STORE.order.forEach((c) => { const o = document.createElement("option"); o.value = c; o.textContent = _label[c] || c; sel.appendChild(o); });
+    const sel = catSelect();
     catRow.appendChild(sel);
 
     const nameRow = row(box, "Preset name");
@@ -162,7 +206,6 @@ function addPresetDialog(node) {
     text.rows = 4; text.placeholder = "text added to your prompt when this preset is chosen";
     textRow.appendChild(text);
 
-    // Pre-fill when an existing name is typed for the chosen category.
     const prefill = () => {
       const t = STORE.categories?.[sel.value]?.[name.value.trim()];
       if (t != null) text.value = t;
@@ -183,25 +226,67 @@ function addPresetDialog(node) {
   });
 }
 
+function categoriesDialog(node) {
+  const render = () => modal("🗂 Manage categories", (box, close) => {
+    const addRow = document.createElement("div");
+    addRow.style.cssText = "display:flex;gap:6px;margin-bottom:12px";
+    const inp = styledInput(document.createElement("input"));
+    inp.placeholder = "new category name";
+    addRow.appendChild(inp);
+    addRow.appendChild(button("Add", async () => {
+      try { await postJSON("/kinburg/presets/category", { action: "add", name: inp.value }); refreshAllNodes(); close(); render(); }
+      catch (e) { alert(e.message); }
+    }, true));
+    box.appendChild(addRow);
+
+    catList().forEach((c) => {
+      const r = document.createElement("div");
+      r.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #333";
+      const s = document.createElement("span");
+      s.textContent = isBuiltinCat(c) ? `🔒 ${displayCat(c)} (built-in)` : displayCat(c);
+      s.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+      r.appendChild(s);
+      if (!isBuiltinCat(c)) {
+        r.appendChild(button("Rename", async () => {
+          const nn = window.prompt(`Rename category "${c}" to:`, c);
+          if (nn == null || !nn.trim() || nn.trim() === c) return;
+          try { await postJSON("/kinburg/presets/category", { action: "rename", name: c, new_name: nn.trim() }); refreshAllNodes(); close(); render(); }
+          catch (e) { alert(e.message); }
+        }));
+        r.appendChild(button("Delete", async () => {
+          if (!window.confirm(`Delete category "${c}" and its custom presets?`)) return;
+          try { await postJSON("/kinburg/presets/category", { action: "delete", name: c }); refreshAllNodes(); close(); render(); }
+          catch (e) { alert(e.message); }
+        }));
+      }
+      box.appendChild(r);
+    });
+
+    footer(box, button("Close", close, true));
+  });
+  render();
+}
+
 function saveSetupDialog(node) {
-  modal("💾 Save current selection as a setup", (box, close) => {
+  modal("💾 Save current slots as a setup", (box, close) => {
     const nameRow = row(box, "Setup name");
     const name = styledInput(document.createElement("input"));
     name.placeholder = "e.g. Cinematic portrait";
     nameRow.appendChild(name);
 
+    const slots = [];
+    for (let i = 1; i <= N(); i++) slots.push({ cat: catW(node, i)?.value ?? "", preset: presetW(node, i)?.value ?? NONE });
+
     const preview = document.createElement("div");
     preview.style.cssText = "opacity:0.75;font-size:12px;line-height:1.6;margin-top:4px";
-    preview.innerHTML = STORE.order.map((c) => `<b>${_label[c]}:</b> ${wv(node, c)?.value ?? NONE}`).join("<br>");
+    preview.innerHTML = slots.map((s) => `<b>${displayCat(s.cat)}:</b> ${s.preset}`).join("<br>");
     box.appendChild(preview);
 
     footer(box,
       button("Cancel", close),
       button("Save", async () => {
-        const values = {};
-        for (const c of STORE.order) values[c] = wv(node, c)?.value ?? NONE;
         try {
-          await postJSON("/kinburg/presets/setup", { name: name.value, values });
+          await postJSON("/kinburg/presets/setup", { name: name.value, slots });
           const s = wv(node, "⚙ setup"); if (s) s.value = name.value.trim();
           refreshAllNodes();
           close();
@@ -232,12 +317,12 @@ function manageDialog(node) {
 
     section("Custom presets");
     let any = false;
-    for (const cat of STORE.order) {
+    for (const cat of catList()) {
       const builtins = new Set(STORE.builtins?.[cat] || []);
       for (const nm of Object.keys(STORE.categories?.[cat] || {})) {
         if (builtins.has(nm)) continue; // built-ins can't be deleted
         any = true;
-        line(`${_label[cat]} — ${nm}`, async () => {
+        line(`${displayCat(cat)} — ${nm}`, async () => {
           try { await postJSON("/kinburg/presets/preset", { category: cat, name: nm, delete: true }); refreshAllNodes(); close(); render(); } catch (e) { alert(e.message); }
         });
       }
@@ -259,8 +344,8 @@ app.registerExtension({
   async nodeCreated(node) {
     if (node.comfyClass !== CLASS && node.type !== CLASS) return;
 
-    // Frontend-only "setup" selector, placed at the very top. serialize:false keeps it out
-    // of the prompt/workflow (it only drives the category dropdowns).
+    // Frontend-only "setup" selector at the very top. serialize:false keeps it out of the
+    // prompt/workflow (it only drives the slot dropdowns).
     const setupW = node.addWidget("combo", "⚙ setup", "—",
       (v) => { if (v && v !== "—" && !app.configuringGraph) applySetup(node, v); },
       { values: ["—"], serialize: false });
@@ -269,10 +354,23 @@ app.registerExtension({
     if (i > 0) { node.widgets.splice(i, 1); node.widgets.unshift(setupW); }
 
     node.addWidget("button", "➕ Add preset", null, () => addPresetDialog(node), { serialize: false });
+    node.addWidget("button", "🗂 Categories", null, () => categoriesDialog(node), { serialize: false });
     node.addWidget("button", "💾 Save setup", null, () => saveSetupDialog(node), { serialize: false });
     node.addWidget("button", "🗑 Manage", null, () => manageDialog(node), { serialize: false });
 
-    // Populate the dropdowns from the cache; fetch first only if it hasn't loaded yet.
+    // Wrap each category dropdown's callback so picking a category refreshes its preset list
+    // and the output label.
+    for (let s = 1; s <= N(); s++) {
+      const cw = catW(node, s);
+      if (!cw) continue;
+      const orig = cw.callback;
+      cw.callback = function () { const r = orig?.apply(this, arguments); onCatChanged(node, s); return r; };
+    }
+
+    // Re-sync after a saved workflow restores widget values (nodeCreated runs before that).
+    const origConfigure = node.onConfigure;
+    node.onConfigure = function () { const r = origConfigure?.apply(this, arguments); syncNode(this); return r; };
+
     if (!Object.keys(STORE.categories || {}).length) refreshStore().then(() => syncNode(node));
     syncNode(node);
 

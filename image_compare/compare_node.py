@@ -4,9 +4,11 @@ import re
 import json
 import uuid
 import base64
+import datetime
 import urllib.parse
 
 from ..util.separators import BLOCK_SEP
+from ..util.paths import first_free
 
 # Heavy / ComfyUI-only imports are guarded so the package still imports — and the
 # Comfy Registry can enumerate its nodes — in an environment without ComfyUI present.
@@ -22,10 +24,15 @@ NODE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIEWER_TEMPLATE = os.path.join(NODE_DIR, "viewer.html")
 
 _ALLOWED_HTML = set()
+_ALLOWED_DIRS = {}   # token -> folder abspath (portable comparison bundles)
 
 
 def _register_html(path):
     _ALLOWED_HTML.add(os.path.normcase(os.path.abspath(path)))
+
+
+def _register_dir(token, path):
+    _ALLOWED_DIRS[token] = os.path.abspath(path)
 
 
 try:
@@ -39,6 +46,21 @@ try:
         if not p or key not in _ALLOWED_HTML or not key.endswith(".html") or not os.path.isfile(p):
             return web.Response(status=404, text="not found")
         return web.FileResponse(p, headers={"Content-Type": "text/html; charset=utf-8"})
+
+    @PromptServer.instance.routes.get("/image_compare_dir/{token}/{tail:.*}")
+    async def _serve_compare_dir(request):
+        # Serve any file inside a registered portable bundle folder, so the page's relative
+        # image paths ("images/000.png") resolve when opened in-app.
+        base = _ALLOWED_DIRS.get(request.match_info.get("token", ""))
+        tail = request.match_info.get("tail", "") or "index.html"
+        if not base or not os.path.isdir(base):
+            return web.Response(status=404, text="not found")
+        target = os.path.normpath(os.path.join(base, tail))
+        base_n, target_n = os.path.normcase(base), os.path.normcase(target)
+        if not (target_n == base_n or target_n.startswith(base_n + os.sep)) or not os.path.isfile(target):
+            return web.Response(status=404, text="not found")
+        hdrs = {"Content-Type": "text/html; charset=utf-8"} if target.lower().endswith(".html") else None
+        return web.FileResponse(target, headers=hdrs)
 except Exception as e:  # pragma: no cover
     print(f"[ImageCompare] could not register web route: {e}")
 
@@ -258,6 +280,72 @@ def _time_to_seconds(raw):
     return total if matched else None
 
 
+def _psnr(x, y):
+    """PSNR in dB between two float arrays in [0,1] of the same shape. None if identical
+    (infinite)."""
+    mse = float(np.mean((x - y) ** 2))
+    if mse <= 1e-12:
+        return None
+    return round(float(10.0 * np.log10(1.0 / mse)), 2)
+
+
+def _ssim(a_pil, b_pil):
+    """Structural Similarity (0..1, higher = more similar) on the luminance channel, with a
+    Gaussian window — the standard formulation, in torch (no extra deps). Assumes equal size.
+    Returns None if the images are too small for a window."""
+    import torch
+    import torch.nn.functional as F
+
+    def gray(p):
+        arr = np.asarray(p.convert("L")).astype(np.float32) / 255.0
+        return torch.from_numpy(arr)[None, None]
+
+    x, y = gray(a_pil), gray(b_pil)
+    h, w = x.shape[-2:]
+    win = min(11, h, w)
+    if win % 2 == 0:
+        win -= 1
+    if win < 3:
+        return None
+    sigma = 1.5
+    coords = torch.arange(win, dtype=torch.float32) - (win - 1) / 2.0
+    g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+    g = g / g.sum()
+    window = (g[:, None] * g[None, :])[None, None]
+    c1, c2 = 0.01 ** 2, 0.03 ** 2
+    mu_x, mu_y = F.conv2d(x, window), F.conv2d(y, window)
+    mu_x2, mu_y2, mu_xy = mu_x * mu_x, mu_y * mu_y, mu_x * mu_y
+    var_x = F.conv2d(x * x, window) - mu_x2
+    var_y = F.conv2d(y * y, window) - mu_y2
+    cov = F.conv2d(x * y, window) - mu_xy
+    smap = ((2 * mu_xy + c1) * (2 * cov + c2)) / ((mu_x2 + mu_y2 + c1) * (var_x + var_y + c2))
+    return round(float(smap.mean().item()), 4)
+
+
+def _metrics_for(cand_pil, ref_pil):
+    """(ssim, psnr) of a candidate vs a reference; the reference is resized to the candidate's
+    size first (metrics need matching dimensions)."""
+    ref = ref_pil if ref_pil.size == cand_pil.size else ref_pil.resize(cand_pil.size, Image.Resampling.LANCZOS)
+    x = np.asarray(cand_pil.convert("RGB")).astype(np.float32) / 255.0
+    y = np.asarray(ref.convert("RGB")).astype(np.float32) / 255.0
+    psnr = _psnr(x, y)
+    try:
+        ssim = _ssim(cand_pil, ref)
+    except Exception as e:
+        print(f"[ImageCompare] SSIM failed: {e}")
+        ssim = None
+    return ssim, psnr
+
+
+def _metrics_str(ssim, psnr, is_ref=False):
+    parts = []
+    if ssim is not None:
+        parts.append(f"SSIM {ssim:.3f}")
+    parts.append("PSNR ∞" if psnr is None else f"PSNR {psnr:.1f} dB")
+    s = " · ".join(parts)
+    return (s + " (reference)") if is_ref else s
+
+
 def _server_port():
     try:
         from comfy.cli_args import args
@@ -275,13 +363,9 @@ def _server_port():
 
 
 def _unique_html_path(out_dir, prefix):
-    i = 1
-    while True:
-        name = f"{prefix}_{i:04d}.html"
-        path = os.path.join(out_dir, name)
-        if not os.path.exists(path):
-            return name, path
-        i += 1
+    _, base = first_free(out_dir, lambda k: f"{prefix}_{k:04d}", [".html"])
+    name = base + ".html"
+    return name, os.path.join(out_dir, name)
 
 
 # ----------------------------------------------------------------------------- node
@@ -305,10 +389,14 @@ class ImageCompare:
                 "show_prompts": ("BOOLEAN", {"default": False, "tooltip": "Initial visibility of prompts on the page (can be toggled there too)"}),
                 "times": ("STRING", {"forceInput": True, "tooltip": "Per-image generation time — one entry per line, aligned with the image batch (e.g. Stop Timer's 'elapsed' collected via Get Accumulator (texts) with a newline separator). Shown under each image and used for the grid's 'Time' sort. Strings like '12.34 s', '1m 30s', '890 ms' or '00:01:30' are parsed for sorting."}),
                 "output_dir": ("STRING", {"default": "", "tooltip": "Custom save folder (absolute path). Empty = ComfyUI output. A served copy is also written to output so 'Open comparison' keeps working."}),
+                "embed_images": ("BOOLEAN", {"default": False, "tooltip": "How the comparison is saved. Off (default): a portable FOLDER '<prefix>_<datetime>/' with a light index.html + an images/ subfolder (relative links) — open it offline, zip/share it, or open it in-app. On: a single self-contained .html with every image inlined as base64 (one file, much larger). Both open from the node's URL output."}),
                 "save_prompts_txt": ("BOOLEAN", {"default": False, "tooltip": "Save each prompt to a .txt file named like its image"}),
                 "settings_data": ("GEN_SETTINGS", {"tooltip": "Structured per-image settings from Generation Info Filter's 'settings_data' output. Rendered under each image (one '[Class] param: value' line per field; toggleable) and stored by field (EAV) when you 'Save run to report'."}),
                 "show_settings": ("BOOLEAN", {"default": True, "tooltip": "Initial visibility of settings on the page (can be toggled there too)"}),
                 "report_db": ("STRING", {"default": "", "tooltip": "SQLite file the page's 'Save run to report' button writes to. Empty = <output>/kinburg/reports.db. The value is shown (and editable) on the page."}),
+                "reference": ("IMAGE", {"tooltip": "Optional baseline to measure similarity against (e.g. the source of an upscale/img2img, or the fp16 output when checking a quantized model). When connected, SSIM + PSNR are computed for every image vs this reference and shown on the page (with a 'Similarity' sort)."}),
+                "reference_index": ("INT", {"default": -1, "min": -1, "max": 4096, "tooltip": "Used only when no 'reference' image is connected: 0-based index of the image IN THIS BATCH to use as the baseline (every image is measured against it). -1 = off (no metrics)."}),
+                "judge_data": ("STRING", {"forceInput": True, "tooltip": "Optional AI verdicts — wire the Vision LLM Judge's 'results_json' here. Each image gets a read-only judge section (stars / tags / comment), separate from your own review, with its own page toggle."}),
             },
         }
 
@@ -327,7 +415,8 @@ class ImageCompare:
             captions="", save_captioned_images=False,
             prompts="", show_prompts=False, times="",
             output_dir="", save_prompts_txt=False,
-            show_settings=True, settings_data="", report_db=""):
+            show_settings=True, settings_data="", report_db="", embed_images=False,
+            reference=None, reference_index=-1, judge_data=""):
         # INPUT_IS_LIST: every input arrives wrapped in a list. Unwrap the scalar widgets and
         # flatten the images (a batch or a list, possibly mixed sizes) into one list of PIL.
         title = _first(title, "Image comparison")
@@ -342,32 +431,54 @@ class ImageCompare:
         show_prompts = bool(_first(show_prompts, False))
         times = _first(times, "") or ""
         output_dir = _first(output_dir, "") or ""
+        embed_images = bool(_first(embed_images, False))
         save_prompts_txt = bool(_first(save_prompts_txt, False))
         show_settings = bool(_first(show_settings, True))
         settings_data = _first(settings_data, "") or ""
         report_db = _first(report_db, "") or ""
+        reference_index = int(_first(reference_index, -1))
+        judge_data = _first(judge_data, "") or ""
 
         pils = _images_to_pils(images)
         n = len(pils)
         if n == 0:
             return self._err("no images connected", [])
 
-        # Report prep: save clean per-image PNGs to a stable, run-scoped folder and gather a
-        # run_id + resolved DB path. The page's "Save run to report" button uses these; the
-        # node itself never writes to the DB.
+        # Where clean per-image PNGs live + how the page references them:
+        #  embed_images=False → a portable folder  <prefix>_<datetime>/  holding images/ + a light
+        #    index.html with RELATIVE src ("images/000.png"): self-contained — zip it, open the
+        #    html offline, or open it in-app (served via /image_compare_dir/<token>/).
+        #  embed_images=True  → pixels are inlined as base64 in a single .html; the clean PNGs
+        #    still go to the report tree so "Save run to report" works.
         comfy_out = folder_paths.get_output_directory()
         run_id = uuid.uuid4().hex[:12]
         report_db_resolved = report_db.strip() or os.path.join(comfy_out, "kinburg", "reports.db")
+        prefix = filename_prefix or "compare"
+        out_dir = output_dir.strip() or comfy_out
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except Exception as e:
+            return self._err(f"cannot create output_dir '{out_dir}': {e}", pils)
+
+        bundle_dir = ""
+        if embed_images:
+            imgdir = os.path.join(comfy_out, "kinburg", "report_images", run_id)
+        else:
+            stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            _, folder_name = first_free(
+                out_dir, lambda k, s=stamp: f"{prefix}_{s}" if k == 1 else f"{prefix}_{s}_{k}", [""])
+            bundle_dir = os.path.join(out_dir, folder_name)
+            imgdir = os.path.join(bundle_dir, "images")
+
         report_paths = []
         try:
-            rdir = os.path.join(comfy_out, "kinburg", "report_images", run_id)
-            os.makedirs(rdir, exist_ok=True)
+            os.makedirs(imgdir, exist_ok=True)
             for i, p in enumerate(pils):
-                rp = os.path.join(rdir, f"{i:03d}.png")
+                rp = os.path.join(imgdir, f"{i:03d}.png")
                 p.convert("RGB").save(rp)
                 report_paths.append(rp)
         except Exception as e:
-            print(f"[ImageCompare] could not save report images: {e}")
+            print(f"[ImageCompare] could not save images: {e}")
             report_paths = []
         report_paths = (report_paths + [""] * n)[:n]
 
@@ -406,12 +517,56 @@ class ImageCompare:
         sdata = (sdata + [[]] * n)[:n]
         setts = [_settings_block(fields) for fields in sdata]
 
+        # Similarity metrics (SSIM / PSNR) vs a reference — only when one is available: a connected
+        # `reference` image wins; otherwise `reference_index` picks one from the batch (-1 = off).
+        # The reference is resized to each candidate's size. Cheap (numpy/torch), no extra deps.
+        ref_pils = _images_to_pils(reference) if reference is not None else []
+        ref_pil = ref_pils[0] if ref_pils else None
+        ref_self = None
+        if ref_pil is None and 0 <= reference_index < n:
+            ref_pil, ref_self = pils[reference_index], reference_index
+        metrics_disp, m_ssim, m_psnr = [""] * n, [None] * n, [None] * n
+        if ref_pil is not None:
+            for i, p in enumerate(pils):
+                ss, ps = _metrics_for(p, ref_pil)
+                m_ssim[i], m_psnr[i] = ss, ps
+                metrics_disp[i] = _metrics_str(ss, ps, is_ref=(i == ref_self))
+
+        # Judge verdicts (Vision LLM Judge's results_json): parsed into a per-index map and shown
+        # as a read-only judge section on the page, separate from the user's own review controls.
+        try:
+            jraw = json.loads(judge_data) if isinstance(judge_data, str) and judge_data.strip() else []
+        except (ValueError, TypeError):
+            jraw = []
+        jmap = {}
+        if isinstance(jraw, list):
+            for v in jraw:
+                idx = v.get("index") if isinstance(v, dict) else None
+                if isinstance(idx, int) and not isinstance(idx, bool):
+                    jmap[idx] = {
+                        "score": v.get("score"),
+                        "score_max": v.get("score_max"),
+                        "tags": v.get("tags") if isinstance(v.get("tags"), list) else [],
+                        "comment": v.get("comment") if isinstance(v.get("comment"), str) else "",
+                    }
+        judge_list = [jmap.get(i) for i in range(n)]
+
+        # Per-image `src`: relative "images/NNN.png" for the portable folder (embed off) — resolves
+        # both offline (open the folder's index.html) and in-app (served under /image_compare_dir).
+        # With embed on, pixels are inlined as base64. A missing file falls back to base64 so the
+        # page never shows a broken picture.
+        def src_of(p, rpth):
+            if not embed_images and rpth and os.path.exists(rpth):
+                return "images/" + urllib.parse.quote(os.path.basename(rpth))
+            return _b64_png(p)
+
         # Data for the interactive page uses the ORIGINAL (clean) images.
-        items = [{"src": _b64_png(p), "caption": c, "prompt": pr, "settings": st,
-                  "time": tm, "time_seconds": ts,
-                  "color": col, "band": band, "report_path": rpth, "settings_data": sd}
-                 for p, c, pr, st, tm, ts, col, band, rpth, sd in
-                 zip(pils, caps, proms, setts, time_lines, time_secs, cap_colors, cap_bands, report_paths, sdata)]
+        items = [{"src": src_of(p, rpth), "caption": c, "prompt": pr, "settings": st,
+                  "time": tm, "time_seconds": ts, "metrics": mtr, "metric_ssim": ms, "metric_psnr": mp,
+                  "judge": jv, "color": col, "band": band, "report_path": rpth, "settings_data": sd}
+                 for p, c, pr, st, tm, ts, col, band, rpth, sd, mtr, ms, mp, jv in
+                 zip(pils, caps, proms, setts, time_lines, time_secs, cap_colors, cap_bands,
+                     report_paths, sdata, metrics_disp, m_ssim, m_psnr, judge_list)]
         cfg = {"title": title, "columns": int(columns), "show_prompts": bool(show_prompts),
                "show_settings": bool(show_settings), "run_id": run_id,
                "report_db": report_db_resolved, "items": items}
@@ -423,21 +578,24 @@ class ImageCompare:
             return self._err(f"viewer.html missing: {e}", pils)
 
         html = template.replace("/*__COMPARE_DATA__*/null", json.dumps(cfg, ensure_ascii=True))
-        prefix = filename_prefix or "compare"
 
-        out_dir = output_dir.strip() or comfy_out
-        try:
-            os.makedirs(out_dir, exist_ok=True)
-        except Exception as e:
-            return self._err(f"cannot create output_dir '{out_dir}': {e}", pils)
-
-        name, path = _unique_html_path(out_dir, prefix)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(html)
-
-        _register_html(path)
-        q = urllib.parse.quote(os.path.abspath(path))
-        url = f"http://127.0.0.1:{_server_port()}/image_compare?path={q}"
+        if embed_images:
+            # Single self-contained .html (base64) in out_dir, served by the single-file route.
+            _, path = _unique_html_path(out_dir, prefix)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+            _register_html(path)
+            q = urllib.parse.quote(os.path.abspath(path))
+            url = f"http://127.0.0.1:{_server_port()}/image_compare?path={q}"
+        else:
+            # Light index.html inside the portable folder (relative image paths); served as a
+            # folder under a token so those relative paths resolve in-app too.
+            path = os.path.join(bundle_dir, "index.html")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+            token = uuid.uuid4().hex[:12]
+            _register_dir(token, bundle_dir)
+            url = f"http://127.0.0.1:{_server_port()}/image_compare_dir/{token}/index.html"
         print(f"[ImageCompare] saved {path}\n[ImageCompare] open: {url}")
 
         if overlay_captions:
@@ -449,23 +607,20 @@ class ImageCompare:
         out_tensor = _pils_to_tensor_list(cap_pils)
 
         if save_captioned_images or save_prompts_txt:
+            export_dir = bundle_dir or out_dir     # keep exports inside the portable folder
             saved = 0
             for idx in range(n):
-                k = 1
-                while True:
-                    base = f"{prefix}_{idx + 1:02d}_{k:04d}"
-                    png = os.path.join(out_dir, base + ".png")
-                    txt = os.path.join(out_dir, base + ".txt")
-                    if not os.path.exists(png) and not os.path.exists(txt):
-                        break
-                    k += 1
+                _, base = first_free(export_dir, lambda k, i=idx: f"{prefix}_{i + 1:02d}_{k:04d}",
+                                     [".png", ".txt"])
+                png = os.path.join(export_dir, base + ".png")
+                txt = os.path.join(export_dir, base + ".txt")
                 if save_captioned_images:
                     cap_pils[idx].save(png)
                 if save_prompts_txt:
                     with open(txt, "w", encoding="utf-8") as f:
                         f.write(proms[idx])
                 saved += 1
-            print(f"[ImageCompare] exported files for {saved} image(s) to {out_dir}")
+            print(f"[ImageCompare] exported files for {saved} image(s) to {export_dir}")
 
         return {"ui": {"compare_url": [url], "compare_path": [path]},
                 "result": (out_tensor, path, url)}

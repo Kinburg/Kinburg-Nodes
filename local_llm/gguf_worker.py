@@ -63,7 +63,9 @@ def _import_hint():
 
 
 def _send(obj):
-    sys.stdout.write(RESP_PREFIX + json.dumps(obj, ensure_ascii=True) + "\n")
+    # ensure_ascii=False keeps non-ASCII (e.g. Cyrillic) compact over the pipe; the stream is
+    # forced to UTF-8 in main() so the parent (also UTF-8) decodes it correctly.
+    sys.stdout.write(RESP_PREFIX + json.dumps(obj, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
@@ -74,7 +76,7 @@ def _progress(n):
 
 def _token(s):
     # JSON-encode so newlines in the delta don't break the one-line protocol.
-    sys.stdout.write(TOK_PREFIX + json.dumps(s, ensure_ascii=True) + "\n")
+    sys.stdout.write(TOK_PREFIX + json.dumps(s, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 
@@ -89,6 +91,7 @@ def _load_sig(req):
         req.get("mmproj_path") or None,
         (req.get("vision_handler") or "auto") if (req.get("mmproj_path") or "").strip() else None,
         json.dumps(req.get("extra_load_args") or {}, sort_keys=True, default=str),
+        req.get("chat_template") or "",
     )
 
 
@@ -150,6 +153,31 @@ def _make_chat_handler(req):
     return cls(**kwargs)
 
 
+def _apply_chat_template_override(llm, req, chat_handler):
+    """Replace the model's embedded chat template with the user-supplied one (read by the node
+    from chat_template_path and sent as `chat_template`). TEXT models only: when a vision
+    `chat_handler` is active it does its own multimodal formatting, so we leave it alone.
+    On any failure we keep the embedded template and just log it — never break generation."""
+    ct = req.get("chat_template") or ""
+    if not ct.strip() or chat_handler is not None:
+        return
+    try:
+        from llama_cpp.llama_chat_format import Jinja2ChatFormatter
+        eos_id, bos_id = llm.token_eos(), llm.token_bos()
+        eos = llm._model.token_get_text(eos_id) if eos_id != -1 else ""
+        bos = llm._model.token_get_text(bos_id) if bos_id != -1 else ""
+        llm.chat_handler = Jinja2ChatFormatter(
+            template=ct, eos_token=eos, bos_token=bos,
+            stop_token_ids=[eos_id] if eos_id != -1 else None,
+        ).to_chat_handler()
+        llm.chat_format = None  # create_chat_completion prefers chat_handler when set
+        sys.stdout.write("[LocalLLM worker] custom chat template override applied\n")
+        sys.stdout.flush()
+    except Exception as e:
+        sys.stdout.write(f"[LocalLLM worker] chat template override failed ({e}); using embedded\n")
+        sys.stdout.flush()
+
+
 def _user_content(req):
     """User message content: text-only string, or a list of image_url parts + the text when
     the request carries `images` (base64 data: URIs encoded by the node)."""
@@ -171,6 +199,14 @@ def _kv_type(llama_cpp, name):
 
 
 def main():
+    # Force the stdio pipes to UTF-8 (Windows subprocesses default to the locale codepage, e.g.
+    # cp1251, which would garble/crash on non-ASCII once ensure_ascii=False is used). The parent
+    # opens the pipe as UTF-8 too, so both ends agree.
+    for _stream in (sys.stdout, sys.stdin):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     _prepare_cuda()
     try:
         import llama_cpp
@@ -183,6 +219,13 @@ def main():
     llm = None
     chat_handler = None
     current_sig = None
+    # Lightweight vocab-only models kept for the token-counter command, keyed by model path.
+    # They load just the tokenizer/vocab (no weights, ~no VRAM), so counting never disturbs a
+    # loaded generation model.
+    vocab_cache = {}
+    # (vocab-only text model, MTMD handler) per (model, mmproj, use_gpu) for lean image-token
+    # counting via mtmd — clip is loaded, LLM weights are NOT, and no decode is run.
+    mtmd_cache = {}
 
     while True:
         line = sys.stdin.readline()
@@ -200,6 +243,74 @@ def main():
 
         if req.get("cmd") == "exit":
             break
+
+        if req.get("cmd") == "count":
+            # Count tokens only — reuse an already-loaded model for the same path, else a cheap
+            # vocab-only load. No generation, no VRAM footprint for the counting model.
+            try:
+                text = req.get("text", "") or ""
+                mp = req.get("model_path")
+                if llm is not None and current_sig and current_sig[0] == mp:
+                    tok = llm
+                else:
+                    tok = vocab_cache.get(mp)
+                    if tok is None:
+                        tok = Llama(model_path=mp, vocab_only=True, verbose=False)
+                        vocab_cache[mp] = tok
+                n = len(tok.tokenize(text.encode("utf-8"), add_bos=False, special=False))
+                _send({"status": "success", "token_count": n})
+            except Exception as e:
+                _send({"status": "error", "message": str(e), "traceback": traceback.format_exc()})
+            continue
+
+        if req.get("cmd") == "count_mtmd":
+            # Lean image-token count: load a vocab-only text model + the clip/mmproj, run
+            # mtmd_tokenize, and sum the IMAGE chunks' token counts. No LLM weights, no decode —
+            # mirrors MTMDChatHandler's tokenize loop but stops before eval. Returns per-image
+            # token counts. (If mtmd can't run weight-free on this build, this raises and the
+            # caller falls back to the full-model prefill.)
+            try:
+                import llama_cpp.mtmd_cpp as mtmd_cpp
+                from llama_cpp.llama_chat_format import MTMDChatHandler
+                mp = req.get("model_path")
+                mmproj = req.get("mmproj_path")
+                use_gpu = int(req.get("n_gpu_layers", -1)) != 0
+                key = (mp, mmproj, use_gpu)
+                entry = mtmd_cache.get(key)
+                if entry is None:
+                    vllm = Llama(model_path=mp, vocab_only=True, verbose=False)
+                    handler = MTMDChatHandler(clip_model_path=mmproj, verbose=False, use_gpu=use_gpu)
+                    handler._init_mtmd_context(vllm)  # loads clip; may need weights → then raises
+                    entry = (vllm, handler)
+                    mtmd_cache[key] = entry
+                handler = entry[1]
+                marker = mtmd_cpp.mtmd_default_marker().decode("utf-8")
+                counts = []
+                for uri in (req.get("images") or []):
+                    bitmap = handler._create_bitmap_from_bytes(handler.load_image(uri))
+                    chunks = mtmd_cpp.mtmd_input_chunks_init()
+                    try:
+                        itext = mtmd_cpp.mtmd_input_text()
+                        itext.text = marker.encode("utf-8")
+                        itext.add_special = False
+                        itext.parse_special = True
+                        barr = (mtmd_cpp.mtmd_bitmap_p_ctypes * 1)(bitmap)
+                        rc = mtmd_cpp.mtmd_tokenize(handler.mtmd_ctx, chunks, ctypes.byref(itext), barr, 1)
+                        if rc != 0:
+                            raise ValueError(f"mtmd_tokenize failed: {rc}")
+                        img = 0
+                        for i in range(mtmd_cpp.mtmd_input_chunks_size(chunks)):
+                            ch = mtmd_cpp.mtmd_input_chunks_get(chunks, i)
+                            if ch is not None and mtmd_cpp.mtmd_input_chunk_get_type(ch) == mtmd_cpp.MTMD_INPUT_CHUNK_TYPE_IMAGE:
+                                img += int(mtmd_cpp.mtmd_input_chunk_get_n_tokens(ch))
+                        counts.append(img)
+                    finally:
+                        mtmd_cpp.mtmd_input_chunks_free(chunks)
+                        mtmd_cpp.mtmd_bitmap_free(bitmap)
+                _send({"status": "success", "image_tokens": counts})
+            except Exception as e:
+                _send({"status": "error", "message": str(e), "traceback": traceback.format_exc()})
+            continue
 
         try:
             sig = _load_sig(req)
@@ -227,6 +338,7 @@ def main():
                 )
                 _merge_extra_load_args(load_kwargs, req.get("extra_load_args") or {})
                 llm = Llama(**load_kwargs)
+                _apply_chat_template_override(llm, req, chat_handler)
                 current_sig = sig
 
             messages = []
@@ -240,6 +352,15 @@ def main():
                 if r in ("user", "assistant") and isinstance(c, str) and c:
                     messages.append({"role": r, "content": c})
             messages.append({"role": "user", "content": _user_content(req)})
+
+            # count_only: prefill just to read the prompt token count (text + chat template +
+            # image tokens, exactly as the model sees them) — used by the Context Sizer. A
+            # 1-token generation is enough to populate usage.prompt_tokens.
+            if req.get("count_only"):
+                out = llm.create_chat_completion(messages=messages, max_tokens=1, temperature=0.0)
+                _send({"status": "success",
+                       "prompt_tokens": int((out.get("usage") or {}).get("prompt_tokens", 0))})
+                continue
 
             gen_kwargs = dict(
                 messages=messages,

@@ -33,7 +33,7 @@ except Exception:
     is_link = None
     ExecutionBlocker = None
 
-MAX_SLOTS = 10
+MAX_SLOTS = 20
 FLOW_TYPE = "KINBURG_LOOP_FLOW"
 
 

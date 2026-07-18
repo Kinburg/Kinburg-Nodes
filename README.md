@@ -27,6 +27,17 @@ unknown keys are ignored and changing it reloads the model. Note these are **Pyt
 args, not llama.cpp CLI flags** — CLI-only flags like `--spec-type draft-mtp` have no effect
 here. These options live on the **`Local LLM Settings (GGUF)`** node (see below).
 
+A **`chat_template_path`** field (also advanced) points to a `chat_template.jinja` file that
+**overrides the model's built-in chat template**. Leave it empty (the default) and llama.cpp uses
+the template embedded in the GGUF — correct for almost every model, so you normally need nothing
+here. Set it only when a GGUF ships a **broken or missing** embedded template (answers come out
+malformed / the system prompt is ignored) or when you want a **specific template variant** (e.g. a
+community template that adds tool-calling or thinking toggles). It applies to **text models only** —
+it is ignored while an `mmproj` (vision) is active, since the vision path does its own multimodal
+formatting. Surrounding quotes are stripped and changing it reloads the model. Tip: if you're not
+sure whether a downloaded `chat_template.jinja` differs from the one already inside the GGUF, it
+usually doesn't — well-packaged models embed the right one.
+
 The single **`Local LLM (GGUF)`** node runs it: wire a `config`, type a `user_prompt`, and read
 the outputs. **Vision** is built in — connect the optional **`image`** input and add a **`Vision
 Settings (GGUF)`** node (`mmproj` + `vision_handler = auto (MTMD)`, which handles most modern vision
@@ -62,11 +73,15 @@ troubleshooting. `unload_comfy_models` frees image models first; `ready_path` ov
 health probe. Text only. Node: **`Local LLM (server client, text)`** (category
 `Kinburg-Nodes/LLM`).
 
-### `context/` — Character Card, Context Collector
+### `context/` — Character Card, Entity Card, Context Collector
 Feed an LLM node reference material so it weaves named subjects into an expanded image prompt.
 **`Character Card`** has fields (name, gender, age, eyes, hair, build, outfit, distinctive
 features, free-form notes…) and outputs one tidy Markdown block, **skipping every empty
-field**. **`Context Collector`** gathers any number of cards / text chunks (auto-growing
+field**. **`Entity Card`** is its free-form sibling for non-people (an object, place, faction…) —
+a name + a description. Both cards carry a **`save_preset_as`** field: type a name and run to save
+the card to a reusable library — it saves at run time, so it captures whatever's filled in, whether
+**typed or wired in** (e.g. from a photo description); reuse it via **Card Presets** (below).
+**`Context Collector`** gathers any number of cards / text chunks (auto-growing
 `item_N` inputs, empties skipped) under a `title` and wraps them in a delimited block —
 `<context>…</context>`, a custom tag, a Markdown heading, or none — so the model can tell
 reference data from the instruction. Wire its `context` output into an LLM node's new
@@ -74,6 +89,62 @@ reference data from the instruction. Wire its `context` output into an LLM node'
 prompt like *"Vasya and Kolya drink tea in a cafe"* comes back expanded with each character's
 looks. Note: the diffusion model still has its own limits binding attributes across multiple
 people. Category `Kinburg-Nodes/LLM`.
+
+### `vision_judge/` — Vision LLM Judge
+**`Vision LLM Judge`** scores a batch (or list) of images with a **vision GGUF** against a rubric
+you write, returning a structured verdict per image — a **GBNF grammar** forces clean
+`{score, tags, comment}` JSON on any model (the same guaranteed-structure trick as the Ideogram
+preset). Wire a **`config`** (a `Local LLM Settings (GGUF)` with a `Vision Settings` mmproj), the
+**`images`**, and a **`rubric`** (optionally the per-image **`prompts`**, `---`-separated, so it
+can judge prompt adherence); the scale is set by `score_min` / `score_max`. It reuses the LLM
+nodes' worker and keeps the model loaded across every image. Outputs: **`results_json`** —
+`[{index, score, score_max, tags, comment}]`, wire it into **Image Compare**'s `judge_data`
+input for a read-only judge section per image (stars / tags / comment) alongside your own review;
+**`summary`** (a readable per-image report); and **`best_index`** (the top-scoring image). Closes
+the generate → auto-evaluate → pick-the-best loop entirely locally. Category `Kinburg-Nodes/LLM`.
+
+### Token Counter (GGUF)
+**`Token Counter (GGUF)`** (in the `local_llm/` package) counts how many tokens a text is under a
+model's tokenizer, **without generating** — via the same worker but a **vocab-only** load (just
+the tokenizer, no weights, no VRAM; it also reuses an already-loaded model when the path matches,
+so counting never disturbs generation). Wire a **`config`** (only its model is used) and a
+**`text`**; outputs `token_count`, `char_count`, and an `info` line (e.g. `42 tokens · 180 chars`).
+Handy for budgeting a prompt against a model's `n_ctx`. Category `Kinburg-Nodes/LLM`.
+
+### Context Sizer (GGUF)
+**`Context Sizer (GGUF)`** (in `local_llm/`) measures how many tokens a request actually needs and
+suggests an `n_ctx`. Wire a **`config`**, your prompt text into the auto-growing **`text_*`** inputs,
+and optionally an **`image`** (a batch is fine — it sizes for the largest). Counting is **lean** — no
+full-model load: text via the vocab-only tokenizer, images via `mtmd_tokenize` on the clip/mmproj
+only (no LLM weights, no forward pass), so image tokens — which depend on the model + resolution —
+are counted for real (with a safe fallback to a full-model prefill if a build can't tokenize
+weight-free). Outputs `text_tokens` / `image_tokens` / `total_tokens` / **`suggested_n_ctx`** (=
+input + the config's `max_tokens` + a `margin`, rounded up) / `info`. Sizing `n_ctx` close to what a
+request uses saves VRAM (the KV cache shrinks with it). Category `Kinburg-Nodes/LLM`.
+
+All four LLM nodes above (**Local LLM (GGUF)**, **Vision LLM Judge**, **Token Counter**, **Context
+Sizer**) carry a per-node **`unload_after_run`** selector — *config default* follows the Settings
+node's `unload_llm_after_run`, *unload after run* frees VRAM after just this node (e.g. a different
+model runs next), *keep loaded* stays warm — so one node can free VRAM without touching the others
+on the same config.
+
+### `grammar_presets/` — Grammar Presets
+**`Grammar Presets`** is a dropdown of **GBNF grammars** → one `grammar` STRING output. It ships
+with templates that force an LLM's output into a fixed shape — **Character Card (JSON)** and
+**Entity Card (JSON)** — and you can add / edit / delete your own (**➕ Add grammar**, persisted on
+disk). Wire the `grammar` output into a **Local LLM (GGUF)** node's `grammar_override` input, feed
+that node a **photo** + a short prompt ("fill the card from this image"), and the vision model
+returns exactly that structure straight from the picture — no multi-image-context gymnastics.
+Category `Kinburg-Nodes/LLM`.
+
+### `card_presets/` — Card Presets
+**`Card Presets`** is a saved library of filled cards: pick a character / entity from a dropdown and
+its ready Markdown block comes out the `card` output (feed it into Context Collector). You build the
+library from the **Character Card** / **Entity Card** nodes' `save_preset_as` field (see above);
+presets are rendered back through the card nodes' own logic — so the format always matches — and
+persisted on disk. **🗑 Manage** deletes entries, **🔄 Refresh** re-reads the list. Build a character
+once (by hand or by photo via Grammar Presets), then reuse it from the dropdown instead of
+re-describing the same photo every time. Category `Kinburg-Nodes/LLM`.
 
 ### `gguf_convert/` — Safetensors → GGUF converters
 Turn `.safetensors` weights into `.gguf` from inside ComfyUI. Two nodes (category
@@ -126,6 +197,23 @@ Accumulator (prompts)**), and `settings_data` (structured per-image settings fro
 **Generation Info Filter**) — rendered under each image as one `[Class] param: value` line
 per field, with its own page toggle. The `url` output is a clickable http
 link. Node: **`Image Compare (HTML)`** (category `Kinburg-Nodes/image/compare`).
+
+Two more controls. **`embed_images`** chooses how the comparison is saved: **off** (default) writes
+a **portable folder** `<prefix>_<datetime>/` — a light `index.html` + an `images/` subfolder with
+relative links — so you can open it offline, zip and share it, or open it in-app; **on** writes a
+single self-contained `.html` with every image inlined as base64 (one bigger file). Both open from
+the node's `url` output. And an optional **`reference`** image (or
+**`reference_index`**, a 0-based index into the batch; `-1` = off) enables **similarity
+metrics** — **SSIM** and **PSNR** of every image vs the reference — shown under each image (a
+**Metrics** page toggle) with a **Similarity** sort in the grid. Great for upscale / img2img /
+restoration, or for checking how far a quantized model's output drifts from its fp16 baseline.
+Note these measure *closeness to the reference*, not aesthetic quality (that's the Vision LLM
+Judge's job).
+
+An optional **`judge_data`** input takes the **Vision LLM Judge**'s `results_json` and renders
+each image's AI verdict — stars (proportional to its score), tags and a comment — as a
+**read-only** section under it, with its own **🤖 Judge** page toggle, kept separate from your
+own hide / rating / tags / comment review controls.
 
 Also in this package: **`Color Caption`** — write a caption and type two colors, the
 **text** color and the **band** color behind it (each as a HEX `#RRGGBB` value). It outputs a one-line JSON
@@ -214,7 +302,7 @@ other tensor — so inside a loop you can feed a whole batch in and pull out the
 `label`). Drop it into a wire inside a loop body to slow iterations down and watch the loop run.
 Category `Kinburg-Nodes/loops`.
 
-### `util/` — Date String, Unlim Text Concat, Color Picker, Any/Combo to String
+### `util/` — Date String, Unlim Text Concat, Color Picker, Any/Combo to String, Text Transform, Any Switch, JSON Extract
 **`Date String`** appends the current **date** (and optionally **time**) to a string, with
 selectable formats. Handy for building save paths: e.g. `project/2026-06-20` (a folder per
 day) or `.../2026-06-20/17-05` (per minute). The `/` separator creates subfolders; `_`/`-`
@@ -240,6 +328,26 @@ a `STRING` input. Connect the Primitive's COMBO output into `Combo to String` (a
 patch in `web/combo_to_string.js` allows the link and pushes the selected value in), and its
 `string` output carries the value — e.g. `ru` — wherever you need it. Category
 `Kinburg-Nodes/util`.
+
+**`Text Transform`** does string find/replace, regex, trim and case in one node —
+`replace`, `regex_replace`, `regex_extract`, `regex_findall`, `strip`, `collapse_whitespace`,
+`lower`/`upper`/`title`, with `ignorecase` / `multiline` / `dotall` flags. The regex is
+**validated**: a bad pattern (or replacement backreference) is reported on the **`error`** output
+while the input text passes through unchanged, so a typo never crashes the run. Outputs `text` /
+`count` / `error`. Category `Kinburg-Nodes/util`.
+
+**`Any Switch`** forwards one of several inputs, chosen by `select` (1-based). The `input_*`
+slots take any type and auto-grow (the node shows the connected ones plus a spare); outputs the
+selected `output` and its `selected` slot number. It routes a value — ComfyUI still computes the
+other branches (it's not a lazy gate). Category `Kinburg-Nodes/util`.
+
+**`JSON Extract`** pulls fields out of a JSON string by path into separate `STRING` outputs — up
+to six independent paths (`path_1…6`) → six `value_*` outputs, plus a `found` flag (all non-empty
+paths resolved) and a `report` (per-path hit/miss). Path syntax: dot keys, `[n]` / `.n` indices
+(negative allowed), `$` (or empty) for the whole document; an object/array value comes out as
+compact JSON, and prose-wrapped JSON is tolerated (the first `{…}`/`[…]` is parsed). Pairs with
+the structured-output LLM nodes (e.g. `ideogram4_json`) to route sub-fields into different prompt
+inputs. Category `Kinburg-Nodes/util`.
 
 ### `timer/` — Start Timer, Stop Timer
 **`Start Timer`** / **`Stop Timer`** measure the wall-clock time of a slice of a workflow.
@@ -344,21 +452,38 @@ automatically right before the workflow is queued, so the run always reflects th
 `Kinburg-Nodes/accumulators`.
 
 ### `prompt_presets/` — Prompt Presets
-**`Prompt Presets`** is five preset **dropdowns** — **Camera**, **Aesthetics**, **Light**,
-**Medium**, **Background** — each emitting a `STRING` prompt fragment (five outputs, one per
-dropdown). Every dropdown ships with curated built-in presets (e.g. *Camera → Cinematic
-Anamorphic*, *Light → Rembrandt*, *Aesthetics → Cyberpunk*) plus a `🚫 None` option that
-resolves to an empty string. Selecting a preset resolves to its fragment at run time; wire the
-outputs into your prompt builder / text concat.
+**`Prompt Presets`** is five **flexible preset slots**, each emitting a `STRING` prompt fragment
+(five outputs). Each slot has **two dropdowns** — a **category** selector and a **preset**
+selector (the presets of the chosen category) — so any slot can draw from any category. Out of
+the box the five slots default to the classic **Camera / Aesthetics / Light / Medium /
+Background** categories (and the output label follows each slot's chosen category), but you can
+point any slot at any other category, including your own. Every category ships with curated
+built-in presets (e.g. *Camera → Cinematic Anamorphic*, *Light → Rembrandt*, *Aesthetics →
+Cyberpunk*) plus a `🚫 None` option that resolves to an empty string. Selecting a preset resolves
+to its fragment at run time; wire the outputs into your prompt builder / text concat.
 
-You can **add your own** presets (**➕ Add preset** — pick a category, name it, type the
-fragment; re-using an existing name edits it) and **save the current selection as a setup**
-(**💾 Save setup** — name a favourite combination of all five dropdowns). The **⚙ setup**
-selector at the top of the node re-applies any saved setup in one click, and **🗑 Manage**
-lists your setups and custom presets for deletion (built-ins can't be removed). Custom presets
-and setups are persisted on disk (`prompt_presets/data/store.json`, git-ignored) via
-`PromptServer` routes under `/kinburg/presets`, so they survive restarts and appear across all
-`Prompt Presets` nodes without an object-info reload. Category `Kinburg-Nodes/prompt`.
+You can **add your own presets** (**➕ Add preset** — pick a category, name it, type the fragment;
+re-using an existing name edits it) and **manage categories** (**🗂 Categories** — add / rename /
+delete your own categories; the five built-in categories are protected). **Save the current
+slots as a setup** (**💾 Save setup** — names the whole combination of all five slots'
+category+preset); the **⚙ setup** selector at the top re-applies any saved setup in one click,
+and **🗑 Manage** lists your setups and custom presets for deletion (built-ins can't be removed).
+Custom presets, categories and setups are persisted on disk (`prompt_presets/data/store.json`,
+git-ignored) via `PromptServer` routes under `/kinburg/presets`, so they survive restarts and
+appear across all `Prompt Presets` nodes without an object-info reload. Category
+`Kinburg-Nodes/prompt`.
+
+### `prompt_variations/` — Prompt Variations
+**`Prompt Variations`** expands one template into many prompts (a per-item `STRING` **list**).
+Write choices with `{a|b|c}` (nesting allowed, e.g. `{a {x|y}|b}`) and optional `__wildcard__`
+refs (one option per line from `<wildcards_dir>/name.txt`, default `ComfyUI/wildcards`), and the
+node emits the **cartesian product** — empty options like `{, dramatic|}` mean "nothing" (dangling
+commas are cleaned up). `mode` = `all` (every combination, capped by `limit`) or `random`
+(`limit` random combinations, reproducible via `seed`); `dedupe` drops duplicates. Outputs
+**`prompts`** (a list — feed it into **For Each (Open)**), **`count`**, and a **`preview`**. It's
+the input generator for a prompt-space sweep: Prompt Variations → For Each → your sampler → a
+Set/Get Accumulator → **Image Compare**, to render and compare every variant at once. Category
+`Kinburg-Nodes/prompt`.
 
 ### `list_ops/` — Insert / Remove for batches and lists
 Edit collections by position without rewiring. Two families:
@@ -395,7 +520,18 @@ extension is added automatically, parent folders are created, and `{date}` / `{t
 `{datetime}` placeholders expand to the current date/time. **`autosave`** does the same
 automatically on every run when a path is set. **📋 Copy** copies the text to the clipboard, and
 a small header shows a char/line counter. The converted text is also a **`text` (STRING) output**,
-so the node can sit inline in a wire and pass it downstream. Category `Kinburg-Nodes/util`.
+so the node can sit inline in a wire and pass it downstream.
+
+**Freeze / use the saved text (`use_saved_text`).** By default the node reads its `value` input
+(running its upstream) and the shown text tracks it. Flip **`use_saved_text`** on to output the
+text saved & edited *in the node* instead — and the input is **not evaluated**, so its upstream
+never runs. Typical use: an LLM generates a prompt → Show Text → image generation; you eyeball
+the prompt, tweak it in the node, flip the toggle on, and re-queue — the **edited** prompt goes
+downstream and the **LLM doesn't re-run**. This uses ComfyUI's *lazy evaluation*
+(`check_lazy_status`), not just output caching, so it holds even after a ComfyUI restart or with
+a randomized seed. The edited text rides in a hidden, serialized `saved_text` widget (so it
+reaches the backend and is stored in the workflow); edit it and re-queue to push changes without
+regenerating. Leave the toggle off for the original behavior. Category `Kinburg-Nodes/util`.
 
 ### Chat — `Local LLM Chat (GGUF)` + `Local LLM Settings (GGUF)`
 **`Local LLM Chat (GGUF)`** (in the `local_llm/` package) is a self-contained multi-turn chat node.
@@ -406,7 +542,8 @@ input.
 
 **`Local LLM Settings (GGUF)`** is that config node: it holds the options — model, system prompt,
 sampling, loader (`n_ctx` / `n_gpu_layers` / …), reasoning split, `output_format` / grammar,
-`extra_load_args`, unload toggles — plus two connect-only inputs: **`context`** (reference material
+`extra_load_args`, `chat_template_path` (optional chat-template override — see above), unload
+toggles — plus two connect-only inputs: **`context`** (reference material
 appended to the system prompt — e.g. Character Card / Context Collector) and **`vision`** (from a
 **`Vision Settings (GGUF)`** node — `mmproj` / `vision_handler` / `image_max_side`; connect it only
 for vision). It emits everything as one `KINBURG_LLM_CONFIG` bundle. Wire its `config` output into
@@ -454,9 +591,12 @@ covers the nodes of any group nested inside it, and nested names are shown **ind
 The list **grows and rebuilds itself** as you add, rename or delete groups (it polls the graph),
 and a mixed selection (some nodes in a group active, some not) shows a `MIXED` marker. Extras:
 **`all on`** / **`all off`** buttons, and a **right-click** on any switch sets **`MUTE`** (Never)
-instead of Bypass. The node has no inputs or outputs and never runs on the backend — it's excluded
-from the prompt and only manipulates other nodes' modes on the client before the run. Category
-`Kinburg-Nodes/util`.
+instead of Bypass. **Reorder the rows** to taste: **`sort ⇅`** sorts by name (click toggles A–Z /
+Z–A; **right-click** restores the original order), or **drag a row by its `⠿` handle**. The chosen
+order is saved on the node (in `properties`), so it travels with the workflow and survives a
+reload — it's purely cosmetic and never affects the prompt. The node has no inputs or outputs and
+never runs on the backend — it's excluded from the prompt and only manipulates other nodes' modes
+on the client before the run. Category `Kinburg-Nodes/util`.
 
 ## Installation
 
