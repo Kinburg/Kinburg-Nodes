@@ -1,13 +1,22 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 
 // Group Control — a client-side panel for the KinburgGroupControl node.
 //
 // Lists every *unique* group name in the workflow and lets you flip all groups with that name
-// between Always (active) and Bypass (skipped). "Mode" of a group means the `mode` of the nodes
-// inside it — exactly what ComfyUI's own "Set Group Nodes to …" menu does — so the effect is
-// baked into the target nodes and travels with the workflow. Nesting is resolved by bounding
-// box: an outer group covers the nodes of any group nested inside it, and nested names are
-// shown indented. The panel polls the graph so the list grows/rebuilds as groups change.
+// between Always (active), Bypass (skipped) and Never (muted). "Mode" of a group means the `mode`
+// of the nodes inside it — exactly what ComfyUI's own "Set Group Nodes to …" menu does — so the
+// effect is baked into the target nodes and travels with the workflow. Nesting is resolved by
+// bounding box: an outer group covers the nodes of any group nested inside it, and nested names
+// are shown indented. The panel polls the graph so the list grows/rebuilds as groups change.
+//
+// Per row:
+//   * left-click the switch  → toggle Always / Bypass (the fast on/off).
+//   * ▶ button               → run ONLY this group: queues its output nodes as ComfyUI
+//                              "partial execution targets", so just this group and the nodes it
+//                              depends on run (like the core "Queue Selected Output Nodes").
+//   * ⋯ button / right-click → a menu with Run · Always · Bypass · Never (the discoverable way
+//                              to set Never / mute a group).
 //
 // The rows can be reordered: "sort" sorts by name (toggling A–Z / Z–A; right-click restores the
 // original order), or drag a row by its ⠿ handle. The chosen order is saved on the node
@@ -223,6 +232,191 @@ function applyMode(entry, mode) {
   app.graph?.change?.();
 }
 
+// ---------------------------------------------------------------------- run a single group
+// A node is an "output node" (SaveImage, PreviewImage, …) when its backend class declares
+// OUTPUT_NODE — the frontend carries that on constructor.nodeData.output_node.
+function isOutputNode(n) {
+  return !!(n && n.constructor && n.constructor.nodeData && n.constructor.nodeData.output_node);
+}
+
+// ComfyUI "partial execution target" id for a node. For the root graph this is just the node id;
+// nested subgraphs would need a "parent:child" path (not built here — the panel operates on the
+// currently-open graph, which is the root in virtually every workflow).
+function execIdOf(n) {
+  return String(n.id);
+}
+
+// De-duplicated nodes across every same-named group of an entry.
+function uniqueNodes(entry) {
+  const seen = new Set(), out = [];
+  for (const g of entry.groups) {
+    for (const n of groupNodes(g)) {
+      if (seen.has(n.id)) continue;
+      seen.add(n.id);
+      out.push(n);
+    }
+  }
+  return out;
+}
+
+// Run ONLY this group. We queue the group's *active* output nodes as ComfyUI partial-execution
+// targets: the backend then runs only those outputs and whatever they depend on, skipping every
+// unrelated branch — exactly like the core "Queue Selected Output Nodes" command. Nothing here
+// changes node modes, so the run reflects the group's current on/off state.
+async function runGroup(node, entry) {
+  const nodes = uniqueNodes(entry);
+  const outputs = nodes.filter(isOutputNode);
+  if (!outputs.length) {
+    flash(node, `“${entry.name}” has no output node (Save/Preview) to run`, true);
+    return;
+  }
+  const active = outputs.filter((n) => n.mode === ALWAYS());
+  if (!active.length) {
+    flash(node, `“${entry.name}” is off — switch it on to run`, true);
+    return;
+  }
+  try {
+    const prompt = await app.graphToPrompt();
+    await api.queuePrompt(0, prompt, { partialExecutionTargets: active.map(execIdOf) });
+    flash(node, `▶ queued “${entry.name}”`);
+  } catch (e) {
+    console.error("[GroupControl] run failed", e);
+    const msg = (e && (e.response?.error?.message || e.message)) || String(e);
+    flash(node, `run failed: ${msg}`, true);
+  }
+}
+
+// ------------------------------------------------------------------ focus a group on the canvas
+// Pan/zoom the canvas onto the union bounding box of every same-named group in this entry, using
+// LiteGraph's own animated helper (the same one the core "focus node/group" uses). Falls back to
+// a manual offset/scale for older builds. Purely a view change — never touches node modes.
+function focusEntry(entry) {
+  const canvas = app.canvas;
+  if (!canvas) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const g of entry.groups) {
+    const b = bboxOf(g);
+    if (!b) continue;
+    x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]);
+    x1 = Math.max(x1, b[0] + b[2]); y1 = Math.max(y1, b[1] + b[3]);
+  }
+  if (!isFinite(x0)) return;
+  const w = x1 - x0, h = y1 - y0, bounds = [x0, y0, w, h];
+  try {
+    if (typeof canvas.animateToBounds === "function") { canvas.animateToBounds(bounds, { zoom: 0.7 }); return; }
+    if (canvas.ds && typeof canvas.ds.animateToBounds === "function") {
+      canvas.ds.animateToBounds(bounds, () => canvas.setDirty(true, true), { zoom: 0.7 });
+      return;
+    }
+  } catch (e) { /* fall through to manual centering */ }
+  const ds = canvas.ds, el = canvas.canvas;
+  if (!ds || !el || w <= 0 || h <= 0) return;
+  const vw = el.clientWidth || el.width, vh = el.clientHeight || el.height;
+  let scale = Math.min(vw / w, vh / h) * 0.7;
+  scale = Math.max(0.1, Math.min(scale, 1.2));
+  ds.scale = scale;
+  ds.offset[0] = vw / (2 * scale) - (x0 + w / 2);
+  ds.offset[1] = vh / (2 * scale) - (y0 + h / 2);
+  canvas.setDirty(true, true);
+}
+
+// ---------------------------------------------------------------------------- solo (isolate)
+// Persistent isolate: set THIS group to Always and every other listed group to Bypass, so a run
+// executes only this branch. Snapshots the prior modes (in memory) so "Undo solo" can restore
+// them. Only nodes that belong to groups are touched; ungrouped nodes are left alone. Others are
+// bypassed first and the target set Always last, so the soloed group wins even under nesting.
+function soloEntry(node, entry) {
+  const entries = node._kbEntries || collectEntries();
+  const snap = new Map();
+  for (const e of entries) for (const g of e.groups) for (const n of groupNodes(g)) {
+    if (!snap.has(n.id)) snap.set(n.id, n.mode);
+  }
+  node._kbSolo = { name: entry.name, modes: snap };
+  for (const e of entries) if (e.name !== entry.name) applyMode(e, BYPASS());
+  applyMode(entry, ALWAYS());
+  refresh(node);
+  flash(node, `◎ solo “${entry.name}” — rest bypassed`);
+}
+
+// Restore the modes captured by the last solo.
+function undoSolo(node) {
+  const solo = node._kbSolo;
+  if (!solo) return;
+  const byId = new Map();
+  for (const n of (app.graph?._nodes || [])) byId.set(n.id, n);
+  for (const [id, mode] of solo.modes) { const n = byId.get(id); if (n) n.mode = mode; }
+  node._kbSolo = null;
+  app.graph?.setDirtyCanvas(true, true);
+  app.graph?.change?.();
+  refresh(node);
+  flash(node, "↩ solo undone");
+}
+
+// Per-row menu (⋯ button or right-click): the discoverable home for every per-group action,
+// including Never, Focus and Solo. Uses LiteGraph's own context menu so it looks native.
+function openRowMenu(node, entry, evt) {
+  const CM = LG().ContextMenu;
+  if (!CM) return;
+  const items = [
+    { content: "▶ Run this group", callback: () => runGroup(node, entry) },
+    { content: "🔍 Focus on canvas", callback: () => focusEntry(entry) },
+    null,
+    { content: "● Always (on)", callback: () => { applyMode(entry, ALWAYS()); refresh(node); } },
+    { content: "⇄ Bypass",      callback: () => { applyMode(entry, BYPASS()); refresh(node); } },
+    { content: "✕ Never (mute)", callback: () => { applyMode(entry, MUTE());  refresh(node); } },
+    null,
+    { content: "◎ Solo — only this group", callback: () => soloEntry(node, entry) },
+  ];
+  if (node._kbSolo) {
+    items.push({ content: `↩ Undo solo (${node._kbSolo.name})`, callback: () => undoSolo(node) });
+  }
+  new CM(items, { event: evt, title: entry.name });
+}
+
+// A short-lived status line under the header — feedback for Run without blocking dialogs
+// (window.alert/prompt are unavailable in the desktop app, so we never use them).
+function flash(node, msg, isError) {
+  const el = node._kbEls && node._kbEls.status;
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isError ? "#e06a6a" : "#66bb6a";
+  el.style.display = "";
+  if (node._kbFlashTimer) clearTimeout(node._kbFlashTimer);
+  node._kbFlashTimer = setTimeout(() => { el.style.display = "none"; el.textContent = ""; }, 3500);
+}
+
+// ------------------------------------------------------------------------------- name filter
+// The filter is a live, view-only text match on the group name (node._kbFilter). It hides
+// non-matching rows without rebuilding, and updates the count + empty message. It never touches
+// the graph and isn't serialized — purely a way to find a row when there are many groups.
+function applyFilter(node) {
+  const els = node._kbEls;
+  if (!els) return;
+  const total = (node._kbEntries || []).length;
+  const q = node._kbFilter || "";
+  let shown = 0;
+  for (const row of els.list.children) {
+    const e = row._kbEntry;
+    const ok = !q || (e && e.name.toLowerCase().includes(q));
+    // Show with "grid" (the row's real display), NOT "" — an empty string deletes the inline
+    // display and the row falls back to block, which would kill the grid column alignment.
+    row.style.display = ok ? "grid" : "none";
+    if (ok) shown++;
+  }
+  els.count.textContent = total ? (q ? `${shown}/${total}` : `${total}`) : "";
+  if (!total) { els.empty.textContent = "No named groups in this workflow."; els.empty.style.display = ""; }
+  else if (shown === 0) { els.empty.textContent = "No groups match the filter."; els.empty.style.display = ""; }
+  else { els.empty.style.display = "none"; }
+}
+
+// Which entries the header bulk buttons act on: the filtered (visible) set when a filter is
+// active, otherwise every entry.
+function bulkEntries(node) {
+  const all = node._kbEntries || [];
+  const q = node._kbFilter || "";
+  return q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all;
+}
+
 // A stable signature of the group layout; a change means the list must be rebuilt.
 function signature() {
   return getGroups()
@@ -275,15 +469,41 @@ function buildPanel(node) {
     clearOrder(node);
     sortBtn.textContent = "sort ⇅";
   };
-  const allOn = mkBtn("all on", "Set every group to Always", () => {
-    for (const e of node._kbEntries || []) applyMode(e, ALWAYS());
+  // Bulk buttons act on the filtered set when a filter is active (else everything).
+  const allOn = mkBtn("all on", "Set matching groups to Always (all when no filter)", () => {
+    for (const e of bulkEntries(node)) applyMode(e, ALWAYS());
     refresh(node);
   });
-  const allOff = mkBtn("all off", "Bypass every group", () => {
-    for (const e of node._kbEntries || []) applyMode(e, BYPASS());
+  const allOff = mkBtn("all off", "Bypass matching groups (all when no filter)", () => {
+    for (const e of bulkEntries(node)) applyMode(e, BYPASS());
     refresh(node);
   });
-  header.append(title, count, sortBtn, allOn, allOff);
+  const allNever = mkBtn("all ✕", "Set matching groups to Never/mute (all when no filter)", () => {
+    for (const e of bulkEntries(node)) applyMode(e, MUTE());
+    refresh(node);
+  });
+  header.append(title, count, sortBtn, allOn, allOff, allNever);
+
+  // Live name filter — hides non-matching rows (view only; never touches the graph).
+  const filter = document.createElement("input");
+  filter.type = "text";
+  filter.placeholder = "filter groups…";
+  filter.style.cssText =
+    "margin:0 4px;padding:2px 6px;border:1px solid #3a3a44;background:#1e1e24;color:#ddd;" +
+    "border-radius:4px;font-size:11px;box-sizing:border-box;outline:none;";
+  filter.addEventListener("input", () => {
+    node._kbFilter = filter.value.trim().toLowerCase();
+    applyFilter(node);
+  });
+  // Keep keystrokes/clicks inside the box — don't trigger canvas shortcuts or node drag.
+  filter.addEventListener("keydown", (e) => e.stopPropagation());
+  filter.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+  // Transient feedback line for Run/Solo (queued / errors); hidden until something happens.
+  const status = document.createElement("div");
+  status.style.cssText =
+    "display:none;padding:1px 6px 2px;font-size:10px;line-height:1.3;" +
+    "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
 
   const list = document.createElement("div");
   list.style.cssText = "display:flex;flex-direction:column;gap:3px;";
@@ -292,8 +512,8 @@ function buildPanel(node) {
   empty.textContent = "No named groups in this workflow.";
   empty.style.cssText = "color:#777;padding:8px 6px;font-style:italic;";
 
-  root.append(header, list, empty);
-  node._kbEls = { root, list, count, empty };
+  root.append(header, filter, status, list, empty);
+  node._kbEls = { root, list, count, empty, status, filter };
   return root;
 }
 
@@ -304,57 +524,81 @@ function rebuild(node) {
   const entries = applyOrder(collectEntries(), node);
   node._kbEntries = entries;
   els.list.innerHTML = "";
-  els.count.textContent = entries.length ? `${entries.length}` : "";
-  els.empty.style.display = entries.length ? "none" : "";
 
   for (const entry of entries) {
+    // Fixed grid columns keep the controls in the same place on every row, whatever the name
+    // length: [grip][dot][name grows][▶][switch][⋯]. NOTE: applyFilter() must re-show rows with
+    // display:"grid" (not ""), or it wipes this inline display and the row falls back to block.
     const row = document.createElement("div");
     row.style.cssText =
-      "display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:5px;" +
+      "display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto auto;" +
+      "align-items:center;column-gap:6px;padding:3px 6px;border-radius:5px;" +
       `background:#00000022;margin-left:${entry.depth * 14}px;`;
 
     const grip = document.createElement("span");
     grip.textContent = "⠿";
     grip.title = "Drag to reorder";
     grip.style.cssText =
-      "flex:0 0 auto;cursor:grab;color:#666;font-size:13px;line-height:1;padding:0 1px;" +
+      "cursor:grab;color:#666;font-size:13px;line-height:1;padding:0 1px;" +
       "user-select:none;touch-action:none;";
 
+    // Dot + name focus the group on the canvas (pan/zoom to it).
     const dot = document.createElement("span");
+    dot.title = "Focus this group on the canvas";
     dot.style.cssText =
-      `width:9px;height:9px;border-radius:50%;flex:0 0 auto;` +
+      `width:9px;height:9px;border-radius:50%;cursor:pointer;` +
       `background:${entry.color || "#666"};border:1px solid #0006;`;
+    dot.onclick = (e) => { e.preventDefault(); focusEntry(entry); };
 
     const name = document.createElement("span");
     name.textContent = entry.name;
     if (entry.groups.length > 1) name.textContent += `  ×${entry.groups.length}`;
-    name.title = entry.name + (entry.groups.length > 1 ? ` (${entry.groups.length} groups)` : "");
+    name.title = entry.name + (entry.groups.length > 1 ? ` (${entry.groups.length} groups)` : "") +
+      " — click to focus on canvas";
     name.style.cssText =
-      "flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ddd;";
+      "min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ddd;cursor:pointer;";
+    name.onclick = (e) => { e.preventDefault(); focusEntry(entry); };
+
+    // ▶ run only this group.
+    const run = document.createElement("button");
+    run.textContent = "▶";
+    run.title = "Run only this group (queue its output nodes + what they depend on)";
+    run.style.cssText =
+      "cursor:pointer;border:1px solid #2e5d34;background:#1f3a24;color:#8fd69b;" +
+      "border-radius:4px;width:22px;height:20px;font-size:10px;line-height:1;padding:0;";
+    run.onclick = (e) => { e.preventDefault(); runGroup(node, entry); };
 
     const sw = document.createElement("button");
     sw.style.cssText =
-      "cursor:pointer;border:none;border-radius:10px;width:64px;height:20px;flex:0 0 auto;" +
-      "font-size:10px;font-weight:600;letter-spacing:.03em;color:#fff;";
+      "cursor:pointer;border:none;border-radius:10px;width:64px;height:20px;" +
+      "font-size:10px;font-weight:600;letter-spacing:.03em;color:#fff;padding:0;";
     sw.onclick = (e) => {
       e.preventDefault();
       const on = stateOf(entry) === "always";
       applyMode(entry, on ? BYPASS() : ALWAYS());
       refresh(node);
     };
-    // Right-click a switch to Mute (Never) instead of Bypass.
-    sw.oncontextmenu = (e) => {
-      e.preventDefault();
-      applyMode(entry, stateOf(entry) === "mute" ? ALWAYS() : MUTE());
-      refresh(node);
-    };
+    // Right-click the switch → the full per-group menu (Run / Always / Bypass / Never).
+    sw.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(node, entry, e); };
+
+    // ⋯ menu: the discoverable home for Always / Bypass / Never (+ Run).
+    const menu = document.createElement("button");
+    menu.textContent = "⋯";
+    menu.title = "More: Run · Focus · Always / Bypass / Never · Solo";
+    menu.style.cssText =
+      "cursor:pointer;border:1px solid #3a3a44;background:#2a2a32;color:#bbb;" +
+      "border-radius:4px;width:20px;height:20px;font-size:12px;line-height:1;padding:0;";
+    menu.onclick = (e) => { e.preventDefault(); openRowMenu(node, entry, e); };
 
     row._kbEntry = entry;
     row._kbSwitch = sw;
-    row.append(grip, dot, name, sw);
+    // Right-click anywhere on the row also opens the menu (except the switch, handled above).
+    row.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(node, entry, e); };
+    row.append(grip, dot, name, run, sw, menu);
     attachDrag(node, row, grip);
     els.list.appendChild(row);
   }
+  applyFilter(node); // re-apply the name filter + refresh count/empty for the new rows
   paint(node);
 }
 
@@ -422,6 +666,7 @@ app.registerExtension({
     const onRemoved = nodeType.prototype.onRemoved;
     nodeType.prototype.onRemoved = function () {
       if (this._kbTimer) { clearInterval(this._kbTimer); this._kbTimer = null; }
+      if (this._kbFlashTimer) { clearTimeout(this._kbFlashTimer); this._kbFlashTimer = null; }
       return onRemoved?.apply(this, arguments);
     };
   },

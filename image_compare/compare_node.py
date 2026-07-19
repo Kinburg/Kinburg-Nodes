@@ -548,6 +548,8 @@ class ImageCompare:
                         "score_max": v.get("score_max"),
                         "tags": v.get("tags") if isinstance(v.get("tags"), list) else [],
                         "comment": v.get("comment") if isinstance(v.get("comment"), str) else "",
+                        # Per-criterion sub-scores (Vision Judge multi-criteria mode); absent → {}.
+                        "scores": v.get("scores") if isinstance(v.get("scores"), dict) else {},
                     }
         judge_list = [jmap.get(i) for i in range(n)]
 

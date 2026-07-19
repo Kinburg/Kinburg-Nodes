@@ -5,7 +5,9 @@
   trigger} — nothing is loaded here.
 * `Lora Unlim Accumulator` takes a model (+ optional CLIP) and a prompt, plus an auto-growing
   list of `lora_*` specs. It loads and applies each LoRA to the model (and CLIP when connected),
-  appends the non-empty trigger words to the prompt, and outputs the patched model/CLIP/prompt.
+  appends the non-empty trigger words to the prompt, and outputs the patched model/CLIP/prompt —
+  plus a `triggers` output (just the comma-separated trigger words) to wire into Ouroboros's
+  `trigger_words` so they survive the LLM prompt rewrite.
 
 Heavy ComfyUI imports live inside the methods so the package still imports (and the Registry can
 enumerate nodes) without ComfyUI present.
@@ -67,8 +69,8 @@ class LoraUnlimAccumulator:
             },
         }
 
-    RETURN_TYPES = ("MODEL", "CLIP", "STRING")
-    RETURN_NAMES = ("model", "clip", "prompt")
+    RETURN_TYPES = ("MODEL", "CLIP", "STRING", "STRING")
+    RETURN_NAMES = ("model", "clip", "prompt", "triggers")
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/lora"
 
@@ -101,7 +103,9 @@ class LoraUnlimAccumulator:
             new_prompt = prompt_clean + "\n\n" + trigger_block
         else:
             new_prompt = prompt_clean or trigger_block
-        return (model, clip, new_prompt)
+        # `triggers` = just the comma-separated trigger words (no prompt) — wire it into
+        # Ouroboros's `trigger_words` so they're always appended AFTER the LLM rewrites the prompt.
+        return (model, clip, new_prompt, trigger_block)
 
     def _apply(self, model, clip, lora_name, strength_model, strength_clip):
         import comfy.sd

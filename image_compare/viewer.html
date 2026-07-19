@@ -57,6 +57,10 @@
   .judge-badge { font-weight:600; }
   .judge-tags { display:flex; flex-wrap:wrap; gap:4px; }
   .judge-tag { background:#a06cff22; border:1px solid #a06cff66; border-radius:9px; padding:0 7px; font-size:11px; color:#c9b3ff; }
+  .judge-scores { flex-basis:100%; display:flex; flex-wrap:wrap; gap:5px; margin-top:1px; }
+  .judge-score { font-size:11px; padding:1px 7px; border-radius:9px; background:#ffffff0d; border:1px solid #ffffff1f; display:flex; gap:5px; align-items:baseline; }
+  .judge-score .k { color:var(--muted); }
+  .judge-score .v { font-weight:600; }
   .judge-comment { flex-basis:100%; color:var(--muted); font-style:italic; }
   .pairjudge { max-width:1000px; margin:6px auto 0; display:flex; gap:12px; }
   .pairjudge > div { flex:1; font-size:12px; color:#c9b3ff; background:#0004; padding:6px 10px; border-radius:6px; }
@@ -216,7 +220,7 @@
   <p>Sort by <b>Similarity</b> to rank closest→farthest. Handy for upscaling, img2img and restoration, or for checking how far a quantized model drifts from its baseline.</p>
 
   <h3>🤖 Judge</h3>
-  <p>When a <b>Vision LLM Judge</b> is connected, each image shows the AI's read-only verdict — stars, tags and a comment — kept separate from your own review.</p>
+  <p>When a <b>Vision LLM Judge</b> is connected, each image shows the AI's read-only verdict — stars, tags and a comment — kept separate from your own review. In <b>multi-criteria</b> mode it also lists a coloured <b>per-criterion score</b> chip (e.g. <i>anatomy 4/5</i>), and the <b>Sort</b> menu gains <b>Judge score ↓</b> plus a <b>Judge: &lt;criterion&gt; ↓</b> entry for each criterion.</p>
 
   <h3>Report &amp; saving</h3>
   <p><b>Save run to report</b> stores this run (images, settings, your verdicts) to a SQLite database; <b>📊 Report</b> opens a browser over it. <b>⬇ Save page</b> downloads this comparison as a standalone HTML file (enable “embed images” on the node for a fully portable file).</p>
@@ -325,6 +329,16 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   };
   $('#cols').value=S.cols; $('#cols').oninput=()=>{ S.cols=Math.max(1,+$('#cols').value||1); render(); };
   $('#rowH').value=S.rowH; $('#rowH').oninput=()=>{ S.rowH=Math.max(40,+$('#rowH').value||320); render(); };
+  // Add judge sort options only when judge data is connected: an overall score sort, plus one
+  // per criterion found in the data (multi-criteria mode).
+  (function initJudgeSort(){
+    if(!items.some(it=>it.judge)) return;
+    const sel=$('#sortSel');
+    const add=(v,l)=>{ const o=document.createElement('option'); o.value=v; o.textContent=l; sel.appendChild(o); };
+    add('judge-desc','Judge score ↓');
+    const keys=[]; items.forEach(it=>{ if(it.judge&&it.judge.scores) Object.keys(it.judge.scores).forEach(k=>{ if(keys.indexOf(k)<0) keys.push(k); }); });
+    keys.forEach(k=> add('jc-desc::'+k, 'Judge: '+k+' ↓'));
+  })();
   $('#sortSel').value=S.sort; $('#sortSel').onchange=()=>{ S.sort=$('#sortSel').value; render(); };
   $('#loupeBtn').onclick=()=>{ S.loupe=!S.loupe; $('#loupeBtn').classList.toggle('active',S.loupe); if(!S.loupe) info.style.display='none'; render(); };
   $('#opacity').oninput=()=>{ S.opacity=+$('#opacity').value; const o=$('.over'); if(o) o.style.opacity=S.opacity/100; };
@@ -371,6 +385,17 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       if(y==null) return -1;
       return (x<y?-1:x>y?1:0)*dir;
     };
+    // Judge sorts (overall or a single criterion) — dynamic, so handled before the static map.
+    if(S.sort==='judge-desc'){
+      rows.sort((a,b)=> nullsLast(num(a.it.judge&&a.it.judge.score), num(b.it.judge&&b.it.judge.score), -1));
+      return rows;
+    }
+    if(S.sort.indexOf('jc-desc::')===0){
+      const key=S.sort.slice(9);
+      const js = it => (it.judge && it.judge.scores) ? num(it.judge.scores[key]) : null;
+      rows.sort((a,b)=> nullsLast(js(a.it), js(b.it), -1));
+      return rows;
+    }
     const cmp = {
       'time-asc':    (a,b)=> nullsLast(num(a.it.time_seconds), num(b.it.time_seconds), 1),
       'time-desc':   (a,b)=> nullsLast(num(a.it.time_seconds), num(b.it.time_seconds), -1),
@@ -509,6 +534,20 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     badge.textContent=`${score}/${max}`; badge.style.color=judgeColor(ratio); wrap.appendChild(badge);
     if(Array.isArray(j.tags)&&j.tags.length){ const tw=document.createElement('span'); tw.className='judge-tags';
       j.tags.forEach(t=>{ const c=document.createElement('span'); c.className='judge-tag'; c.textContent=t; tw.appendChild(c); }); wrap.appendChild(tw); }
+    // Per-criterion sub-scores (multi-criteria mode): a coloured chip per criterion.
+    if(j.scores && typeof j.scores==='object'){
+      const keys=Object.keys(j.scores);
+      if(keys.length){
+        const sc=document.createElement('div'); sc.className='judge-scores';
+        keys.forEach(k=>{ const v=+j.scores[k];
+          const chip=document.createElement('span'); chip.className='judge-score';
+          const kk=document.createElement('span'); kk.className='k'; kk.textContent=k;
+          const vv=document.createElement('span'); vv.className='v'; vv.textContent=`${v}/${max}`;
+          vv.style.color=judgeColor(max?v/max:0);
+          chip.appendChild(kk); chip.appendChild(vv); sc.appendChild(chip); });
+        wrap.appendChild(sc);
+      }
+    }
     if(j.comment){ const cm=document.createElement('div'); cm.className='judge-comment'; cm.textContent=j.comment; wrap.appendChild(cm); }
     return wrap;
   }
@@ -516,7 +555,8 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     const j=it.judge; if(!j) return '';
     const max=(+j.score_max)||5;
     const tags=(Array.isArray(j.tags)&&j.tags.length)?' · '+j.tags.join(', '):'';
-    return `🤖 ★${(+j.score)||0}/${max}${tags}`+(j.comment?' — '+j.comment:'');
+    const sc=(j.scores&&typeof j.scores==='object')?Object.entries(j.scores).map(([k,v])=>`${k} ${v}`).join(' · '):'';
+    return `🤖 ★${(+j.score)||0}/${max}${tags}`+(sc?` (${sc})`:'')+(j.comment?' — '+j.comment:'');
   }
 
   function renderPair(){

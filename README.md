@@ -97,11 +97,87 @@ you write, returning a structured verdict per image — a **GBNF grammar** force
 preset). Wire a **`config`** (a `Local LLM Settings (GGUF)` with a `Vision Settings` mmproj), the
 **`images`**, and a **`rubric`** (optionally the per-image **`prompts`**, `---`-separated, so it
 can judge prompt adherence); the scale is set by `score_min` / `score_max`. It reuses the LLM
-nodes' worker and keeps the model loaded across every image. Outputs: **`results_json`** —
-`[{index, score, score_max, tags, comment}]`, wire it into **Image Compare**'s `judge_data`
-input for a read-only judge section per image (stars / tags / comment) alongside your own review;
-**`summary`** (a readable per-image report); and **`best_index`** (the top-scoring image). Closes
-the generate → auto-evaluate → pick-the-best loop entirely locally. Category `Kinburg-Nodes/LLM`.
+nodes' worker and keeps the model loaded across every image. **Multi-criteria mode** (optional):
+fill **`criteria`** — one per line, `name` or `name: description` (e.g. `anatomy: hands, limbs` /
+`sharpness` / `prompt_adherence`) — and the judge scores **each** criterion on the scale, with the
+overall `score` being their average; the GBNF grammar is generated on the fly to force
+`{scores:{…}, tags, comment}`. The field is **pre-filled with a sensible example** (overall_quality
+/ anatomy / prompt_compliance / camera / text); edit it, or **clear it** for a single overall score
+(the original behaviour). The two built-in prompts are **editable**: **`system_prompt`** (the judge persona —
+the default is pre-filled) and **`comment_style`** (how the comment reads, default *one concise
+sentence*; set e.g. *two to four sentences covering strengths and weaknesses* for a detailed
+review); both fall back to the built-in default when blank, and the JSON shape stays managed (so
+editing them only affects quality, never parsing). Outputs: **`results_json`** —
+`[{index, score, score_max, tags, comment}]` (plus a
+per-criterion **`scores`** object in multi-criteria mode), wire it into **Image Compare**'s
+`judge_data` input for a read-only judge section per image (stars / tags / comment) alongside your
+own review; **`summary`** (a readable per-image report, with the per-criterion breakdown when in
+multi-criteria mode); and **`best_index`** (the top-scoring image). Closes the generate →
+auto-evaluate → pick-the-best loop entirely locally. Category `Kinburg-Nodes/LLM`.
+
+### `ouroboros/` — Ouroboros (Self-Correcting Sampler) 🐍
+**`Ouroboros (Self-Correcting Sampler) 🐍`** is a **closed-loop text→image optimizer** in one node.
+Each iteration: an LLM **expands/rewrites the prompt** → an image is **sampled** → a vision
+**critic** scores it and returns concrete **advice** (how to change the prompt) plus **negative-prompt
+terms** for the flaws it sees → the advice feeds the next revision. It repeats until the score hits a
+**target** or **`max_iterations`**, keeping the **best image across all iterations**. The loop is a
+plain Python `while` inside the node (no graph-expansion loop), and generation is owned internally
+via ComfyUI's own `common_ksampler` / CLIP encode / VAE decode — so the node is effectively a
+KSampler variant. It uses a **fixed seed** and a fixed start latent so only the prompt varies (a
+clean optimization signal); the critic's advice targets the **weakest criterion** (see Vision Judge's
+multi-criteria scoring), and negative terms **accumulate** (deduped) across iterations.
+
+Settings follow the repo's bundle idiom, in two small companion nodes:
+- **`Sampler Settings`** → `sampler_settings` (`SAMPLER_CFG`): seed, steps, cfg, sampler, scheduler,
+  denoise, plus a **`seed_mode`** (`fixed` / `random` / `increment` / `decrement`) and **`seed_step`**
+  — how the seed changes each iteration (`fixed` keeps the signal clean; the others explore, at the
+  cost of mixing "prompt improved" with "seed got lucky"; `random` is reproducible from the seed).
+  (Image size comes from the latent — see below.) Category `Kinburg-Nodes/sampling`.
+- **`Critic Settings (GGUF)`** → `critic_settings` (`CRITIC`): embeds a **vision `LLM_CONFIG`** (a
+  Local LLM Settings with an mmproj) plus the evaluation rules: `criteria` (pre-filled), `rubric`,
+  `target_score`, `score_min/max`, editable `system_prompt` and `advice_style`, and `samples`
+  (self-consistency: judge N times, take the median). Category `Kinburg-Nodes/LLM`.
+
+Wire into Ouroboros: `model` / `clip` / `vae`, a **`latent`** (required — an Empty Latent matching
+your model sets the image size; feed a real latent + denoise<1 for img2img/hires-feedback),
+`user_prompt` (your intent), `negative`, `enhancer_settings` (a Local LLM Settings for the prompt
+LLM — **its own `system_prompt` defines how to expand**), `critic_settings`, `sampler_settings`,
+`max_iterations`, and optional **`trigger_words`** (comma-separated words — e.g. **LoRA triggers**
+from `Lora Unlim Accumulator`'s new `triggers` output — that are **always appended** to the enhanced
+prompt so the LLM rewrite can't drop them). **Outputs** feed **Image Compare** directly: `images`
+(all iterations) + `prompts` (`---`-separated) + `judge_data` (per-image scores/advice) + `captions`
+(iteration labels) + `times` (per-iteration generation time) + `settings_data` (per-iteration
+iteration#/score/seed/steps/cfg/sampler as `GEN_SETTINGS`); plus `best_image`, `best_prompt`,
+`best_score`, a `report`, and `iterations`.
+
+The node has a **`⏹ Stop loop`** button: press it mid-run and the loop finishes the current
+iteration, then **stops and returns everything generated so far** (images, best, etc.) — a graceful
+stop, unlike ComfyUI's Cancel which aborts and discards the run. (It works via a small backend flag
+the node polls between iterations, so it takes effect at the next iteration boundary.)
+
+**Logging:** a **`full_console_log`** toggle (default on) controls **console/terminal** verbosity —
+on, each iteration also prints the enhanced prompt, advice and negative additions (off = just a
+one-line score); the full trace is always in the **`report`** output (wire it to a Show Text node)
+regardless. For a **live in-canvas
+view**, drop an **`Ouroboros Live Log 🐍📜`** node anywhere (no connections needed): it listens for
+the loop's websocket events and shows a **thumbnail** of the image plus seed · score (+ per-criterion)
+· time · the **full prompt** · advice · negative additions (failed/stopped iterations are flagged
+too). This side-steps the console's line truncation entirely. Entries are **timestamped** (`HH:MM:SS`),
+and a **`log_mode`** toggle on Ouroboros controls granularity: **`per step`** (default) posts each
+stage the moment it finishes — enhanced prompt → generated image → critic verdict, as three live
+entries — while **`per iteration`** posts one combined entry after the whole iteration. The log **survives
+ComfyUI Desktop tab switches** — it's replayed from an in-memory history when the node is recreated
+(kept in memory, not serialized into the workflow, so thumbnails don't bloat the file; cleared on a
+new run and on full app restart). Hovering an image in the log shows a small **📋 copy** button in
+its top-right corner that copies the picture to the clipboard (as PNG).
+
+**VRAM discipline (built for small cards):** when a config's **`unload_comfy_models`** is on,
+Ouroboros frees all ComfyUI models before each LLM call **and** frees the LLM worker before each
+diffusion — so only **one model is resident at any moment** (diffusion *or* one GGUF). The cost is
+model reloads around each phase; that is the accepted trade for running at all on low VRAM. On big
+GPUs/farms, turn `unload_comfy_models` off to keep everything resident (no reloads); pointing the
+enhancer and critic at the **same model file** further minimizes reloads. Category
+`Kinburg-Nodes/sampling`.
 
 ### Token Counter (GGUF)
 **`Token Counter (GGUF)`** (in the `local_llm/` package) counts how many tokens a text is under a
@@ -413,9 +489,10 @@ loaders (the `clip` input sits above the first LoRA). It loads and applies each 
 order — to the model with `strength_model`, and to CLIP with `strength_clip` when a CLIP is
 connected (otherwise model-only) — appends the non-empty trigger words to the prompt (in their
 own paragraph after a blank line, comma-separated among themselves), and outputs the patched
-`model` / `clip` / `prompt`. A LoRA with no effective strength (off) is skipped entirely —
-neither applied nor does its trigger word get added. Loaded files are cached per run. Category
-`Kinburg-Nodes/lora`.
+`model` / `clip` / `prompt` plus a **`triggers`** output (just the comma-separated trigger words,
+no prompt — wire it into **Ouroboros**'s `trigger_words` so the triggers survive the LLM prompt
+rewrite). A LoRA with no effective strength (off) is skipped entirely — neither applied nor does
+its trigger word get added. Loaded files are cached per run. Category `Kinburg-Nodes/lora`.
 
 ### `accumulators/` — Set / Get Results (name-based accumulators)
 For collecting parallel branches without manual batch wiring. **`Set Results (image)`** is a
@@ -589,14 +666,25 @@ into the target nodes and travels with the workflow — no extra serialization, 
 **Nesting is supported**: membership is resolved by bounding box, so an outer group automatically
 covers the nodes of any group nested inside it, and nested names are shown **indented** by depth.
 The list **grows and rebuilds itself** as you add, rename or delete groups (it polls the graph),
-and a mixed selection (some nodes in a group active, some not) shows a `MIXED` marker. Extras:
-**`all on`** / **`all off`** buttons, and a **right-click** on any switch sets **`MUTE`** (Never)
-instead of Bypass. **Reorder the rows** to taste: **`sort ⇅`** sorts by name (click toggles A–Z /
-Z–A; **right-click** restores the original order), or **drag a row by its `⠿` handle**. The chosen
-order is saved on the node (in `properties`), so it travels with the workflow and survives a
-reload — it's purely cosmetic and never affects the prompt. The node has no inputs or outputs and
-never runs on the backend — it's excluded from the prompt and only manipulates other nodes' modes
-on the client before the run. Category `Kinburg-Nodes/util`.
+and a mixed selection (some nodes in a group active, some not) shows a `MIXED` marker. Each row
+also has a **`▶` button that runs *only that group*** — it queues the group's output nodes as
+ComfyUI **partial-execution targets**, so just this group and the nodes it depends on run while
+every unrelated branch is skipped (the same mechanism as the core *Queue Selected Output Nodes*).
+It respects the current on/off state (won't run a bypassed group) and tells you if the group has
+no output node to run. A **`⋯` button** (or **right-click** the row / switch) opens a small menu
+with **Run · Focus · `ALWAYS` · `BYPASS` · `NEVER` · Solo** — the discoverable way to **mute a
+group to `NEVER`**, and to **Solo** it (set this group `ALWAYS` and every other group `BYPASS` as a
+*persistent* state, with an **Undo solo** entry that restores the previous modes). **Click a row's
+name or colour dot to _focus_ it** — the canvas pans/zooms to that group. A **filter box** hides
+non-matching rows by name (handy with many groups; view-only, never touches the graph), and while
+a filter is active the header **`all on`** / **`all off`** / **`all ✕`** (set to Never) buttons act
+only on the matching groups (otherwise on every group).
+**Reorder the rows** to taste: **`sort ⇅`** sorts by name (click toggles A–Z / Z–A; **right-click**
+restores the original order), or **drag a row by its `⠿` handle**. The chosen order is saved on the
+node (in `properties`), so it travels with the workflow and survives a reload — it's purely
+cosmetic and never affects the prompt. The node itself has no inputs or outputs and never runs on
+the backend — it's excluded from the prompt and only manipulates other nodes' modes on the client
+before the run. Category `Kinburg-Nodes/util`.
 
 ## Installation
 
