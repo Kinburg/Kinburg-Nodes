@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Siren Compare</title>
+<style>
+  :root{
+    --bg:#14161a; --panel:#1c1f26; --panel2:#232732; --line:#2e3441; --tx:#e6e9ef;
+    --dim:#98a1b3; --accent:#4f8cff; --warm:#ff9d33; --cool:#4fd8ff; --bad:#ff6b5e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font:13px/1.45 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  header{position:sticky;top:0;z-index:20;background:rgba(20,22,26,.97);
+         border-bottom:1px solid var(--line);backdrop-filter:blur(6px)}
+  .wrap{max-width:1500px;margin:0 auto;padding:9px 16px}
+  h1{margin:0 0 8px;font-size:16px;font-weight:600}
+  .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  button,select,input[type=number]{background:var(--panel2);color:var(--tx);
+    border:1px solid var(--line);border-radius:6px;padding:5px 10px;font-size:12px;
+    cursor:pointer;font-family:inherit}
+  input[type=number]{width:62px;cursor:text}
+  button:hover{border-color:#41506b}
+  button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .big{font-size:15px;padding:8px 16px;min-width:88px}
+  .time{font-variant-numeric:tabular-nums;color:var(--dim);min-width:112px}
+  .scrub{position:relative;height:11px;background:var(--panel2);border-radius:5px;
+         flex:1;min-width:160px;cursor:pointer;overflow:hidden}
+  .scrub .played{position:absolute;inset:0 auto 0 0;background:var(--accent);opacity:.55}
+  .scrub .loop{position:absolute;top:0;bottom:0;background:var(--warm);opacity:.3;display:none}
+  .scrub .win{position:absolute;top:0;bottom:0;border:1px solid #cdd6e6;
+              background:rgba(205,214,230,.12);display:none;pointer-events:none}
+  .view{border-top:1px solid var(--line);margin-top:8px;padding-top:8px;display:none}
+  .view.open{display:block}
+  .grp{display:flex;align-items:center;gap:9px;flex-wrap:wrap;border:1px solid var(--line);
+       border-radius:7px;padding:5px 9px}
+  .grp[data-off="1"]{opacity:.38;pointer-events:none}
+  .grp>b{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+  label{color:var(--dim);font-size:11px;display:inline-flex;align-items:center;gap:5px}
+  input[type=range]{width:104px;vertical-align:middle}
+  .val{font-variant-numeric:tabular-nums;color:var(--tx);min-width:44px;display:inline-block}
+  main{max-width:1500px;margin:0 auto;padding:12px 16px 60px}
+  .track{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+         margin-bottom:11px;overflow:hidden}
+  .track.solo{border-color:var(--accent)}
+  .track.off{opacity:.45}
+  .thead{display:flex;align-items:center;gap:9px;padding:7px 11px;background:var(--panel2)}
+  .name{font-weight:600;flex:1;min-width:80px}
+  .idx{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;
+       background:#2c3240;border-radius:4px;font-size:11px;color:var(--dim)}
+  .gv{color:var(--dim);font-variant-numeric:tabular-nums;min-width:52px;font-size:11px}
+  .sw{position:relative;line-height:0;cursor:crosshair;user-select:none;touch-action:none}
+  .sw.panning{cursor:grabbing}
+  .sw canvas{width:100%;display:block}
+  .ph{position:absolute;top:0;bottom:0;width:2px;background:#fff;
+      box-shadow:0 0 6px rgba(255,255,255,.85);pointer-events:none}
+  .lp{position:absolute;top:0;bottom:0;background:rgba(255,157,51,.18);
+      border-left:1px solid var(--warm);border-right:1px solid var(--warm);
+      pointer-events:none;display:none}
+  table{border-collapse:collapse;width:100%;font-size:12px}
+  th,td{border:1px solid var(--line);padding:5px 9px;text-align:left;
+        font-variant-numeric:tabular-nums;vertical-align:top}
+  th{background:var(--panel2);font-weight:600}
+  td.k{color:var(--dim);white-space:nowrap}
+  tr.diff td{background:rgba(255,157,51,.10)}
+  tr.diff td.k{color:var(--warm)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px}
+  .tabs{display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap;align-items:center}
+  .muted{color:var(--dim)}
+  .load{padding:26px;text-align:center;color:var(--dim)}
+  .bar{height:5px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:10px}
+  .bar i{display:block;height:100%;background:var(--accent);width:0}
+  kbd{background:#2c3240;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+      font-size:11px;font-family:inherit}
+  .err{color:var(--bad)}
+  .noteblock{margin-bottom:10px}
+  .noteblock b{display:block;margin-bottom:3px}
+  .noteblock pre{margin:0;white-space:pre-wrap;color:var(--dim);font-size:12px;
+                 font-family:ui-monospace,Consolas,monospace}
+  #lyr{position:fixed;top:0;right:0;bottom:0;width:34vw;min-width:260px;max-width:92vw;z-index:30;
+       background:var(--panel);border-left:1px solid var(--line);transform:translateX(101%);
+       transition:transform .18s ease;display:flex;flex-direction:column}
+  #lyr.open{transform:none}
+  #lyr.sizing{transition:none}
+  #grip{position:absolute;left:-4px;top:0;bottom:0;width:9px;cursor:ew-resize;z-index:2}
+  #grip:hover{background:rgba(79,140,255,.35)}
+  #lyr .hd{padding:9px 12px;background:var(--panel2);border-bottom:1px solid var(--line);
+           display:flex;gap:8px;align-items:center}
+  #lyr .bd{overflow:auto;padding:12px 14px;white-space:pre-wrap;font-size:13px;line-height:1.65;
+           flex:1;font-family:ui-monospace,Consolas,monospace}
+  /* AceStep lyric syntax: [Verse 1 - …] structure markers and (backing vocals) asides read as
+     separate layers from the sung words, which is how the model treats them too. */
+  .lyr-sec{color:#7fd3ff;font-weight:700}
+  .lyr-par{color:var(--warm);font-style:italic}
+</style>
+</head>
+<body>
+<div id="app"><div class="load">Loading…</div></div>
+<div id="lyr"><div id="grip"></div>
+  <div class="hd"><b style="flex:1">Lyrics</b>
+    <select id="lyrsel" onchange="paintLyrics()"></select>
+    <button onclick="toggleLyrics()">close</button></div>
+  <div class="bd" id="lyrbd"></div></div>
+
+<script>
+const DATA = /*__SIREN_DATA__*/null;
+
+/* ---------------------------------------------------------------- audio engine
+ * Web Audio, not <audio> elements. Every track is decoded into an AudioBuffer and all of them are
+ * started against the SAME AudioContext clock, so they stay sample-accurate for the whole run — no
+ * drift to nudge out, and no click when you switch which one you hear. That matters: the point of
+ * this page is flipping between takes mid-phrase, and a 30 ms hiccup at the switch is exactly the
+ * artifact you would mistake for a difference between the takes. Per-track GainNodes do the
+ * soloing, ramped over ~12 ms so the switch itself is silent.
+ */
+const S = {
+  ctx:null, buffers:[], gains:[], sources:[], playing:false,
+  startedAt:0, startOffset:0, duration:(DATA&&DATA.duration)||0,
+  loop:false, loopA:0, loopB:0, levelMatch:false, blind:false,
+  tab:"measure", diffOnly:false, lyricsOpen:false,
+};
+/* View state — all of it live, because the page holds the spectrogram DATA rather than a picture:
+ * recolouring, re-windowing, zooming and diffing are array arithmetic, not a server round trip. */
+const V = {
+  mode:"mel + waveform", chan:"mono", cmap:"magma", floor:-80, ceil:0, height:200,
+  ref:-1, span:6, detail:"musical", zoom:1, pan:0,
+  bpm:(DATA&&DATA.bpm)||0, beats:(DATA&&DATA.beats_per_bar)||4,
+};
+const T = (DATA && DATA.tracks) || [];
+const M = (DATA && DATA.matrix) || {bands:192, cols:1600, db_min:-120, db_max:6};
+const CACHE = {};
+const RENDER_W = Math.max(600, Math.min(M.cols, 2000));   // canvas pixels; zoom samples into it
+
+const RAMPS = {
+  magma:[[0,0,.02],[.28,.07,.38],[.68,.21,.38],[.95,.48,.24],[.99,.85,.6],[1,.99,.85]],
+  viridis:[[.27,0,.33],[.23,.32,.55],[.13,.57,.55],[.37,.79,.38],[.99,.91,.14]],
+  gray:[[0,0,0],[1,1,1]],
+  _diff:[[.3,.85,1],[.1,.35,.6],[0,0,0],[.65,.25,.1],[1,.65,.2]],
+};
+const GATE_BELOW_PEAK = 55;
+
+const dbToLin = db => Math.pow(10, db/20);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const fin = (v,f) => (Number.isFinite(v) ? v : f);
+const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function fmt(t){ t=Math.max(0,t||0); const m=Math.floor(t/60), s=t-m*60;
+  return m+":"+(s<10?"0":"")+s.toFixed(1); }
+
+/* -------------------------------------------------------------- zoom / time map */
+function winLen(){ return S.duration / Math.max(1, V.zoom); }
+function clampPan(){ V.pan = clamp(V.pan, 0, Math.max(0, S.duration - winLen())); }
+const t2frac = t => (t - V.pan) / Math.max(1e-9, winLen());
+const frac2t = f => V.pan + f * winLen();
+
+function lut(name){
+  const a = RAMPS[name] || RAMPS.magma, n = a.length-1, out = new Uint8Array(256*3);
+  for (let i=0;i<256;i++){
+    const p = i/255*n, lo = Math.min(n-1, Math.floor(p)), f = p-lo;
+    for (let c=0;c<3;c++) out[i*3+c] = Math.round((a[lo][c]*(1-f)+a[lo+1][c]*f)*255);
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------- transport */
+function position(){
+  if (!S.playing || !S.ctx) return S.startOffset;
+  let t = S.ctx.currentTime - S.startedAt + S.startOffset;
+  if (t < S.startOffset) t = S.startOffset;
+  if (S.loop && S.loopB > S.loopA && t > S.loopB){
+    const len = S.loopB - S.loopA;
+    t = S.loopA + ((t - S.loopA) % len);
+  }
+  return Math.min(t, S.duration);
+}
+function stopSources(){
+  S.sources.forEach(s => { try{s.stop();}catch(e){} try{s.disconnect();}catch(e){} });
+  S.sources = [];
+}
+function startAt(offset){
+  if (!S.ctx) return;
+  stopSources();
+  const when = S.ctx.currentTime + 0.06;
+  S.startedAt = when;
+  S.startOffset = clamp(fin(offset,0), 0, Math.max(0, S.duration-0.01));
+  S.buffers.forEach((buf,i) => {
+    if (!buf) return;
+    const src = S.ctx.createBufferSource();
+    src.buffer = buf;
+    if (S.loop && S.loopB > S.loopA){
+      src.loop = true; src.loopStart = S.loopA; src.loopEnd = Math.min(S.loopB, buf.duration);
+    }
+    src.connect(S.gains[i]);
+    src.start(when, Math.min(S.startOffset, Math.max(0, buf.duration-0.01)));
+    S.sources.push(src);
+  });
+  S.playing = true; paint();
+}
+function pause(){ if(!S.playing) return; S.startOffset = position(); stopSources();
+                  S.playing = false; paint(); }
+async function toggle(){
+  if (!S.ctx) return;
+  if (S.ctx.state === "suspended") await S.ctx.resume();
+  if (S.playing) pause(); else startAt(S.startOffset);
+}
+function seek(t){
+  const was = S.playing;
+  S.startOffset = clamp(fin(t, S.startOffset), 0, S.duration);
+  if (was) startAt(S.startOffset); else { stopSources(); paint(); }
+}
+function applyLoopLive(){
+  S.sources.forEach(src => {
+    if (S.loop && S.loopB > S.loopA){
+      src.loopStart = S.loopA; src.loopEnd = Math.min(S.loopB, src.buffer.duration); src.loop = true;
+    } else src.loop = false;
+  });
+}
+function applyGains(){
+  if (!S.ctx) return;
+  const anySolo = T.some(t => t.solo);
+  T.forEach((t,i) => {
+    const audible = anySolo ? !!t.solo : !t.mute;
+    const trim = S.levelMatch ? (t.match_db||0) : 0;
+    S.gains[i].gain.setTargetAtTime(audible ? dbToLin((t.gain_db||0)+trim) : 0,
+                                    S.ctx.currentTime, 0.012);
+  });
+  paintTracks();
+}
+
+/* ------------------------------------------------------- matrices and rendering */
+async function decodeImage(url){
+  // fetch -> blob -> createImageBitmap, NOT `new Image()` + `img.decode()`. `decode()` resolves
+  // when the image is ready to *paint*, so it never settles in a tab that isn't compositing (a
+  // background tab, a hidden pane) and the whole boot hangs instead of failing. createImageBitmap
+  // decodes off the main thread with no such dependency, and a bitmap made from a same-origin or
+  // data: blob doesn't taint the canvas either.
+  if (typeof createImageBitmap === "function"){
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP "+res.status);
+    return await createImageBitmap(await res.blob());
+  }
+  return await new Promise((ok, no) => {           // ancient-browser fallback
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = () => no(new Error("image failed to load"));
+    img.src = url;
+  });
+}
+
+async function loadMatrix(url){
+  const img = await decodeImage(url);
+  const w = img.width || img.naturalWidth, h = img.height || img.naturalHeight;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const cx = c.getContext("2d", {willReadFrequently:true});
+  cx.drawImage(img, 0, 0);
+  if (img.close) img.close();
+  const px = cx.getImageData(0, 0, c.width, c.height).data;
+  const n = c.width*c.height, out = new Float32Array(n), span = M.db_max - M.db_min;
+  // 16-bit dB packed high byte in R, low byte in G — 0.0019 dB per step over the shipped window.
+  for (let i=0;i<n;i++) out[i] = M.db_min + ((px[i*4]<<8 | px[i*4+1]) / 65535) * span;
+  return {d:out, w:c.width, h:c.height};
+}
+function rawMatrix(i, chan){
+  const t = T[i];
+  const name = (t.matrices && t.matrices[chan]) ? chan : "mono";
+  return CACHE["m:"+i+":"+name];
+}
+function poolFactors(){
+  // Mirror the Python rule: average energy over a musically sized tile before comparing, because
+  // two independent takes never agree bin-for-bin and the raw difference is mostly phase noise.
+  const colSec = S.duration / M.cols;
+  if (V.detail === "fine") return [1,1];
+  if (V.detail === "coarse") return [24, Math.max(1, Math.round(0.5/colSec))];
+  return [8, Math.max(1, Math.round(0.12/colSec))];
+}
+function pooled(i, chan){
+  const [fp, tp] = poolFactors();
+  const key = "p:"+i+":"+chan+":"+fp+":"+tp;
+  if (CACHE[key]) return CACHE[key];
+  const m = rawMatrix(i, chan);
+  if (!m) return null;
+  if (fp <= 1 && tp <= 1) return (CACHE[key] = m);
+  const w = m.w, h = m.h, out = new Float32Array(w*h);
+  // Average in the LINEAR domain, then back to dB: averaging decibels lets one near-empty bin drag
+  // a whole tile down.
+  for (let y0=0;y0<h;y0+=fp){
+    const y1 = Math.min(h, y0+fp);
+    for (let x0=0;x0<w;x0+=tp){
+      const x1 = Math.min(w, x0+tp);
+      let sum = 0, cnt = 0;
+      for (let y=y0;y<y1;y++) for (let x=x0;x<x1;x++){ sum += Math.pow(10, m.d[y*w+x]/10); cnt++; }
+      const v = 10*Math.log10(Math.max(sum/cnt, 1e-14));
+      for (let y=y0;y<y1;y++) for (let x=x0;x<x1;x++) out[y*w+x] = v;
+    }
+  }
+  return (CACHE[key] = {d:out, w:w, h:h});
+}
+function envelope(i, chan){
+  const key = "e:"+i+":"+chan;
+  if (CACHE[key]) return CACHE[key];
+  const buf = S.buffers[i];
+  if (!buf) return null;
+  let ch;
+  if (chan === "left") ch = buf.getChannelData(0);
+  else if (chan === "right") ch = buf.getChannelData(Math.min(1, buf.numberOfChannels-1));
+  else if (buf.numberOfChannels > 1){
+    const a = buf.getChannelData(0), b = buf.getChannelData(1);
+    ch = new Float32Array(a.length);
+    for (let k=0;k<a.length;k++) ch[k] = (a[k]+b[k])/2;
+  } else ch = buf.getChannelData(0);
+  // Laid out on the SHARED time base at matrix resolution, so a short take stops early rather than
+  // being stretched — and so zooming indexes it the same way it indexes the spectrogram.
+  const cols = M.cols, lo = new Float32Array(cols), hi = new Float32Array(cols);
+  const total = Math.round(S.duration*buf.sampleRate), per = Math.max(1, Math.floor(total/cols));
+  for (let x=0;x<cols;x++){
+    const s = x*per, e = Math.min(ch.length, s+per);
+    if (s >= ch.length){ lo[x]=0; hi[x]=0; continue; }
+    let mn = 1, mx = -1;
+    for (let k=s;k<e;k++){ const v = ch[k]; if (v<mn) mn=v; if (v>mx) mx=v; }
+    lo[x]=mn; hi[x]=mx;
+  }
+  return (CACHE[key] = {lo:lo, hi:hi});
+}
+
+function drawTrack(i){
+  const cv = document.getElementById("cv"+i);
+  if (!cv) return;
+  const outW = RENDER_W, bands = M.bands;
+  const wantSpec = V.mode !== "waveform", wantWave = V.mode !== "mel", ruler = 18;
+  const specH = wantSpec ? (wantWave ? Math.round(V.height*0.7) : V.height) : 0;
+  const waveH = wantWave ? (wantSpec ? V.height-specH : V.height) : 0;
+  cv.width = outW; cv.height = specH + waveH + ruler;
+  const cx = cv.getContext("2d");
+  cx.fillStyle = "#06070a"; cx.fillRect(0, 0, outW, cv.height);
+
+  // Zoom is a window into the shipped matrix, not a rescale of a finished picture: the columns are
+  // 40 ms apart, so there is real detail under the magnifier rather than interpolation.
+  const c0 = V.pan / S.duration * M.cols, cSpan = winLen() / S.duration * M.cols;
+  const colAt = x => clamp(Math.floor(c0 + x*cSpan/outW), 0, M.cols-1);
+  const isDiff = V.ref >= 0 && V.ref !== i && V.ref < T.length;
+  const dspan = Math.max(0.5, V.span);
+
+  if (wantSpec){
+    const A = pooled(i, V.chan), B = isDiff ? pooled(V.ref, V.chan) : null;
+    if (A){
+      const table = lut(isDiff ? "_diff" : V.cmap);
+      const img = cx.createImageData(outW, bands), px = img.data;
+      let gate = -1e9;
+      if (isDiff && B){
+        let peak = -1e9;
+        for (let k=0;k<A.d.length;k++){ if(A.d[k]>peak)peak=A.d[k]; if(B.d[k]>peak)peak=B.d[k]; }
+        gate = Math.max(V.floor, peak - GATE_BELOW_PEAK);
+      }
+      const lo = V.floor, span = Math.max(0.5, V.ceil - V.floor);
+      const cols = new Int32Array(outW);
+      for (let x=0;x<outW;x++) cols[x] = colAt(x);
+      for (let y=0;y<bands;y++){
+        const srcRow = (bands-1-y)*A.w, dstRow = y*outW;     // low frequencies at the bottom
+        for (let x=0;x<outW;x++){
+          const s = srcRow + cols[x];
+          let u;
+          if (isDiff && B){
+            // Floor both takes at the same level before differencing: below it they are equally
+            // inaudible, and letting near-empty bins disagree by tens of dB paints the whole frame.
+            const a = Math.max(A.d[s], gate), b = Math.max(B.d[s], gate);
+            u = clamp((a-b)/dspan, -1, 1)*0.5 + 0.5;
+          } else u = clamp((A.d[s]-lo)/span, 0, 1);
+          const c = (Math.round(u*255)|0)*3, o = (dstRow+x)*4;
+          px[o]=table[c]; px[o+1]=table[c+1]; px[o+2]=table[c+2]; px[o+3]=255;
+        }
+      }
+      const tmp = document.createElement("canvas");
+      tmp.width = outW; tmp.height = bands;
+      tmp.getContext("2d").putImageData(img, 0, 0);
+      cx.drawImage(tmp, 0, 0, outW, specH);
+    }
+  }
+  if (wantWave){
+    const y0 = specH, mid = y0 + waveH/2;
+    cx.fillStyle = "#0b0d12"; cx.fillRect(0, y0, outW, waveH);
+    cx.fillStyle = "#1b1f28"; cx.fillRect(0, Math.round(mid), outW, 1);
+    const eA = envelope(i, V.chan), eB = isDiff ? envelope(V.ref, V.chan) : null;
+    if (eA){
+      for (let x=0;x<outW;x++){
+        const c = colAt(x);
+        let top, bot;
+        if (isDiff && eB){
+          // Loudness difference, not a sample-wise subtraction: two takes that differ only in phase
+          // subtract to something as loud as the music itself, which measures nothing you can hear.
+          const a = Math.max(Math.abs(eA.lo[c]), Math.abs(eA.hi[c]));
+          const b = Math.max(Math.abs(eB.lo[c]), Math.abs(eB.hi[c]));
+          const f = clamp(20*Math.log10(Math.max(a,1e-6)/Math.max(b,1e-6))/dspan, -1, 1);
+          cx.fillStyle = f > 0 ? "#ff9d33" : "#4fd8ff";
+          top = mid - f*(waveH/2); bot = mid;
+        } else {
+          cx.fillStyle = "#73cbf0";
+          top = mid - clamp(eA.hi[c],-1,1)*(waveH/2);
+          bot = mid - clamp(eA.lo[c],-1,1)*(waveH/2);
+        }
+        const a0 = Math.min(top,bot), a1 = Math.max(top,bot);
+        cx.fillRect(x, a0, 1, Math.max(1, a1-a0));
+      }
+    }
+  }
+  drawGrid(cx, outW, specH+waveH, ruler);
+}
+
+function drawGrid(cx, w, h, ruler){
+  const win = winLen(), t0 = V.pan, t1 = V.pan + win;
+  const at = t => Math.round(t2frac(t)*(w-1));
+  if (V.bpm > 0){
+    const beat = 60/V.bpm, bar = beat*Math.max(1, V.beats);
+    let first = Math.floor(t0/bar)*bar;
+    for (let t=first; t<=t1; t+=bar){
+      if (t >= t0){ cx.fillStyle = "rgba(115,203,240,.55)"; cx.fillRect(at(t), 0, 1, h); }
+      for (let b=t+beat; b<t+bar-1e-6; b+=beat){
+        if (b>=t0 && b<=t1){ cx.fillStyle = "rgba(115,203,240,.20)"; cx.fillRect(at(b), 0, 1, h); }
+      }
+    }
+  }
+  const step = niceStep(win, w);
+  cx.fillStyle = "#0a0c11"; cx.fillRect(0, h, w, ruler);
+  cx.font = "11px ui-sans-serif,system-ui,sans-serif"; cx.textBaseline = "middle";
+  for (let t=Math.ceil(t0/step)*step; t<=t1+1e-6; t+=step){
+    const x = at(t);
+    if (V.bpm <= 0){ cx.fillStyle = "rgba(143,152,170,.35)"; cx.fillRect(x, 0, 1, h); }
+    cx.fillStyle = "#8f98aa"; cx.fillRect(x, h, 1, 4);
+    const lab = fmt(t), tw = cx.measureText(lab).width;
+    cx.fillText(lab, clamp(x-tw/2, 2, w-tw-2), h+ruler/2+1);
+  }
+}
+function niceStep(win, w){
+  const want = win*150/Math.max(1,w);
+  for (const s of [0.05,0.1,0.25,0.5,1,2,5,10,15,30,60,120,300,600]) if (s >= want) return s;
+  return 600;
+}
+
+let repaintPending = false;
+function repaintNow(){
+  clampPan();
+  T.forEach((_,i) => drawTrack(i));
+  paintLoop(); paint();
+}
+function repaint(){
+  // Coalesced through rAF so dragging a slider doesn't redraw more often than the screen updates.
+  // The FIRST paint goes through repaintNow() instead: rAF is throttled to nothing in a background
+  // tab, and a comparison opened in one should not be a set of blank canvases waiting for focus.
+  if (repaintPending) return;
+  repaintPending = true;
+  requestAnimationFrame(() => { repaintPending = false; repaintNow(); });
+}
+
+/* ------------------------------------------------------------------------ view */
+function paintTracks(){
+  const anySolo = T.some(t => t.solo);
+  T.forEach((t,i) => {
+    const el = document.getElementById("tr"+i);
+    if (!el) return;
+    const audible = anySolo ? !!t.solo : !t.mute;
+    el.classList.toggle("solo", !!t.solo);
+    el.classList.toggle("off", !audible);
+    const sb = document.getElementById("solo"+i); if (sb) sb.classList.toggle("on", !!t.solo);
+    const mb = document.getElementById("mute"+i);
+    if (mb){ mb.classList.toggle("on", !!t.mute); mb.textContent = t.mute ? "muted" : "on"; }
+  });
+}
+function paint(){
+  const p = position(), f = t2frac(p);
+  document.querySelectorAll(".ph").forEach(el => {
+    const vis = f >= 0 && f <= 1;
+    el.style.display = vis ? "block" : "none";
+    if (vis) el.style.left = (f*100)+"%";
+  });
+  const pl = document.getElementById("played");
+  if (pl) pl.style.width = (S.duration ? p/S.duration*100 : 0)+"%";
+  const wn = document.getElementById("winbox");
+  if (wn){
+    const on = V.zoom > 1.001;
+    wn.style.display = on ? "block" : "none";
+    if (on){ wn.style.left = (V.pan/S.duration*100)+"%";
+             wn.style.width = (winLen()/S.duration*100)+"%"; }
+  }
+  const tl = document.getElementById("tl");
+  if (tl) tl.textContent = fmt(p)+" / "+fmt(S.duration);
+  const pb = document.getElementById("play"); if (pb) pb.textContent = S.playing?"❚❚ Pause":"▶ Play";
+  const zb = document.getElementById("zv"); if (zb) zb.textContent = V.zoom.toFixed(1)+"×";
+}
+function tick(){
+  if (S.playing){
+    const p = position();
+    // Keep the playhead on screen when zoomed in, or it walks straight out of view.
+    if (V.zoom > 1.001){
+      const f = t2frac(p);
+      if (f < 0.02 || f > 0.94){ V.pan = p - winLen()*0.3; clampPan(); repaint(); }
+    }
+    paint();
+    if (!S.loop && p >= S.duration-0.02){ pause(); S.startOffset = 0; paint(); }
+  }
+  requestAnimationFrame(tick);
+}
+function paintLoop(){
+  const has = S.loop && S.loopB > S.loopA;
+  document.querySelectorAll(".lp").forEach(e => {
+    e.style.display = has ? "block" : "none";
+    if (has){
+      const a = clamp(t2frac(S.loopA),0,1), b = clamp(t2frac(S.loopB),0,1);
+      e.style.left = (a*100)+"%"; e.style.width = ((b-a)*100)+"%";
+    }
+  });
+  const g = document.getElementById("loopbar");
+  if (g){
+    g.style.display = has ? "block" : "none";
+    if (has){ g.style.left = (S.loopA/S.duration*100)+"%";
+              g.style.width = ((S.loopB-S.loopA)/S.duration*100)+"%"; }
+  }
+  const b = document.getElementById("loopbtn"); if (b) b.classList.toggle("on", !!S.loop);
+}
+
+/* ------------------------------------------------------------------------ tabs */
+function diffTable(rows, keys){
+  let h = '<table><thead><tr><th>field</th>';
+  T.forEach((t,i) => { h += "<th>"+esc(S.blind ? "Take "+(i+1) : t.label)+"</th>"; });
+  h += "</tr></thead><tbody>";
+  let shown = 0;
+  keys.forEach(k => {
+    const vals = rows.map(r => r[k]);
+    const differs = vals.some(v => String(v) !== String(vals[0]));
+    if (S.diffOnly && !differs) return;
+    shown++;
+    h += '<tr class="'+(differs?"diff":"")+'"><td class="k">'+esc(k)+"</td>";
+    vals.forEach(v => { h += "<td>"+esc(v===undefined?"—":v)+"</td>"; });
+    h += "</tr>";
+  });
+  return shown ? h+"</tbody></table>" : "<div class='muted'>Nothing differs between these takes.</div>";
+}
+function tabBody(){
+  if (S.tab === "measure" || S.tab === "settings"){
+    const key = S.tab === "measure" ? "metrics" : "settings";
+    const rows = T.map(t => t[key] || {}), keys = [];
+    rows.forEach(r => Object.keys(r).forEach(k => { if (!keys.includes(k)) keys.push(k); }));
+    if (keys.length) return diffTable(rows, keys);
+    return S.tab === "measure" ? "<div class='muted'>No measurements.</div>"
+      : "<div class='muted'>No settings wired — connect Generation Info Filter's "
+        + "<b>settings_data</b> to see them here.</div>";
+  }
+  if (!T.some(t => (t.notes||"").trim())) return "<div class='muted'>No notes wired.</div>";
+  return T.map((t,i) => '<div class="noteblock"><b>'+esc(S.blind?"Take "+(i+1):t.label)
+    + "</b><pre>"+esc(t.notes||"—")+"</pre></div>").join("");
+}
+function setTab(name){
+  S.tab = name;
+  ["measure","settings","notes"].forEach(k => {
+    const b = document.getElementById("tab_"+k); if (b) b.classList.toggle("on", k===name);
+  });
+  document.getElementById("tabbody").innerHTML = tabBody();
+}
+function doDiffOnly(){
+  S.diffOnly = !S.diffOnly;
+  document.getElementById("dob").classList.toggle("on", S.diffOnly);
+  document.getElementById("tabbody").innerHTML = tabBody();
+}
+
+/* ---------------------------------------------------------------------- lyrics */
+function toggleLyrics(){
+  S.lyricsOpen = !S.lyricsOpen;
+  document.getElementById("lyr").classList.toggle("open", S.lyricsOpen);
+  const b = document.getElementById("lyrbtn"); if (b) b.classList.toggle("on", S.lyricsOpen);
+}
+function hiLyrics(text){
+  // Escape first, then colour: the markers are plain brackets, which escaping leaves alone.
+  return esc(text)
+    .replace(/\[[^\]\n]*\]/g, m => '<span class="lyr-sec">'+m+"</span>")
+    .replace(/\([^)\n]*\)/g, m => '<span class="lyr-par">'+m+"</span>");
+}
+function paintLyrics(){
+  const sel = document.getElementById("lyrsel");
+  const i = sel ? (parseInt(sel.value,10)||0) : 0;
+  const txt = (T[i] && T[i].lyrics) || "";
+  document.getElementById("lyrbd").innerHTML =
+    txt.trim() ? hiLyrics(txt) : "<span class='muted'>(no lyrics wired)</span>";
+}
+function wireGrip(){
+  const grip = document.getElementById("grip"), panel = document.getElementById("lyr");
+  let on = false;
+  grip.addEventListener("mousedown", e => { on = true; panel.classList.add("sizing");
+                                            e.preventDefault(); });
+  window.addEventListener("mousemove", e => {
+    if (!on) return;
+    panel.style.width = clamp(window.innerWidth - e.clientX, 260, window.innerWidth*0.92)+"px";
+  });
+  window.addEventListener("mouseup", () => { on = false; panel.classList.remove("sizing"); });
+}
+
+/* --------------------------------------------------------------------- markup */
+function trackMarkup(t, i){
+  return '<div class="track" id="tr'+i+'">'
+    + '<div class="thead"><span class="idx">'+(i+1)+"</span>"
+    + '<span class="name">'+esc(S.blind ? "Take "+(i+1) : t.label)+"</span>"
+    + (t.time ? '<span class="gv" title="generation time">⏱ '+esc(t.time)+"</span>" : "")
+    + '<button id="solo'+i+'" onclick="doSolo('+i+')" title="Hear only this one (key '+(i+1)+')">solo</button>'
+    + '<button id="mute'+i+'" onclick="doMute('+i+')">on</button>'
+    + '<input type="range" min="-24" max="12" step="0.5" value="'+(t.gain_db||0)
+    + '" oninput="doGain('+i+',this.value)" title="Trim" style="width:100px">'
+    + '<span class="gv" id="gv'+i+'">'+(t.gain_db||0).toFixed(1)+" dB</span></div>"
+    + '<div class="sw" data-i="'+i+'"><canvas id="cv'+i+'"></canvas>'
+    + '<div class="lp"></div><div class="ph"></div></div></div>';
+}
+function opt(list, cur){
+  return list.map(v => '<option value="'+esc(v)+'"'+(v===cur?" selected":"")+">"+esc(v)+"</option>").join("");
+}
+function render(){
+  const d = DATA || {};
+  const hasStereo = T.some(t => t.matrices && t.matrices.left);
+  document.getElementById("app").innerHTML =
+    "<header><div class='wrap'>"
+    + "<h1>"+esc(d.title||"Siren Compare")+"</h1>"
+    + "<div class='row'>"
+      + "<button class='big' id='play' onclick='toggle()'>▶ Play</button>"
+      + "<button onclick='seek(0)'>⏮</button>"
+      + "<span class='time' id='tl'>0:00.0 / 0:00.0</span>"
+      + "<div class='scrub' id='scrub'><div class='loop' id='loopbar'></div>"
+        + "<div class='played' id='played'></div><div class='win' id='winbox'></div></div>"
+      + "<button id='loopbtn' onclick='doLoopToggle()'>loop</button>"
+      + "<button onclick='clearLoop()'>clear</button>"
+      + "<button id='lmb' onclick='doLevelMatch()' title='Trim every take to the same RMS so the louder one does not simply win'>match level</button>"
+      + "<button id='blindb' onclick='doBlind()'>blind</button>"
+      + "<button onclick='doAll()'>hear all</button>"
+      + "<button id='lyrbtn' onclick='toggleLyrics()'>lyrics</button>"
+      + "<button id='viewbtn' onclick='doView()'>view ▾</button>"
+    + "</div>"
+    + "<div class='view' id='viewbar'><div class='row'>"
+      + "<div class='grp'><b>scope</b>"
+        + "<label>mode <select onchange='setV(\"mode\",this.value)'>"+opt(["mel + waveform","mel","waveform"],V.mode)+"</select></label>"
+        + (hasStereo ? "<label>channel <select onchange='setV(\"chan\",this.value)'>"+opt(["mono","left","right"],V.chan)+"</select></label>" : "")
+        + "<label>colour <select onchange='setV(\"cmap\",this.value)'>"+opt(["magma","viridis","gray"],V.cmap)+"</select></label>"
+        + "<label>floor <input type='range' min='-120' max='-20' step='1' value='"+V.floor+"' oninput='setV(\"floor\",+this.value)'><span class='val' id='v_floor'>"+V.floor+" dB</span></label>"
+        + "<label>ceiling <input type='range' min='-60' max='20' step='1' value='"+V.ceil+"' oninput='setV(\"ceil\",+this.value)'><span class='val' id='v_ceil'>"+V.ceil+" dB</span></label>"
+        + "<label>height <input type='range' min='80' max='480' step='10' value='"+V.height+"' oninput='setV(\"height\",+this.value)'><span class='val' id='v_height'>"+V.height+"</span></label>"
+      + "</div>"
+      + "<div class='grp'><b>zoom</b><span class='val' id='zv'>1.0×</span>"
+        + "<button onclick='doZoom(1/1.6)'>−</button><button onclick='doZoom(1.6)'>+</button>"
+        + "<button onclick='fitZoom()'>fit</button>"
+        + "<button onclick='zoomToLoop()' title='Zoom to the marked loop'>to loop</button>"
+        + "<span class='muted'>wheel over a scope zooms · drag pans</span></div>"
+    + "</div><div class='row' style='margin-top:7px'>"
+      + "<div class='grp' id='diffgrp'><b>diff</b>"
+        + "<label>against <select onchange='setV(\"ref\",+this.value)'><option value='-1'>none</option>"
+          + T.map((t,i) => "<option value='"+i+"'>"+esc(t.label)+"</option>").join("")+"</select></label>"
+        + "<span id='diffdials' style='display:flex;gap:9px;align-items:center'>"
+        + "<label title='How big a difference is painted at full colour. Smaller = subtler differences become visible; larger = only gross ones show.'>"
+          + "full colour at ±<input type='range' min='1' max='24' step='0.5' value='"+V.span+"' oninput='setV(\"span\",+this.value)'><span class='val' id='v_span'>"+V.span+" dB</span></label>"
+        + "<label title='How much to average before comparing. Two takes never agree bin-for-bin; averaging over a musical tile throws away the phase noise.'>"
+          + "averaging <select onchange='setV(\"detail\",this.value)'>"+opt(["musical","fine","coarse"],V.detail)+"</select></label>"
+        + "</span></div>"
+      + "<div class='grp'><b>grid</b>"
+        + "<label>bpm <input type='number' min='0' max='300' value='"+V.bpm+"' onchange='setV(\"bpm\",+this.value)'></label>"
+        + "<label>beats <input type='number' min='1' max='16' value='"+V.beats+"' onchange='setV(\"beats\",+this.value)'></label></div>"
+      + "<span class='muted'>the spectrogram data ships once — everything here is live</span>"
+    + "</div></div>"
+    + "<div class='row muted' style='margin-top:6px;font-size:11px'>"
+      + "<kbd>space</kbd> play · <kbd>1</kbd>…<kbd>9</kbd> solo · <kbd>0</kbd> all · <kbd>←</kbd><kbd>→</kbd> ±5 s · "
+      + "<kbd>L</kbd> loop · <kbd>+</kbd><kbd>−</kbd> zoom · click a scope to seek · drag to pan · shift-drag to mark a loop</div>"
+    + "</div></header><main>"
+    + T.map(trackMarkup).join("")
+    + "<div class='card'><div class='tabs'>"
+      + "<button id='tab_measure' onclick=\"setTab('measure')\" class='on'>Measurements</button>"
+      + "<button id='tab_settings' onclick=\"setTab('settings')\">Settings</button>"
+      + "<button id='tab_notes' onclick=\"setTab('notes')\">Notes</button>"
+      + "<button id='dob' onclick='doDiffOnly()'"+(S.diffOnly?" class='on'":"")+">differences only</button>"
+    + "</div><div id='tabbody'></div></div>"
+    + (d.footer ? "<div class='card muted' style='white-space:pre-wrap;margin-top:11px'>"+esc(d.footer)+"</div>" : "")
+    + "</main>";
+  document.getElementById("lyrsel").innerHTML =
+    T.map((t,i) => "<option value='"+i+"'>"+esc(t.label)+"</option>").join("");
+  wireScopes(); paintTracks(); setTab(S.tab); paintLyrics(); syncDiffGroup(); repaintNow();
+}
+
+/* ------------------------------------------------------------------ interaction */
+function syncDiffGroup(){
+  const d = document.getElementById("diffdials");
+  if (d) d.style.opacity = (V.ref < 0) ? ".35" : "1";
+  const g = document.getElementById("diffgrp");
+  if (g) g.dataset.off = "";        // the group itself stays usable so you can pick a reference
+  if (d) d.style.pointerEvents = (V.ref < 0) ? "none" : "auto";
+}
+function setV(k, v){
+  V[k] = v;
+  if (k === "ceil" && V.ceil <= V.floor) V.ceil = V.floor + 1;
+  if (k === "floor" && V.ceil <= V.floor) V.ceil = V.floor + 1;
+  const el = document.getElementById("v_"+k);
+  if (el) el.textContent = (k === "height") ? v : v+" dB";
+  if (k === "ref") syncDiffGroup();
+  repaint();
+}
+function doView(){
+  const b = document.getElementById("viewbar");
+  b.classList.toggle("open");
+  document.getElementById("viewbtn").classList.toggle("on", b.classList.contains("open"));
+}
+function doZoom(mul, anchorFrac){
+  const a = (anchorFrac === undefined) ? 0.5 : anchorFrac;
+  const tAnchor = frac2t(a);
+  V.zoom = clamp(V.zoom*mul, 1, 400);
+  V.pan = tAnchor - a*winLen();
+  clampPan(); repaint();
+}
+function fitZoom(){ V.zoom = 1; V.pan = 0; repaint(); }
+function zoomToLoop(){
+  if (S.loopB <= S.loopA) return;
+  const len = Math.max(0.05, S.loopB - S.loopA);
+  V.zoom = clamp(S.duration/len, 1, 400);
+  V.pan = S.loopA - (winLen()-len)/2;
+  clampPan(); repaint();
+}
+function doSolo(i){
+  const was = T[i].solo;
+  T.forEach(t => { t.solo = false; });
+  T[i].solo = !was;
+  applyGains();
+}
+function doMute(i){ T[i].mute = !T[i].mute; applyGains(); }
+function doAll(){ T.forEach(t => { t.solo=false; t.mute=false; }); applyGains(); }
+function doGain(i,v){
+  T[i].gain_db = parseFloat(v)||0;
+  const el = document.getElementById("gv"+i);
+  if (el) el.textContent = T[i].gain_db.toFixed(1)+" dB";
+  applyGains();
+}
+function doLevelMatch(){
+  S.levelMatch = !S.levelMatch;
+  document.getElementById("lmb").classList.toggle("on", S.levelMatch);
+  applyGains();
+}
+function doBlind(){ S.blind = !S.blind; render();
+  document.getElementById("blindb").classList.toggle("on", S.blind); }
+function doLoopToggle(){
+  if (S.loopB <= S.loopA){ S.loopA = 0; S.loopB = S.duration; }
+  S.loop = !S.loop; applyLoopLive(); paintLoop();
+}
+function clearLoop(){ S.loop=false; S.loopA=S.loopB=0; applyLoopLive(); paintLoop(); }
+
+function wireScopes(){
+  const scrub = document.getElementById("scrub");
+  if (scrub) scrub.addEventListener("click", e => {
+    const r = scrub.getBoundingClientRect();
+    if (r.width > 0) seek((e.clientX-r.left)/r.width*S.duration);
+  });
+  document.querySelectorAll(".sw").forEach(el => {
+    let mode = null, from = 0, panFrom = 0, moved = 0;
+    // null when there is nothing to measure against (collapsed pane, hidden tab): the caller then
+    // leaves the position alone rather than seeking to NaN, which would throw inside start().
+    const frac = e => {
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 0)) return null;
+      return clamp((e.clientX-r.left)/r.width, 0, 1);
+    };
+    el.addEventListener("wheel", e => {
+      const f = frac(e); if (f === null) return;
+      e.preventDefault();
+      doZoom(e.deltaY < 0 ? 1.25 : 1/1.25, f);
+    }, {passive:false});
+    el.addEventListener("mousedown", e => {
+      const f = frac(e); if (f === null) return;
+      e.preventDefault();
+      moved = 0;
+      if (e.shiftKey){ mode = "loop"; from = frac2t(f); }
+      else { mode = "pan"; from = e.clientX; panFrom = V.pan; }
+    });
+    el.addEventListener("mousemove", e => {
+      if (!mode) return;
+      const f = frac(e); if (f === null) return;
+      moved = Math.max(moved, Math.abs(e.clientX - (mode === "pan" ? from : e.clientX)));
+      if (mode === "loop"){
+        const t = frac2t(f);
+        S.loopA = Math.min(from,t); S.loopB = Math.max(from,t);
+        S.loop = true; paintLoop();
+      } else if (moved > 3){
+        el.classList.add("panning");
+        const r = el.getBoundingClientRect();
+        V.pan = panFrom - (e.clientX - from)/r.width*winLen();
+        clampPan(); repaint();
+      }
+    });
+    window.addEventListener("mouseup", e => {
+      if (!mode) return;
+      const m = mode; mode = null;
+      el.classList.remove("panning");
+      if (m === "loop"){
+        if (S.loopB-S.loopA < 0.02) clearLoop(); else { applyLoopLive(); seek(S.loopA); }
+      } else if (moved <= 3){
+        const f = frac(e); if (f !== null) seek(frac2t(f));   // a click, not a drag
+      }
+    });
+  });
+}
+
+window.addEventListener("keydown", e => {
+  if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  if (e.code === "Space"){ e.preventDefault(); toggle(); return; }
+  if (e.key === "0"){ doAll(); return; }
+  if (/^[1-9]$/.test(e.key)){ const i = +e.key-1; if (i < T.length) doSolo(i); return; }
+  if (e.key === "ArrowLeft"){ e.preventDefault(); seek(position()-5); return; }
+  if (e.key === "ArrowRight"){ e.preventDefault(); seek(position()+5); return; }
+  if (e.key === "+" || e.key === "=") { doZoom(1.6, t2frac(position())); return; }
+  if (e.key === "-" || e.key === "_") { doZoom(1/1.6, t2frac(position())); return; }
+  if (e.key === "l" || e.key === "L") doLoopToggle();
+});
+
+/* ------------------------------------------------------------------------ boot */
+function offlineHelp(){
+  // Opened straight off disk, everything blocked. Worth saying plainly: the console messages
+  // ("tainted by cross-origin data", "blocked by CORS policy") describe a browser rule, not a
+  // broken bundle, and nobody should have to open devtools to find that out.
+  return "<div class='load err' style='text-align:left;max-width:760px;margin:24px auto'>"
+    + "<b>This page was opened straight off disk, so the browser blocked its own media.</b>"
+    + "<div class='muted' style='margin-top:10px;line-height:1.7'>"
+    + "A <code>file://</code> page counts as having no origin, so the browser refuses both the "
+    + "audio (CORS) and the spectrogram data (reading it back out of a canvas would be "
+    + "\"cross-origin\"). Nothing is wrong with the bundle — the same folder works fine over HTTP."
+    + "<br><br><b>Either</b> re-run the node with <b>self_contained</b> switched on: that writes a "
+    + "single .html with the takes and the scopes inlined, which a browser <i>will</i> read off "
+    + "disk. Pick MP3 or Opus first if you are sending it to someone."
+    + "<br><br><b>Or</b> serve this folder — <code>python -m http.server</code> inside it, then "
+    + "open <code>http://127.0.0.1:8000</code>."
+    + "</div></div>";
+}
+
+async function boot(){
+  const app = document.getElementById("app");
+  if (!T.length){ app.innerHTML = "<div class='load err'>No tracks.</div>"; return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC){ app.innerHTML = "<div class='load err'>This browser has no Web Audio.</div>"; return; }
+  S.ctx = new AC();
+  const steps = T.length*2;
+  let done = 0;
+  const bump = () => { const p = document.getElementById("pg");
+                       if (p) p.style.width = (++done/steps*100)+"%"; };
+  app.innerHTML = "<div class='load'>Loading "+T.length+" take(s)…<div class='bar'><i id='pg'></i></div></div>";
+  let failed = 0, matFailed = 0, wanted = 0;
+  for (let i=0;i<T.length;i++){
+    T[i].solo = false; T[i].mute = false; T[i].gain_db = T[i].gain_db || 0;
+    try {
+      const res = await fetch(T[i].file);
+      if (!res.ok) throw new Error("HTTP "+res.status);
+      const buf = await S.ctx.decodeAudioData(await res.arrayBuffer());
+      S.buffers[i] = buf;
+      S.duration = Math.max(S.duration, buf.duration);
+    } catch (err){
+      S.buffers[i] = null; failed++;
+      T[i].label = (T[i].label||"") + "  [could not decode: "+err.message+"]";
+    }
+    bump();
+    for (const [name, url] of Object.entries(T[i].matrices || {})){
+      wanted++;
+      try { CACHE["m:"+i+":"+name] = await loadMatrix(url); }
+      catch (err){ matFailed++; console.error("matrix", String(url).slice(0,80), err); }
+      T[i].matrices[name] = true;   // see below — keep the KEY, drop the source string
+    }
+    // In self_contained mode those sources were base64 data: URIs — megabytes of text that nothing
+    // reads again once the AudioBuffer and the Float32 matrices exist. Only the channel NAMES are
+    // still needed (rawMatrix picks by key, render() checks for a 'left' to offer the channel
+    // selector), so the values go and the keys stay, and the strings become collectable instead of
+    // sitting in the heap for the whole session.
+    T[i].file = null;
+    bump();
+    const g = S.ctx.createGain(); g.gain.value = 1; g.connect(S.ctx.destination);
+    S.gains[i] = g;
+  }
+  // Nothing at all came through and we are on file:// — that is the browser's origin rule, not a
+  // broken bundle, and it deserves a sentence rather than a silent empty page.
+  if (location.protocol === "file:" && failed === T.length && matFailed === wanted && wanted > 0){
+    app.innerHTML = offlineHelp();
+    return;
+  }
+  if (failed || matFailed){
+    console.warn("[Siren Compare] " + failed + "/" + T.length + " take(s) and "
+                 + matFailed + "/" + wanted + " matri(ces) failed to load.");
+  }
+  if (!S.duration) S.duration = Math.max(...T.map(t => t.duration||0), 1);
+  render();
+  wireGrip();
+  applyGains();
+  tick();
+}
+boot();
+</script>
+</body>
+</html>

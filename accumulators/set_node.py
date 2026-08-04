@@ -31,6 +31,26 @@ class SetAccumImages:
         return (image,)
 
 
+class SetAccumAudio:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audio": ("AUDIO",),
+                "name": ("STRING", {"default": "AUDIO", "tooltip": "Accumulator name. A Get Accumulator (audio) with the same name collects every Set that shares it."}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 9999, "tooltip": "Position in the collected list. Auto-increments when you copy the node."}),
+            },
+        }
+
+    RETURN_TYPES = ("AUDIO",)
+    RETURN_NAMES = ("audio",)
+    FUNCTION = "run"
+    CATEGORY = "Kinburg-Nodes/accumulators"
+
+    def run(self, audio, name="", index=0):
+        return (audio,)
+
+
 class SetAccumTexts:
     @classmethod
     def INPUT_TYPES(cls):
@@ -111,5 +131,5 @@ class SetAccumGenInfo:
         return (data,)
 
 
-NODE_CLASS_MAPPINGS = {"SetAccumImages": SetAccumImages, "SetAccumTexts": SetAccumTexts, "SetAccumPrompts": SetAccumPrompts, "SetAccumCaptions": SetAccumCaptions, "SetAccumGenInfo": SetAccumGenInfo}
-NODE_DISPLAY_NAME_MAPPINGS = {"SetAccumImages": "Set Accumulator (images)", "SetAccumTexts": "Set Accumulator (texts)", "SetAccumPrompts": "Set Accumulator (prompts)", "SetAccumCaptions": "Set Accumulator (captions)", "SetAccumGenInfo": "Set Accumulator (gen info)"}
+NODE_CLASS_MAPPINGS = {"SetAccumImages": SetAccumImages, "SetAccumAudio": SetAccumAudio, "SetAccumTexts": SetAccumTexts, "SetAccumPrompts": SetAccumPrompts, "SetAccumCaptions": SetAccumCaptions, "SetAccumGenInfo": SetAccumGenInfo}
+NODE_DISPLAY_NAME_MAPPINGS = {"SetAccumImages": "Set Accumulator (images)", "SetAccumAudio": "Set Accumulator (audio)", "SetAccumTexts": "Set Accumulator (texts)", "SetAccumPrompts": "Set Accumulator (prompts)", "SetAccumCaptions": "Set Accumulator (captions)", "SetAccumGenInfo": "Set Accumulator (gen info)"}

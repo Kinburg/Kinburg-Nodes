@@ -8,6 +8,7 @@ const PAIRS = [
   { set: "SetAccumImages",   get: "GetAccumImages",     slot: "image_", type: "IMAGE" },
   // Same Set, a second Get that returns a LIST instead of a batch (different sizes coexist).
   { set: "SetAccumImages",   get: "GetAccumImagesList", slot: "image_", type: "IMAGE" },
+  { set: "SetAccumAudio",    get: "GetAccumAudio",    slot: "audio_", type: "AUDIO"  },
   { set: "SetAccumTexts",    get: "GetAccumTexts",    slot: "text_",  type: "STRING" },
   // Compare-tuned text pairs: same wiring as texts, but the Get joins with a fixed
   // separator (prompts: a '---' line; captions: a newline) to match Image Compare.
@@ -150,12 +151,18 @@ function registerGet(pair) {
 for (const setClass of new Set(PAIRS.map((p) => p.set))) registerSet(setClass);
 for (const pair of PAIRS) registerGet(pair);
 
-// ---- Collect All: one button that (re)wires every Get accumulator in the graph ----
+// ---- Collect All, hosted on Image Compare ----
+// Collecting exists to feed a comparison, so the one button that (re)wires EVERY Get accumulator in
+// the graph lives on the node that consumes them, rather than on a separate helper node.
+// Every node that consumes accumulated results and therefore wants the button. Collecting exists
+// to feed a comparison, so it lives on the nodes that consume them rather than a helper node.
+const COLLECT_HOSTS = new Set(["ImageCompareHTML", "KinburgSirenCompare"]);
+
 app.registerExtension({
-  name: "Kinburg.CollectAllAccumulators",
+  name: "Kinburg.CollectAllOnCompare",
   async setup() {
-    // Auto-collect before the prompt is queued, whenever a Collect All node has its toggle on.
-    // Runs synchronously before the original queuePrompt builds the prompt, so the freshly
+    // Auto-collect before the prompt is queued, whenever an (active) Image Compare has the toggle
+    // on. Runs synchronously before the original queuePrompt builds the prompt, so the freshly
     // (re)wired links are the ones that get queued. Idempotent — patched only once.
     const orig = app.queuePrompt;
     if (typeof orig === "function" && !orig.__kinburgAutoCollect) {
@@ -163,7 +170,8 @@ app.registerExtension({
         try {
           const g = app.graph;
           const on = (g?._nodes || []).some(
-            (n) => isType(n, "CollectAllAccumulators") && wv(n, "auto_collect")?.value);
+            (n) => [...COLLECT_HOSTS].some((h) => isType(n, h)) && isActive(n)
+                 && wv(n, "auto_collect")?.value);
           if (on) collectAll(g);
         } catch (e) {
           console.error("[Kinburg] auto-collect before queue failed:", e);
@@ -175,13 +183,14 @@ app.registerExtension({
     }
   },
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData.name !== "CollectAllAccumulators") return;
+    if (!COLLECT_HOSTS.has(nodeData.name)) return;
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       const r = onNodeCreated?.apply(this, arguments);
-      this.addWidget("button", "🔌 Collect All", null, () => {
-        const n = collectAll(this.graph);
-        this.title = `Collect All (${n})`;
+      // The label keeps the last count, so pressing it tells you how many Gets were re-wired
+      // without stealing the node's title (which Image Compare uses for its own name).
+      const btn = this.addWidget("button", "🔌 Collect All", null, () => {
+        btn.label = `🔌 Collect All (${collectAll(this.graph)})`;
         this.setDirtyCanvas(true, true);
       });
       return r;

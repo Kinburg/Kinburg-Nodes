@@ -38,7 +38,7 @@ class LocalLLMVisionSettingsGGUF:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "mmproj": (_list_mmproj(), {"tooltip": "Projector mmproj .gguf from ComfyUI/models/llm (mmproj-named files first). Choose the placeholder to type a path in mmproj_path."}),
+                "mmproj": (_list_mmproj(), {"tooltip": "Projector mmproj .gguf from ComfyUI/models/llm (subfolders included, so you can keep a model + its mmproj together in one folder; mmproj-named files first). Choose the placeholder to type a path in mmproj_path."}),
                 "mmproj_path": ("STRING", {"default": "", "tooltip": "Full path to the mmproj .gguf (when mmproj is the placeholder). Surrounding quotes are stripped."}),
                 "vision_handler": (_VISION_HANDLER_LABELS, {"default": "auto (MTMD)", "tooltip": "auto (MTMD) is llama.cpp's generic multimodal loader and fits most modern vision GGUFs. Switch to the model's family only if auto fails."}),
                 "image_max_side": ("INT", {"default": 1024, "min": 0, "max": 4096, "step": 64, "tooltip": "Downscale each image so its longest side is at most this many px before sending. 0 = full size."}),

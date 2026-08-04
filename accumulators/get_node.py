@@ -14,6 +14,7 @@ from ..util.separators import BLOCK_JOINER
 _MODES = ["as is", "crop to smallest", "pad to largest"]
 
 _DATA_RE = re.compile(r"^data_(\d+)$")
+_AUDIO_RE = re.compile(r"^audio_(\d+)$")
 
 
 def _data_idx(key):
@@ -86,6 +87,43 @@ class GetAccumImagesList:
         # kwargs carries the frontend-wired image_1, image_2, … links — emit them as a list
         # (each batch split into single frames), so different sizes travel separately.
         return UnlimImageList().run(**kwargs)
+
+
+class GetAccumAudio:
+    """Get Accumulator (audio) — collect every Set Accumulator (audio) of a name into a LIST.
+
+    A list rather than a batch: two takes are only batchable when they share a length and a sample
+    rate, and comparing takes of different lengths is a normal thing to want. Plug it into Siren
+    Compare (Audio) where a stack of `audio_*` inputs used to go.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "name": ("STRING", {"default": "AUDIO", "tooltip": "Accumulator name to collect — must match the Set Accumulator (audio) nodes. Press 'Collect' to (re)wire after adding/removing Sets."}),
+                "skip_empty": ("BOOLEAN", {"default": True, "tooltip": "Skip empty / bypassed branches so a muted take doesn't leave a hole in the list."}),
+            },
+        }
+
+    RETURN_TYPES = ("AUDIO",)
+    RETURN_NAMES = ("audios",)
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "run"
+    CATEGORY = "Kinburg-Nodes/accumulators"
+
+    def run(self, name="", skip_empty=True, **kwargs):
+        # kwargs carries the frontend-wired audio_1, audio_2, … links, in index order.
+        out = []
+        for key in sorted((k for k in kwargs if _AUDIO_RE.match(k)),
+                          key=lambda k: int(_AUDIO_RE.match(k).group(1))):
+            v = kwargs.get(key)
+            if isinstance(v, list):          # a wired list input arrives already flattened
+                out.extend(a for a in v if isinstance(a, dict) and a.get("waveform") is not None)
+            elif isinstance(v, dict) and v.get("waveform") is not None:
+                out.append(v)
+            elif not skip_empty:
+                out.append(v)
+        return (out,)
 
 
 class GetAccumTexts:
@@ -191,25 +229,9 @@ class GetAccumGenInfo:
         return (json.dumps(dumps, ensure_ascii=False),)
 
 
-class CollectAllAccumulators:
-    """One-button helper — its frontend 'Collect All' button (re)wires every Get Accumulator
-    in the graph at once. With `auto_collect` on, the frontend also re-collects automatically
-    right before the workflow is queued. No execution role; purely an editor convenience
-    (web/accumulators.js).
-    """
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required": {
-            "auto_collect": ("BOOLEAN", {"default": True, "tooltip": "On: re-collect every accumulator automatically right before the workflow runs. Off: only when you press the button."}),
-        }}
+# The former "Collect All Accumulators" helper node is gone: collecting only ever served a
+# comparison, so its button and its `auto_collect` toggle now live on **Image Compare (HTML)**
+# (see web/accumulators.js). Nothing about the Set/Get pairs themselves changed.
 
-    RETURN_TYPES = ()
-    FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
-
-    def run(self, auto_collect=True):
-        return ()
-
-
-NODE_CLASS_MAPPINGS = {"GetAccumImages": GetAccumImages, "GetAccumImagesList": GetAccumImagesList, "GetAccumTexts": GetAccumTexts, "GetAccumPrompts": GetAccumPrompts, "GetAccumCaptions": GetAccumCaptions, "GetAccumGenInfo": GetAccumGenInfo, "CollectAllAccumulators": CollectAllAccumulators}
-NODE_DISPLAY_NAME_MAPPINGS = {"GetAccumImages": "Get Accumulator (images)", "GetAccumImagesList": "Get Accumulator (images list)", "GetAccumTexts": "Get Accumulator (texts)", "GetAccumPrompts": "Get Accumulator (prompts)", "GetAccumCaptions": "Get Accumulator (captions)", "GetAccumGenInfo": "Get Accumulator (gen info)", "CollectAllAccumulators": "Collect All Accumulators"}
+NODE_CLASS_MAPPINGS = {"GetAccumImages": GetAccumImages, "GetAccumImagesList": GetAccumImagesList, "GetAccumAudio": GetAccumAudio, "GetAccumTexts": GetAccumTexts, "GetAccumPrompts": GetAccumPrompts, "GetAccumCaptions": GetAccumCaptions, "GetAccumGenInfo": GetAccumGenInfo}
+NODE_DISPLAY_NAME_MAPPINGS = {"GetAccumImages": "Get Accumulator (images)", "GetAccumImagesList": "Get Accumulator (images list)", "GetAccumAudio": "Get Accumulator (audio)", "GetAccumTexts": "Get Accumulator (texts)", "GetAccumPrompts": "Get Accumulator (prompts)", "GetAccumCaptions": "Get Accumulator (captions)", "GetAccumGenInfo": "Get Accumulator (gen info)"}

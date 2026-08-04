@@ -4,3 +4,4 @@ __pycache__/
 /.claude/
 /prompt_presets/data/
 /card_presets/data/
+/model_presets/data/

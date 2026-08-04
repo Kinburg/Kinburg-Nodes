@@ -1,0 +1,22 @@
+{
+  "_comment": "Criteria catalog for the 'Criteria Builder' node. Each entry becomes a toggle; toggled-on entries are emitted as 'key: description' lines for the Critic Settings / Vision Judge 'criteria' field. 'default' = the toggle starts ON. 'group' is metadata (ordering / future UI) and is optional. To ADD YOUR OWN without editing this file (survives a git pull), create 'catalog.user.json' next to it with the same {\"criteria\": [ ... ]} shape; entries there extend this list and override any matching 'key'. Keys must be lowercase [a-z0-9_]; 'extra' and 'criteria_in' are reserved.",
+  "criteria": [
+    {"key": "overall_quality", "default": true, "group": "core", "description": "overall image quality — matches the intended style, no artifacts, no excess noise, correct proportions, good color reproduction"},
+    {"key": "prompt_compliance", "default": true, "group": "core", "description": "how accurately the image follows the generation prompt — subjects, attributes, counts and relations are all present and correct"},
+    {"key": "anatomy", "default": true, "group": "figure", "description": "all required limbs present, no extra or missing limbs, correct joint placement, natural and proportional body"},
+    {"key": "hands", "default": false, "group": "figure", "description": "hands and fingers — correct finger count, natural shape and pose, no fused, missing or extra digits"},
+    {"key": "face", "default": false, "group": "figure", "description": "face quality — symmetry, natural features, correct eyes and teeth, no distortion, consistent with the intended subject"},
+    {"key": "composition", "default": false, "group": "framing", "description": "composition and framing — balanced layout, clear focal point, good use of the frame, no awkward cropping"},
+    {"key": "perspective", "default": false, "group": "framing", "description": "perspective and geometry — consistent vanishing points and scale, no warped or physically impossible structures"},
+    {"key": "camera", "default": true, "group": "framing", "description": "camera angle and camera settings (lens, depth of field, framing) match the intent"},
+    {"key": "lighting", "default": false, "group": "look", "description": "lighting — believable direction and intensity, coherent shadows and highlights, matches the described mood"},
+    {"key": "color", "default": false, "group": "look", "description": "color — pleasing coherent palette, accurate white balance, no oversaturation or unwanted color casts"},
+    {"key": "sharpness", "default": false, "group": "look", "description": "sharpness and focus — the subject is crisp where intended, no unwanted blur and no over-sharpening halos"},
+    {"key": "detail", "default": false, "group": "look", "description": "level of detail — fine textures and small elements render cleanly, no mushy or smeared areas"},
+    {"key": "background", "default": false, "group": "scene", "description": "background — coherent with the scene, no distracting artifacts, correct depth and separation from the subject"},
+    {"key": "style_consistency", "default": false, "group": "scene", "description": "style consistency — one coherent art style throughout, no clashing rendering styles within the image"},
+    {"key": "realism", "default": false, "group": "scene", "description": "photorealism — looks like a real photograph, believable materials and skin, no tell-tale AI look (use only for realistic targets)"},
+    {"key": "aesthetics", "default": false, "group": "scene", "description": "aesthetic appeal — overall attractiveness and visual impact, tasteful and pleasing to look at"},
+    {"key": "text", "default": true, "group": "extra", "description": "if the prompt requests text — present, character-accurate, correct color/font/size/placement; if the prompt has NO text, give the top score"}
+  ]
+}

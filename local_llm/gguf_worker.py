@@ -178,6 +178,37 @@ def _apply_chat_template_override(llm, req, chat_handler):
         sys.stdout.flush()
 
 
+def _continue_prompt(llm, req, messages, cont_text):
+    """Raw prompt tokens for RESUMING a truncated assistant reply.
+
+    `messages` end just before that reply. We render them through the model's chat template with
+    the generation prompt on (so the string ends with an opened assistant turn), glue the reply's
+    own text onto it, and tokenize ourselves — `create_completion` would otherwise add a second
+    BOS on top of the one most templates already emit."""
+    from llama_cpp.llama_chat_format import Jinja2ChatFormatter
+    eos_id, bos_id = llm.token_eos(), llm.token_bos()
+    eos = llm._model.token_get_text(eos_id) if eos_id != -1 else ""
+    bos = llm._model.token_get_text(bos_id) if bos_id != -1 else ""
+
+    tmpl = (req.get("chat_template") or "").strip()
+    if not tmpl:
+        tmpl = ((getattr(llm, "metadata", None) or {}).get("tokenizer.chat_template") or "").strip()
+    if not tmpl:
+        raise ValueError("this model ships no chat template, so a truncated reply can't be "
+                         "resumed — set chat_template_path on the Settings node")
+
+    fmt = Jinja2ChatFormatter(template=tmpl, eos_token=eos, bos_token=bos,
+                              stop_token_ids=[eos_id] if eos_id != -1 else None)
+    try:
+        rendered = fmt(messages=messages).prompt
+    except TypeError:  # older signatures want the llama handle too
+        rendered = fmt(llama=llm, messages=messages).prompt
+
+    text = rendered + cont_text
+    add_bos = not (bos and text.startswith(bos))
+    return llm.tokenize(text.encode("utf-8"), add_bos=add_bos, special=True)
+
+
 def _user_content(req):
     """User message content: text-only string, or a list of image_url parts + the text when
     the request carries `images` (base64 data: URIs encoded by the node)."""
@@ -351,7 +382,18 @@ def main():
                 r, c = m.get("role"), m.get("content", "")
                 if r in ("user", "assistant") and isinstance(c, str) and c:
                     messages.append({"role": r, "content": c})
-            messages.append({"role": "user", "content": _user_content(req)})
+            # The chat node can ask for a turn with NO user message — "answer from the
+            # conversation, your instructions are already in the system prompt" — so a persona
+            # switch doesn't have to inject a prodding message into everyone's context. Then we
+            # stop at the history and let the template open an assistant turn. Opt-in via
+            # allow_no_user so an empty prompt still behaves as before for every other node, and
+            # never send an empty list. Note some templates (mistral) demand alternating roles
+            # and will reject two assistant turns in a row.
+            skip_user = (req.get("allow_no_user") and messages
+                         and not (req.get("user_prompt") or "").strip()
+                         and not req.get("images"))
+            if not skip_user:
+                messages.append({"role": "user", "content": _user_content(req)})
 
             # count_only: prefill just to read the prompt token count (text + chat template +
             # image tokens, exactly as the model sees them) — used by the Context Sizer. A
@@ -362,8 +404,15 @@ def main():
                        "prompt_tokens": int((out.get("usage") or {}).get("prompt_tokens", 0))})
                 continue
 
+            # Resuming a reply that ran out of max_tokens: prefill the model with the partial
+            # text so it writes the REST of that message instead of starting a new one. Needs the
+            # raw completion API, so it can't go through the multimodal handlers.
+            cont = req.get("continue_text") or ""
+            if cont and (chat_handler is not None or req.get("images")):
+                raise ValueError("a truncated reply can't be resumed on the vision path — "
+                                 "type a message instead")
+
             gen_kwargs = dict(
-                messages=messages,
                 max_tokens=int(req.get("max_tokens", 512)),
                 temperature=float(req.get("temperature", 0.7)),
                 top_p=float(req.get("top_p", 0.95)),
@@ -377,12 +426,21 @@ def main():
                 gen_kwargs["stop"] = stop
 
             out_fmt = req.get("output_format", "text")
-            if out_fmt == "json_object":
+            if out_fmt == "json_object" and not cont:
+                # create_completion has no response_format; a resumed reply is mid-document
+                # anyway, so re-imposing "must be a whole JSON object" would be wrong.
                 gen_kwargs["response_format"] = {"type": "json_object"}
             elif out_fmt == "gbnf_grammar":
                 gtext = (req.get("grammar") or "").strip()
                 if gtext:
                     gen_kwargs["grammar"] = llama_cpp.LlamaGrammar.from_string(gtext)
+
+            if cont:
+                gen_kwargs["prompt"] = _continue_prompt(llm, req, messages, cont)
+                run = llm.create_completion
+            else:
+                gen_kwargs["messages"] = messages
+                run = llm.create_chat_completion
 
             use_stream = "grammar" not in gen_kwargs
             gen_kwargs["stream"] = use_stream
@@ -390,11 +448,12 @@ def main():
             parts = []
             n = 0
             finish_reason = ""
+            prompt_tokens = 0  # exact prefill count, when the (non-stream) path exposes usage
             if use_stream:
                 stream_text = bool(req.get("stream_text"))
-                for chunk in llm.create_chat_completion(**gen_kwargs):
+                for chunk in run(**gen_kwargs):
                     ch = chunk["choices"][0]
-                    piece = (ch.get("delta") or {}).get("content")
+                    piece = ch.get("text") if cont else (ch.get("delta") or {}).get("content")
                     if piece:
                         parts.append(piece)
                         n += 1
@@ -405,11 +464,13 @@ def main():
                         finish_reason = ch["finish_reason"]
                 text = "".join(parts)
             else:
-                out = llm.create_chat_completion(**gen_kwargs)
+                out = run(**gen_kwargs)
                 ch = out["choices"][0]
-                text = ch["message"]["content"]
+                text = ch["text"] if cont else ch["message"]["content"]
                 finish_reason = ch.get("finish_reason", "")
-                n = int((out.get("usage") or {}).get("completion_tokens", 0))
+                usage = out.get("usage") or {}
+                n = int(usage.get("completion_tokens", 0))
+                prompt_tokens = int(usage.get("prompt_tokens", 0))
                 _progress(n)
 
             def _count(s):
@@ -421,6 +482,21 @@ def main():
                 except Exception:
                     return 0
 
+            # Context accounting for the caller (used by the Ouroboros live log to show how close
+            # each call runs to the limit). n_ctx() is the authoritative loaded window; n_tokens is
+            # the actual KV-cache fill after this call (prompt prefill + generated, INCLUDING the
+            # chat-template and image tokens on the vision path). Both best-effort.
+            try:
+                ctx_limit = int(llm.n_ctx())
+            except Exception:
+                ctx_limit = int(req.get("n_ctx", 0) or 0)
+            try:
+                ctx_used = int(getattr(llm, "n_tokens", 0) or 0)
+            except Exception:
+                ctx_used = 0
+            if not prompt_tokens and ctx_used:
+                prompt_tokens = max(0, ctx_used - n)
+
             _send({
                 "status": "success",
                 "output": text,
@@ -428,6 +504,9 @@ def main():
                 "sys_tokens": _count(req.get("system_prompt")),
                 "user_tokens": _count(req.get("user_prompt")),
                 "output_tokens": n,
+                "prompt_tokens": prompt_tokens,
+                "context_used": ctx_used if ctx_used else (prompt_tokens + n),
+                "n_ctx": ctx_limit,
             })
         except Exception as e:
             _send({"status": "error", "message": str(e),

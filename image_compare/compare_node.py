@@ -25,6 +25,27 @@ VIEWER_TEMPLATE = os.path.join(NODE_DIR, "viewer.html")
 
 _ALLOWED_HTML = set()
 _ALLOWED_DIRS = {}   # token -> folder abspath (portable comparison bundles)
+_DIRS_KEEP = 300     # how many tokens the on-disk registry remembers
+
+
+def _registry_path():
+    """Where the token → folder map is persisted, next to the report DB."""
+    import folder_paths
+    return os.path.join(folder_paths.get_output_directory(), "kinburg", "compare_dirs.json")
+
+
+def _load_registry():
+    """A node's 'Open comparison' URL is saved INTO the workflow, so it long outlives the process
+    that minted it — but the token map used to live only in memory, so every ComfyUI restart turned
+    every previously-issued link into a 404. The map is written to disk and re-read on a miss."""
+    try:
+        with open(_registry_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for tok, p in data.items():
+                _ALLOWED_DIRS.setdefault(str(tok), str(p))
+    except Exception:
+        pass
 
 
 def _register_html(path):
@@ -33,6 +54,24 @@ def _register_html(path):
 
 def _register_dir(token, path):
     _ALLOWED_DIRS[token] = os.path.abspath(path)
+    try:
+        reg = _registry_path()
+        os.makedirs(os.path.dirname(reg), exist_ok=True)
+        keep = {}
+        try:
+            with open(reg, "r", encoding="utf-8") as f:
+                old = json.load(f)
+            if isinstance(old, dict):
+                keep = {str(k): str(v) for k, v in old.items()}
+        except Exception:
+            pass
+        keep[token] = _ALLOWED_DIRS[token]
+        if len(keep) > _DIRS_KEEP:           # dicts keep insertion order — drop the oldest
+            keep = dict(list(keep.items())[-_DIRS_KEEP:])
+        with open(reg, "w", encoding="utf-8") as f:
+            json.dump(keep, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        print(f"[ImageCompare] could not persist the comparison-folder registry: {e}")
 
 
 try:
@@ -51,7 +90,11 @@ try:
     async def _serve_compare_dir(request):
         # Serve any file inside a registered portable bundle folder, so the page's relative
         # image paths ("images/000.png") resolve when opened in-app.
-        base = _ALLOWED_DIRS.get(request.match_info.get("token", ""))
+        token = request.match_info.get("token", "")
+        base = _ALLOWED_DIRS.get(token)
+        if base is None:            # not minted by THIS process — a link from before a restart
+            _load_registry()
+            base = _ALLOWED_DIRS.get(token)
         tail = request.match_info.get("tail", "") or "index.html"
         if not base or not os.path.isdir(base):
             return web.Response(status=404, text="not found")
@@ -382,17 +425,16 @@ class ImageCompare:
                 "font_size": ("INT", {"default": 0, "min": 0, "max": 200, "tooltip": "Caption font size in px; 0 = auto from image width"}),
                 "filename_prefix": ("STRING", {"default": "compare"}),
                 "save_captioned_images": ("BOOLEAN", {"default": False, "tooltip": "Also save the captioned images as PNG files in the output folder"}),
+                "auto_collect": ("BOOLEAN", {"default": True, "tooltip": "Re-wire every Get Accumulator in the graph automatically, right before the workflow is queued — so a Set you just added, removed, muted or bypassed is picked up without a click. Off: only the '🔌 Collect All' button collects. (Purely an editor convenience; the backend ignores this value.)"}),
             },
             "optional": {
                 "captions": ("STRING", {"forceInput": True, "tooltip": "One caption per line, aligned with the image batch (e.g. from Get Accumulator (captions)). Missing lines become empty."}),
                 "prompts": ("STRING", {"forceInput": True, "tooltip": "Full generation prompts, one block per image separated by a '---' line (e.g. from Get Accumulator (prompts)). Shown on the page (toggleable). Multi-line prompts are fine."}),
-                "show_prompts": ("BOOLEAN", {"default": False, "tooltip": "Initial visibility of prompts on the page (can be toggled there too)"}),
                 "times": ("STRING", {"forceInput": True, "tooltip": "Per-image generation time — one entry per line, aligned with the image batch (e.g. Stop Timer's 'elapsed' collected via Get Accumulator (texts) with a newline separator). Shown under each image and used for the grid's 'Time' sort. Strings like '12.34 s', '1m 30s', '890 ms' or '00:01:30' are parsed for sorting."}),
                 "output_dir": ("STRING", {"default": "", "tooltip": "Custom save folder (absolute path). Empty = ComfyUI output. A served copy is also written to output so 'Open comparison' keeps working."}),
                 "embed_images": ("BOOLEAN", {"default": False, "tooltip": "How the comparison is saved. Off (default): a portable FOLDER '<prefix>_<datetime>/' with a light index.html + an images/ subfolder (relative links) — open it offline, zip/share it, or open it in-app. On: a single self-contained .html with every image inlined as base64 (one file, much larger). Both open from the node's URL output."}),
                 "save_prompts_txt": ("BOOLEAN", {"default": False, "tooltip": "Save each prompt to a .txt file named like its image"}),
                 "settings_data": ("GEN_SETTINGS", {"tooltip": "Structured per-image settings from Generation Info Filter's 'settings_data' output. Rendered under each image (one '[Class] param: value' line per field; toggleable) and stored by field (EAV) when you 'Save run to report'."}),
-                "show_settings": ("BOOLEAN", {"default": True, "tooltip": "Initial visibility of settings on the page (can be toggled there too)"}),
                 "report_db": ("STRING", {"default": "", "tooltip": "SQLite file the page's 'Save run to report' button writes to. Empty = <output>/kinburg/reports.db. The value is shown (and editable) on the page."}),
                 "reference": ("IMAGE", {"tooltip": "Optional baseline to measure similarity against (e.g. the source of an upscale/img2img, or the fp16 output when checking a quantized model). When connected, SSIM + PSNR are computed for every image vs this reference and shown on the page (with a 'Similarity' sort)."}),
                 "reference_index": ("INT", {"default": -1, "min": -1, "max": 4096, "tooltip": "Used only when no 'reference' image is connected: 0-based index of the image IN THIS BATCH to use as the baseline (every image is measured against it). -1 = off (no metrics)."}),
@@ -413,10 +455,13 @@ class ImageCompare:
     def run(self, images, title, columns, overlay_captions,
             caption_position, font_size, filename_prefix,
             captions="", save_captioned_images=False,
-            prompts="", show_prompts=False, times="",
+            prompts="", times="",
             output_dir="", save_prompts_txt=False,
-            show_settings=True, settings_data="", report_db="", embed_images=False,
-            reference=None, reference_index=-1, judge_data=""):
+            settings_data="", report_db="", embed_images=False,
+            reference=None, reference_index=-1, judge_data="",
+            auto_collect=True,          # editor-only (the Collect All button lives on this node)
+            show_prompts=False, show_settings=True):   # retired widgets: still honoured if an old
+                                                       # API prompt sends them, otherwise defaulted
         # INPUT_IS_LIST: every input arrives wrapped in a list. Unwrap the scalar widgets and
         # flatten the images (a batch or a list, possibly mixed sizes) into one list of PIL.
         title = _first(title, "Image comparison")

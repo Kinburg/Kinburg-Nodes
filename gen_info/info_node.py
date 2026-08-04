@@ -8,6 +8,13 @@ structured data (`data`, a JSON string, type GEN_INFO) for the Generation Info F
 Each entry carries the node's `class_type`, its 1-based occurrence index `ord` among nodes
 of the same class (so a repeated node like PrimitiveString can be addressed as
 `PrimitiveString[2]`), and its literal widget `params`.
+
+A walk can only read widget LITERALS, so a node that decides things at run time (Chimera resolving
+its step split, sigma boundary and per-stage times) can hand what it knows to the optional `extra`
+input: it is merged in front of the walked entries into ONE dump, keeping the branch a single Set
+Accumulator (gen info) — i.e. a single image downstream. `extra` is an addition to a dump, never a
+dump on its own: a branch that skips this node has none of the shared settings, and the Filter's
+`differences` mode then keeps every field the other branches have (absent counts as a difference).
 """
 import json
 from collections import deque
@@ -42,12 +49,39 @@ def _fmt_value(v, cap=300):
     return s if len(s) <= cap else s[:cap] + "…"
 
 
+def _parse_info(v):
+    """A GEN_INFO value is a JSON string of [{class_type, ord, params}] (or an already-parsed list)."""
+    if not v:
+        return []
+    if isinstance(v, list):
+        return [e for e in v if isinstance(e, dict)]
+    try:
+        d = json.loads(v)
+    except Exception:
+        return []
+    return [e for e in d if isinstance(e, dict)] if isinstance(d, list) else []
+
+
+def _renumber(entries):
+    """Recount the per-class `ord` after merging, so every entry stays uniquely addressable by the
+    Generation Info Filter's `ClassType[n].param` selectors."""
+    counts, out = {}, []
+    for e in entries:
+        ct = e.get("class_type", "?")
+        counts[ct] = counts.get(ct, 0) + 1
+        out.append({"class_type": ct, "ord": counts[ct], "params": e.get("params", {}) or {}})
+    return out
+
+
 class GenerationInfo:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "passthrough": ("LATENT", {"tooltip": "Pass your LATENT through here — tap it downstream of where the branches converge (e.g. the sampler's LATENT output) so the upstream walk reaches them all. The node lists every upstream node's widget settings."}),
+            },
+            "optional": {
+                "extra": ("GEN_INFO", {"tooltip": "Optional GEN_INFO from a node that reports its OWN runtime facts — e.g. Chimera's 'gen_extra_info', which knows the resolved step split, the sigma boundary and the per-stage times that a graph walk can't see (a walk only reads widget literals). It is an ADDITION, not a whole dump: it gets merged IN FRONT of the walked settings into a single one, so the branch still feeds one Set Accumulator (gen info) and stays one image. Wiring such a node straight into the accumulator instead would give that branch a dump with none of the shared settings — and the Filter's 'differences' mode then keeps every field the other branches have, since present-vs-absent counts as a difference."}),
             },
             "hidden": {"prompt": "PROMPT", "unique_id": "UNIQUE_ID"},
         }
@@ -58,8 +92,8 @@ class GenerationInfo:
     OUTPUT_NODE = True
     CATEGORY = "Kinburg-Nodes/util"
 
-    def run(self, passthrough, prompt=None, unique_id=None):
-        data = self._collect(prompt, unique_id)
+    def run(self, passthrough, extra=None, prompt=None, unique_id=None):
+        data = _renumber(_parse_info(extra) + self._collect(prompt, unique_id))
         text = self._render(data)
         return {"ui": {"kinburg_geninfo": [text]},
                 "result": (passthrough, text, json.dumps(data, ensure_ascii=False))}

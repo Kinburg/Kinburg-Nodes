@@ -11,7 +11,8 @@ the node mappings from the root `__init__.py`, and the sets are split into subpa
 > `config` + `user_prompt`, plus an optional **`image`** input (connect it, with a `Vision Settings`
 > node on the config, for vision) and two optional connect-only overrides — **`system_override`**
 > (replaces the config's system prompt) and **`grammar_override`** (a GBNF grammar that forces
-> `gbnf_grammar` output). The chat node uses the same bundle. (See the Settings/chat section below.)
+> `gbnf_grammar` output). A **`live_preview`** toggle streams the output to an **`LLM Live Log`**
+> node as it's written (see below). The chat node uses the same bundle. (See the Settings/chat section below.)
 
 Run a GGUF LLM right inside ComfyUI **with guaranteed VRAM unloading**: inference
 runs in a separate worker process, so when it exits the OS reclaims all of its VRAM —
@@ -26,6 +27,24 @@ args straight to llama-cpp-python's `Llama()` loader — `key=value` per line (e
 unknown keys are ignored and changing it reloads the model. Note these are **Python-binding
 args, not llama.cpp CLI flags** — CLI-only flags like `--spec-type draft-mtp` have no effect
 here. These options live on the **`Local LLM Settings (GGUF)`** node (see below).
+
+**`LLM Live Log`** — turn on the `Local LLM (GGUF)` node's **`live_preview`** toggle and drop an
+`LLM Live Log` node anywhere (no connections): it shows the output as it streams, token by token,
+a block per generation labelled by the source node (like the Ouroboros Live Log). One log node
+shows the stream from every LLM node. Each block's header counts the tokens generated so far
+against the run's `max_tokens` ceiling (`142/512 tok`) plus the live `tok/s`, with a thin **budget
+bar** under it, and on finish adds the context fill (`ctx 1780/4096 (43%) · prompt 1268 + gen 512`)
+— amber when the output hit `max_tokens` or the context is nearly full. **Reasoning is separated
+from the answer**: `<think>` blocks (or everything before your `answer_marker` line) render dim and
+italic in a collapsible section headed `thinking… 4.2s`, which folds itself away the moment the
+answer starts — click it to keep it open. The split mirrors the node's own, so what the log shows
+as the answer is exactly the `text` output. Hover a block for a **copy** button (copies the answer,
+without the reasoning); **`clear`** in the header wipes the log. The view follows
+the newest text only while you're parked at the bottom: **scroll up and it stays put** while
+generation continues, with a **`↓ latest`** pill to jump back. **Text runs only** — a grammar/JSON
+run (e.g. a card via `grammar_override`) takes the worker's non-stream path, so its result shows up
+in the log once it finishes rather than token by token. Same websocket mechanism as the Chat node's
+live reply.
 
 A **`chat_template_path`** field (also advanced) points to a `chat_template.jinja` file that
 **overrides the model's built-in chat template**. Leave it empty (the default) and llama.cpp uses
@@ -47,6 +66,12 @@ sending; pair vision with `output_format = json_object` for a structured image d
 optional connect-only inputs override the config for that node: **`system_override`** (replaces the
 system prompt) and **`grammar_override`** (a GBNF grammar that replaces the config's grammar and
 forces `gbnf_grammar` output). Category `Kinburg-Nodes/LLM`.
+
+The **`model`** (Local LLM Settings) and **`mmproj`** (Vision Settings) pickers scan
+`ComfyUI/models/llm` **recursively**, so you can group a model with its `mmproj` — or organize
+families — into **subfolders**; they show as `folder/model.gguf` in the dropdown (and the newer
+ComfyUI frontend renders `/` as nested submenus). As before, pick the placeholder to type any
+absolute path in `model_path` / `mmproj_path` instead.
 
 **`Local LLM (server client, text)`** is a different beast: instead of the Python binding it
 talks HTTP to an OpenAI-compatible LLM **server**, so you get the server's **full command
@@ -78,9 +103,11 @@ Feed an LLM node reference material so it weaves named subjects into an expanded
 **`Character Card`** has fields (name, gender, age, eyes, hair, build, outfit, distinctive
 features, free-form notes…) and outputs one tidy Markdown block, **skipping every empty
 field**. **`Entity Card`** is its free-form sibling for non-people (an object, place, faction…) —
-a name + a description. Both cards carry a **`save_preset_as`** field: type a name and run to save
-the card to a reusable library — it saves at run time, so it captures whatever's filled in, whether
-**typed or wired in** (e.g. from a photo description); reuse it via **Card Presets** (below).
+a name + a description. Both cards carry a **`save_preset_as`** field (+ optional comma-separated
+**`tags`**): type a name and run to save the card to a reusable library — it saves at run time, so
+it captures whatever's filled in, whether **typed or wired in** (e.g. from a photo description);
+reuse it via **Card Presets** (below). To save an LLM's JSON card in one step instead, use **Card
+Save**.
 **`Context Collector`** gathers any number of cards / text chunks (auto-growing
 `item_N` inputs, empties skipped) under a `title` and wraps them in a delimited block —
 `<context>…</context>`, a custom tag, a Markdown heading, or none — so the model can tell
@@ -115,6 +142,17 @@ own review; **`summary`** (a readable per-image report, with the per-criterion b
 multi-criteria mode); and **`best_index`** (the top-scoring image). Closes the generate →
 auto-evaluate → pick-the-best loop entirely locally. Category `Kinburg-Nodes/LLM`.
 
+**`Criteria Builder 📋`** builds that `criteria` string for you — tick criteria instead of typing
+them. It carries a catalog of curated, model-guiding descriptions (overall_quality, anatomy, hands,
+face, composition, lighting, color, sharpness, background, camera, realism, text, …), one **toggle**
+each; toggled-on ones are emitted as `name: description` lines. An **`extra`** box appends custom
+lines, and an optional **`criteria_in`** input merges an upstream string first (chain builders, or
+start from an existing set), with duplicates removed by name. The single **`criteria`** output feeds
+both **Vision LLM Judge** and **Critic Settings (GGUF)** — right-click their `criteria` field →
+**Convert widget to input** and wire it in (empty output = single overall score). The catalog is
+`criteria_presets/catalog.json`; drop a **`catalog.user.json`** next to it (same shape) to add your
+own criteria without editing the shipped file (it survives a git pull). Category `Kinburg-Nodes/LLM`.
+
 ### `ouroboros/` — Ouroboros (Self-Correcting Sampler) 🐍
 **`Ouroboros (Self-Correcting Sampler) 🐍`** is a **closed-loop text→image optimizer** in one node.
 Each iteration: an LLM **expands/rewrites the prompt** → an image is **sampled** → a vision
@@ -122,8 +160,10 @@ Each iteration: an LLM **expands/rewrites the prompt** → an image is **sampled
 terms** for the flaws it sees → the advice feeds the next revision. It repeats until the score hits a
 **target** or **`max_iterations`**, keeping the **best image across all iterations**. The loop is a
 plain Python `while` inside the node (no graph-expansion loop), and generation is owned internally
-via ComfyUI's own `common_ksampler` / CLIP encode / VAE decode — so the node is effectively a
-KSampler variant. It uses a **fixed seed** and a fixed start latent so only the prompt varies (a
+via ComfyUI's own **custom-sampler API** (`comfy.sample.sample_custom`) / CLIP encode / VAE decode —
+so the node is effectively a KSampler variant (the custom-sampler path is what lets Sampler Settings
+expose per-sampler knobs like `eta`; sigmas come from a stock `KSampler` object, so single-stage
+results match the classic path). It uses a **fixed seed** and a fixed start latent so only the prompt varies (a
 clean optimization signal); the critic's advice targets the **weakest criterion** (see Vision Judge's
 multi-criteria scoring), and negative terms **accumulate** (deduped) across iterations.
 
@@ -132,28 +172,74 @@ Settings follow the repo's bundle idiom, in two small companion nodes:
   denoise, plus a **`seed_mode`** (`fixed` / `random` / `increment` / `decrement`) and **`seed_step`**
   — how the seed changes each iteration (`fixed` keeps the signal clean; the others explore, at the
   cost of mixing "prompt improved" with "seed got lucky"; `random` is reproducible from the seed).
-  (Image size comes from the latent — see below.) Category `Kinburg-Nodes/sampling`.
+  Advanced sampler knobs (reached via the custom-sampler API): **`eta`** (stochasticity for
+  ancestral / SDE samplers — `0` = deterministic, higher = more variation; no-op on deterministic
+  samplers), **`s_noise`** (extra-noise multiplier on stochastic steps; >1 = more grain/detail),
+  **`s_churn`** (adds stochasticity to otherwise-deterministic euler / heun / dpm_2), and
+  **`solver_type`** — which has **two separate vocabularies** in k-diffusion: `midpoint` / `heun` for
+  the `dpmpp_2m_sde` family, and `phi_1` / `phi_2` for the SEEDS and exp_heun ones (`seeds_2`,
+  `exp_heun_2_x0`, `exp_heun_2_x0_sde`). All four are offered; a value from the wrong family is dropped
+  (the sampler keeps its own default) and noted once in the console, so no combination can break a run.
+  Each knob is only passed to samplers
+  that actually accept it, so unsupported ones are silently ignored (never an error). Defaults keep
+  a single stage bit-identical to the classic path. (Image size comes from the latent — see below.)
+  Category `Kinburg-Nodes/sampling`.
+  <br>**Multi-stage refine (chaining):** Sampler Settings has an optional **`sampler_settings`** input —
+  wire one node's output into the next to build a **chain** (left→right = stage order). Feed the chain
+  into Ouroboros and it runs in **refine mode**: each iteration samples through every stage in order,
+  the previous stage's latent feeding the next (stage 1 drafts at full denoise; give later stages
+  their own sampler + `denoise < 1` to polish). The **critic always judges only the FINAL image** of
+  the chain — there is no intermediate scoring. One Sampler Settings = the classic single pass
+  (fully backward-compatible).
+Optional **`model_negative`**: a second model for the **unconditional** pass, for checkpoints shipped
+as a model + uncond-model pair (Ideogram). The loop builds the dual-model guider itself on **every
+iteration**, so the freshly rewritten prompt is still what gets encoded — feeding a ready-made
+`Dual Model CFG Guider` in instead would freeze the conditioning and defeat the loop, which is why the
+input is a MODEL and not a GUIDER. ⚠ At **cfg 1.0** the guider skips the unconditional pass and the
+second model does nothing; the console says so at the start of the run.
+
 - **`Critic Settings (GGUF)`** → `critic_settings` (`CRITIC`): embeds a **vision `LLM_CONFIG`** (a
   Local LLM Settings with an mmproj) plus the evaluation rules: `criteria` (pre-filled), `rubric`,
-  `target_score`, `score_min/max`, editable `system_prompt` and `advice_style`, and `samples`
-  (self-consistency: judge N times, take the median). Category `Kinburg-Nodes/LLM`.
+  `score_min/max`, editable `system_prompt` and `advice_style`, `samples`
+  (self-consistency: judge N times, take the median), and **`image_downscale`** — shrink the image
+  the critic sees by this factor (`2` = half-size, `4` = quarter) for **fewer image tokens → faster
+  judging and less VRAM**, at the cost of fine detail; `1.0` = full resolution (it never upscales
+  past the Vision Settings `image_max_side` cap). Category `Kinburg-Nodes/LLM`.
 
 Wire into Ouroboros: `model` / `clip` / `vae`, a **`latent`** (required — an Empty Latent matching
 your model sets the image size; feed a real latent + denoise<1 for img2img/hires-feedback),
 `user_prompt` (your intent), `negative`, `enhancer_settings` (a Local LLM Settings for the prompt
 LLM — **its own `system_prompt` defines how to expand**), `critic_settings`, `sampler_settings`,
-`max_iterations`, and optional **`trigger_words`** (comma-separated words — e.g. **LoRA triggers**
+`target_score`, `max_iterations`, `low_vram`, and optional **`trigger_words`** (comma-separated words — e.g. **LoRA triggers**
 from `Lora Unlim Accumulator`'s new `triggers` output — that are **always appended** to the enhanced
-prompt so the LLM rewrite can't drop them). **Outputs** feed **Image Compare** directly: `images`
+prompt so the LLM rewrite can't drop them). The two stop conditions — **`target_score`** (the loop
+stops once the overall score reaches it) and **`max_iterations`** — now live on the Ouroboros node
+itself, alongside **`enhancer_history`** (how many recent iterations — prompt + score — are recapped
+to the enhancer LLM as "already tried, do not repeat"; `0` = none; the latest critic advice is always
+sent). **Outputs** feed **Image Compare** directly: `images`
 (all iterations) + `prompts` (`---`-separated) + `judge_data` (per-image scores/advice) + `captions`
 (iteration labels) + `times` (per-iteration generation time) + `settings_data` (per-iteration
-iteration#/score/seed/steps/cfg/sampler as `GEN_SETTINGS`); plus `best_image`, `best_prompt`,
+iteration#/score/seed/steps/cfg/sampler as `GEN_SETTINGS` — a per-stage breakdown in refine mode);
+plus `best_image`, `best_prompt`,
 `best_score`, a `report`, and `iterations`.
 
 The node has a **`⏹ Stop loop`** button: press it mid-run and the loop finishes the current
 iteration, then **stops and returns everything generated so far** (images, best, etc.) — a graceful
 stop, unlike ComfyUI's Cancel which aborts and discards the run. (It works via a small backend flag
 the node polls between iterations, so it takes effect at the next iteration boundary.)
+
+**VRAM — the `low_vram` toggle (default on):** Ouroboros runs a diffusion model *and* one or two
+GGUF LLMs, so it's the single control for how VRAM is shared. **On** keeps strictly one model
+resident at a time — ComfyUI models are freed before each LLM call, the LLM worker is unloaded after
+it, and, because every LLM load is then fresh, each call's **`n_ctx` is auto-sized to what the request
+actually needs** (measured per role from the previous iteration's prompt tokens, rounded up with a
+generation-budget cushion). This means the **`n_ctx` you set on the LLM Settings nodes becomes the
+*ceiling*, not the amount always allocated** — so you can set it generously without paying the
+KV-cache VRAM every step (the critic's figure includes image tokens; a rare under-shot reloads once
+at the ceiling, so it never breaks the loop). **Off** keeps everything resident at the full `n_ctx`
+— fastest, no reloads — for GPUs with VRAM to spare. Either way the live log's context line shows
+`used/n_ctx`, so you can watch the auto-sizing at work. This toggle **overrides the `unload_*` flags
+on the LLM Settings nodes** for the loop (those still apply to the standalone LLM nodes).
 
 **Logging:** a **`full_console_log`** toggle (default on) controls **console/terminal** verbosity —
 on, each iteration also prints the enhanced prompt, advice and negative additions (off = just a
@@ -162,14 +248,27 @@ regardless. For a **live in-canvas
 view**, drop an **`Ouroboros Live Log 🐍📜`** node anywhere (no connections needed): it listens for
 the loop's websocket events and shows a **thumbnail** of the image plus seed · score (+ per-criterion)
 · time · the **full prompt** · advice · negative additions (failed/stopped iterations are flagged
-too). This side-steps the console's line truncation entirely. Entries are **timestamped** (`HH:MM:SS`),
-and a **`log_mode`** toggle on Ouroboros controls granularity: **`per step`** (default) posts each
-stage the moment it finishes — enhanced prompt → generated image → critic verdict, as three live
-entries — while **`per iteration`** posts one combined entry after the whole iteration. The log **survives
+too). Each LLM call also shows a **context-fill line** — `ⓘ enhancer/critic ctx used/n_ctx (%) ·
+prompt + gen` — so you can see how close each request runs to the model's `n_ctx` window and whether
+it was clipped: it turns amber and warns to **raise `max_tokens`** (output hit the ceiling) or
+**raise `n_ctx`** (context ≥90% full, so the prompt itself is being truncated). The critic figure
+includes the image tokens the vision model consumes. This side-steps the console's line truncation
+entirely. Entries are **timestamped** (`HH:MM:SS`),
+and a **`log_mode`** toggle on Ouroboros controls granularity: **`streaming`** (default) is like
+`per step` but the enhancer's prompt **types out token by token** as it's written, its header
+counting the tokens against the enhancer's `max_tokens` (`142/512 tok`) plus the live `tok/s`
+(text only — the critic is grammar-constrained and can't stream, so its verdict still lands
+whole); **`per step`**
+posts each stage the moment it finishes — enhanced prompt → generated image → critic verdict, as
+three live entries; **`per iteration`** posts one combined entry after the whole iteration. The log **survives
 ComfyUI Desktop tab switches** — it's replayed from an in-memory history when the node is recreated
 (kept in memory, not serialized into the workflow, so thumbnails don't bloat the file; cleared on a
 new run and on full app restart). Hovering an image in the log shows a small **📋 copy** button in
-its top-right corner that copies the picture to the clipboard (as PNG).
+its top-right corner that copies the picture to the clipboard (as PNG); hovering any entry shows a
+**copy** button in its header that copies that entry's text (the prompt, or the advice + negative
+additions), and **`clear`** in the log header wipes it. The log follows new rows
+only while you're parked at the bottom — **scroll up and it stays put** while the loop keeps
+running, with a **`↓ latest`** pill to jump back.
 
 **VRAM discipline (built for small cards):** when a config's **`unload_comfy_models`** is on,
 Ouroboros frees all ComfyUI models before each LLM call **and** frees the LLM worker before each
@@ -178,6 +277,477 @@ model reloads around each phase; that is the accepted trade for running at all o
 GPUs/farms, turn `unload_comfy_models` off to keep everything resident (no reloads); pointing the
 enhancer and critic at the **same model file** further minimizes reloads. Category
 `Kinburg-Nodes/sampling`.
+
+### `chimera/` — Chimera (Multi-Sampler) 🦁
+**`Chimera (Multi-Sampler) 🦁`** runs **two (or more) `Sampler Settings` bundles as consecutive stages
+of ONE image**, the way the Ouroboros refine chain does — but with the **step budget under explicit
+control** and a **physically correct handoff** between stages. It reuses the very same
+**`Sampler Settings`** node (`SAMPLER_CFG`) documented above, so there is nothing new to configure:
+wire one bundle into `stage_a`, another into `stage_b` (a chain also works and is flattened into
+stages, left→right). `seed_mode` / `seed_step` are Ouroboros-loop dials and are ignored here — only
+`seed` is used.
+
+**The `handoff` mode is the point of the node:**
+- **`continuous`** (default) — **ONE sigma schedule** is built once and each stage runs a **slice** of
+  it. Stage A goes `0→a` and leaves the latent sitting at the sigma of step `a` (partially denoised);
+  stage B resumes **at** `a` with **no fresh noise** and finishes `a→end`. The run is exactly one
+  traversal of one noise trajectory, just with a different sampler / cfg / eta / model per segment.
+  This is the equivalent of chaining two `KSampler (Advanced)` nodes through
+  `start_at_step` / `end_at_step` — except the schedule **can't get out of sync**, because this node
+  owns it. The
+  shared curve takes its **scheduler and `denoise` from stage A**; a later stage's own `denoise` is
+  reported as ignored, and a **different scheduler** on a later stage is rebuilt over the same length,
+  sliced, and **pinned to the handoff sigma** (a mismatch there is what produces classic "refiner
+  seam" artifacts).
+- **`restart`** — the classic **two-KSamplers** pattern: every stage builds its **own** schedule and
+  adds its **own** noise, so stage B **needs `denoise < 1`** or it re-noises from scratch and discards
+  stage A (the node says so in the report). A genuinely different effect (img2img refine), not a worse
+  one.
+
+Because the node owns the schedule, a stage's **`steps` simply means "how many steps THIS stage
+runs"**. **`step_split`** decides **where the boundary falls** — the last three modes are the same
+decision in different units, so reach for whichever unit you're thinking in:
+- **`stage steps`** — each stage runs exactly the `steps` it declares; the curve is their **sum**.
+- **`at step`** — cut **`total_steps`** at **`handoff_step`**: stage A gets that many steps, the rest
+  the remainder (`0` = halfway). Same unit as above, but the boundary lives on *this* node, so you can
+  sweep it without editing the Sampler Settings — handy when hunting for the right split.
+- **`at percent`** — the same cut as a percentage **of the steps**: 60% of 30 → 18 / 12.
+- **`at sigma`** — the cut lands where the **noise level** crosses **`handoff_sigma`**. The mode for
+  stages on **different schedulers**, where step indices aren't comparable but noise levels are — and
+  the only one whose boundary stays put when you change the step count. The scale is model-dependent:
+  flow-matching models (Flux / SD3 / Krea) run **1.0 → 0**, so the useful range is 0..1 and the `0.5`
+  default sits mid-trajectory; SD / SDXL start around 14.6, where you'd want single digits. The report
+  prints the curve's range and the sigma actually hit, so one run tells you the scale.
+
+The last three ignore the `steps` set inside the Sampler Settings nodes.
+
+**`total_steps`** (`0` = auto = the declared sum) doubles as a leftover-noise escape hatch: in the
+`stage steps` split, setting it **longer** than the sum means the tail of the curve is never walked, so
+the result deliberately **keeps residual noise** (reported). Shorter → the last stages are clipped.
+
+**Two things inherent to splitting any sampler run** (they apply equally to a chain of two
+`KSampler (Advanced)` nodes, and the node reports them rather than hiding them): **multistep samplers**
+(`dpmpp_2m` / `3m`, `deis`, `ipndm`, `lms`, `res_multistep`, `sa_solver`, …) keep a history of previous
+steps, which **resets at the boundary** — so the first step of stage B runs at reduced order (one step
+out of N; single-step samplers like `euler` / `heun` / `res_2s` are unaffected and the split is exact
+there). And with a **noise mask** on the input latent, a continued stage runs on zero noise, which is
+also the tensor ComfyUI uses to re-noise the frozen region each step — so the masked-out area stops
+being re-noised from stage 2 on (identical to stock `SamplerCustom` with `add_noise` disabled). For a
+masked refine use the **`restart`** handoff, where every stage makes its own noise. Note also that even
+an exact split is not *bit*-identical to a single run: the latent round-trips through
+`inverse_noise_scaling` / `noise_scaling` between stages, which is mathematically exact but leaves
+float32 rounding (≈±1 LSB after VAE decode — PSNR around 50 dB against a single pass).
+
+**Models shipped as a pair, and custom guidance.** Some checkpoints (Ideogram) come as a model **plus
+a separate unconditional model** for the negative pass. Wire the second one into **`model_negative`**:
+Chimera builds the dual-model guider **per stage**, from that stage's own conditioning and cfg, so
+`positive_b` and per-stage cfg keep working. ⚠ The guider **skips the unconditional pass entirely at
+cfg 1.0** — the second model then does nothing at all, and the report says so, naming the stages at
+fault. For anything else there's **`guider`**, which accepts any `GUIDER`: it carries its own model,
+conditioning and cfg, so the node's `positive` / `negative` / `positive_b` and every stage's cfg are
+ignored while it's wired (reported), and the sigma curve is built from the guider's own model. It
+takes precedence over `model_negative`. **`sigmas`** accepts an external schedule and replaces the one
+the node builds — `total_steps` and every stage's scheduler and denoise are then ignored, while all
+four `step_split` modes keep working exactly as before, just slicing the curve you supplied.
+
+Optional **per-stage overrides for everything after stage A**: **`model_b`** (a different LoRA stack or
+a refiner — it must share the main model's noise schedule, since in `continuous` mode the curve is
+built from the main model, the space the in-flight latent's noise level lives in), **`positive_b`** /
+**`negative_b`** (polish on a different prompt — e.g. without the style tokens).
+
+**Outputs:** `latent` (the result), **`handoff_latent`** (the raw latent between stages — feed it to
+another sampler if you want), **`handoff_denoised`** (the **x0 estimate** at the handoff — VAE-decode
+this to actually *see* what stage A produced, since the raw handoff latent is still noisy),
+**`report`** (the exact split: curve, per-stage step ranges, sigma boundaries, every warning — also
+printed to the console unless `verbose` is off), **`gen_extra_info`**, and **`time`** / **`seconds`**.
+Category `Kinburg-Nodes/sampling`.
+
+**`gen_extra_info` (`GEN_INFO`) is an ADDITION to a settings dump, not a dump on its own.** It holds
+only what the node resolved at run time — one `[Chimera]` entry (handoff, split, `steps` walked vs
+scheduled, the curve and its sigma range, total time) plus a `[Chimera stage]` entry per stage
+(sampler, scheduler, its step range, cfg, eta, seed, its sigma boundaries, its own time, and any
+`model_b` / `positive_b` overrides) — because the graph-walking **Generation Info** node can only read
+widget literals: it can't know the resolved split (`18 / 30`), the sigma the handoff landed on, or
+which stage a given `Sampler Settings` fed. Wire it into Generation Info's optional **`extra`** input:
+
+```
+Chimera ──latent────→ Generation Info ──data──→ Set Accumulator (gen info) ──→ Get ──→ Filter ──→ Image Compare
+        └─gen_extra_info─→ (extra)
+```
+
+The entries are merged in front of the walked ones into **one** dump, so the branch stays a single
+accumulator entry (one image). They're separate **fields**, not one blob, so the Filter's
+`differences` mode shows exactly what changed between the compared runs. Wiring `gen_extra_info`
+straight into the accumulator instead leaves that branch without any of the shared settings
+(checkpoint, resolution, seed) — and since the Filter counts *present vs absent* as a difference,
+`differences` mode then keeps every field the other branches have and nothing collapses.
+
+**It times itself.** `time` (a string like `12.34 s`, ready for Image Compare's `times` input) and
+`seconds` are measured **around the sampling calls inside the node**, with a per-stage breakdown and a
+`s/step` figure in the report. That matters because `Start Timer` / `Stop Timer` measure the gap
+between two *node executions*, and ComfyUI is free to schedule those relative to other branches — put
+several sampler branches in one graph and the intervals can overlap, so a 6-step run can come out
+"slower" than a 12-step one. Timing from inside can't be skewed that way. It covers **sampling only**
+(CLIP encode and VAE decode happen in other nodes) and is a true wall-clock figure — `sample_custom`
+moves the result off the GPU before returning, so it waits for the work to finish. One honest caveat:
+the **first stage absorbs the model load** when the checkpoint isn't resident yet, because ComfyUI
+loads it inside that first sampling call.
+
+### `siren/` — Siren (Music Sampler) 🧜, Siren Section 🧜, Siren Scope 🧜, Siren Compare 🧜
+
+An AceStep audio latent is a **one-dimensional strip of time**: `[B, 64, T]`, one frame per **40 ms**
+(the 1.5 VAE turns a frame into 1920 samples at 48 kHz — **25 frames per second**). That single fact is
+what a generic latent sampler can't exploit and what these two nodes exist for: name a stretch of the
+strip **in seconds** and you can regenerate only that stretch, or append to it, and leave the rest of
+the take alone. Chimera is still the node for splitting a schedule; Siren is the node for splitting
+the **track**.
+
+**`Siren Section (Audio Window) 🧜`** turns *"from 0:47.5 to 1:02, snapped to bars, with a 0.35 s
+crossfade"* into a denoise mask on the latent:
+- **`retake`** marks `start_sec`→`end_sec` as free to regenerate and freezes everything else; the
+  latent's length doesn't change. `end_sec = 0` means "to the end of the track".
+- **`extend`** **grows** the latent by `extend_sec` (at the `end` or the `start`) and marks only the new
+  part as free. The existing take is frozen but still **visible to the model** — attention runs over
+  the whole strip — so the new part is written to follow on from it. Extending at the `start` shifts
+  every section marked earlier in the chain later by the same amount, so their timings stay on the
+  music.
+- **`snap`** (`bar` / `beat` / `off`) quantizes the edges to a grid built from `bpm` /
+  `beats_per_bar` — use the values you gave `TextEncodeAceStepAudio1.5`. One bar at 120 bpm in 4/4 is
+  2 s = exactly 50 latent frames. Replacing a section that starts mid-bar is the usual reason a retake
+  refuses to sit in the groove. `grid_origin_sec` moves bar 1 for a track that opens with a pickup.
+- **`fade_sec`** ramps the mask **outside** the window, so the range you named is rewritten in full and
+  the join is spread into the neighbouring audio. In an image a hard mask edge is a visible line; in
+  audio it is an audible **click**, so this is not cosmetic. 0.2–0.5 s is a good range.
+- Wire the **`vae`** input and the frame rate is read from the model itself (sample rate ÷ samples per
+  frame) instead of trusting the `latent_fps` widget — recommended, and it covers AceStep 1.0, which
+  runs at a different rate.
+
+The mask goes into the latent's own standard **`noise_mask`**, so the `latent` output also works with
+the **stock** samplers — Siren is not required to use it. Chain several Section nodes (`section` input)
+to mark several windows at once; overlapping windows merge, and the mask is rebuilt over all of them.
+
+**`Siren (Music Sampler) 🧜`** samples it, with the dials **on the node** — defaults already set to
+what ships for `acestep_v1.5_xl_base`: `steps 50 · cfg 6.0 · euler · simple`. The dials that do nothing
+here are simply absent (`seed_mode` / `seed_step` are Ouroboros loop controls; a later stage's
+`denoise` and `scheduler` can't matter when one schedule is shared), and the rarely-touched ones
+(`eta`, `s_noise`, `s_churn`, `solver_type`, `stage_b_sampler`, `verbose`) are flagged **advanced** so
+they collapse out of the way.
+
+**`steps` is the whole schedule and `stage_b_steps` carves the tail off it** — 50 with `stage_b_steps`
+10 means 40 + 10, so you never add the stages up yourself. Two stages exist for one reason: **high cfg
+locks the lyrics and the structure but squeezes the sound, low cfg lets the timbre breathe but slurs
+the words** — so `cfg 6.0` early and `stage_b_cfg 4.5` late buys both. AceStep's schedule is heavily
+top-loaded (at the default shift of 3.0 the halfway step is still at **sigma 0.750**), so the boundary
+has to be **late** to land in polishing territory: out of 50 steps, 10 puts it at sigma 0.429 and 15 at
+0.562. Much earlier and the second stage starts rewriting the arrangement instead.
+
+Under **advanced**, the second stage can also take its own **sampler**, **scheduler** and **seed**.
+The scheduler can't simply replace the shared curve — the latent is sitting at a particular noise
+level — so the alternate is rebuilt over the same length, its tail sliced out and its first sigma
+**pinned to the level actually carried**, then forced monotonic: the same splice Chimera does, and the
+report says when it happened. The seed only bites when stage B's sampler is ancestral or SDE, because
+a continuing stage adds no fresh noise and the seed reaches nothing but the stochastic sampler's own
+generator; `-1` means "use stage A's".
+
+**`resume_from_sigma` is the retake dial**, and it replaces reasoning about `denoise`. Above 0 it
+resumes an existing take from that noise level — the whole track, or just the marked stretch when a
+Section is wired — and **derives the step count itself**, so the run walks exactly the tail of the
+native schedule and costs proportionally less time. Measured on a 50-step shift-3 curve:
+
+| `resume_from_sigma` | what you get | steps actually run |
+|---|---|---|
+| 0.43 | tidy up the performance, groove intact | 10 |
+| 0.51 | same musical idea, different performance | 12 |
+| 0.56 | noticeably different take | 14 |
+| 0.71 | almost a new section | 22 |
+| 1.00 (or 0 = off) | completely new | 50 |
+
+It needs something to resume *from*: on an empty latent it only lowers the starting noise level and
+weakens the result, which the node warns about rather than letting you wonder.
+
+A **`Sampler Settings`** bundle can still be wired into the optional `sampler` input, and while it is
+there it **replaces** the widgets outright (reported) — that is how a stored per-model recipe from the
+model library's **Settings Select** / **Model Select** drives this node. A half-and-half rule would be
+unreadable off the node face, so it's all or nothing.
+
+**One rule follows from the masked math**, and the node enforces it: *with a section, exactly one stage
+can run.* A masked run has to finish at sigma 0, because only there is the frozen region's reference
+the **clean** latent; handing an in-flight latent to a second stage would re-pin the frozen audio to a
+partially-denoised reference with no noise term — right at the handoff step, drifting after it. So a
+retake gives the whole remaining tail to the first live stage and reports that the others were skipped.
+Set `stage_b_steps` to 0 for retakes. Without a section, stages run continuous exactly like Chimera.
+
+Why the rest of the take survives at all: ComfyUI's masked path re-pins the frozen frames every step
+with `sigma·noise + (1−sigma)·original`, which for a flow model like AceStep is the exact forward
+interpolation — so the untouched audio stays consistent with the noise level the sampler is working at,
+and `reshape_mask` already handles the 1-D case. No custom sampling code is involved.
+
+The report prints the curve's **quarter, half and three-quarter sigmas**, which is the only place
+`shift` is visible: a flow schedule's endpoints are always 1→0 whatever shift is set to, so `50%=0.750`
+vs `50%=0.500` is how you tell at a glance whether a `ModelSamplingAuraFlow` node is actually in the
+model path. (Worth knowing: **bypassing that node is not "no shift"** — `ACEStep15.sampling_settings`
+already carries `shift: 3.0`, so bypass and shift 3.0 are the same run.)
+
+Outputs mirror Chimera's so the node drops into the same pipeline: **`latent`**, **`report`** (schedule,
+per-stage times, section coverage as a percentage of the track, every warning), **`gen_extra_info`**
+(`GEN_INFO`, for Generation Info's `extra` input) and **`time`** / **`seconds`**, measured around the
+sampling calls inside the node. Category `Kinburg-Nodes/sampling`.
+
+#### `Siren Scope (Audio → Image) 🧜`
+
+Audio can't go into **Image Compare** — a picture of it can. This node renders `AUDIO` to `IMAGE`, and
+every decision in it exists to make two takes **comparable** rather than to look nice:
+
+- **The dB scale is absolute, never auto-fitted.** `db_floor` / `db_ceiling` are dBFS, so a quiet take
+  renders *dark* instead of being silently boosted to fill the frame. Auto-normalising each image is
+  exactly what makes two spectrograms meaningless side by side.
+- **The pixel grid is fixed.** The clip always spans `width_px`, so column *x* is the same moment in
+  every render of a same-length track and an A/B flip doesn't jitter. There are no margins — every
+  pixel is signal, plus the optional time ruler.
+- **The bar grid lands where `Siren Section` would cut.** Give it the same `bpm` / `beats_per_bar` /
+  `grid_origin_sec` and the bright lines are bar boundaries, the dim ones beats — so you pick a retake
+  window off the picture and type those seconds straight into the Section node.
+
+Modes: `mel spectrogram` (structure, drop-outs, a band-limited top end), `linear spectrogram` (hard
+low-pass and resampling artifacts), `waveform` (level, silence, clipping) and `mel + waveform` stacked
+on one time axis. `channels` can draw a mono mix, one side, or both stacked to catch a stereo collapse.
+
+**Wire a second clip into `audio_b` and it becomes a difference view** — **black where the two are
+identical**, warm where A is louder and cool where B is. Two things make that view mean something,
+and without them it is worse than useless:
+
+- **It compares energy over musical tiles, not raw bins.** Two independent takes never agree
+  bin-for-bin — their fine detail and noise floor are uncorrelated — so a raw difference is a field of
+  speckle that says nothing about whether they *sound* different. `diff_detail` averages energy over a
+  tile first (`musical` ≈ ⅛ of the mel bands × 120 ms). Measured on synthetic takes: inaudible noise
+  50 dB down goes from painting the frame to **0% of tiles**, while a real 10 dB shift in the top end
+  still comes through at **9.4 dB**. Both takes are also floored at the same level *before* pooling —
+  gate afterwards instead and the near-empty bins, where two takes disagree by tens of dB about
+  essentially nothing, take over the picture.
+- **The bottom panel compares short-term RMS, not samples.** A sample-by-sample subtraction of two
+  takes that merely differ in phase comes out nearly as loud as the music itself — shift a track by
+  3 ms and `A − B` peaks at 0.41 while nothing about the sound changed at all. The loudness panel
+  answers the question a listener actually has: *where is one of these louder than the other.*
+
+`diff_span_db` (default 6) sets how many dB reach full colour — the dial that decides whether nuance is
+visible at all. `fine (raw bins)` turns the averaging off; it is the right choice only when the two
+clips share actual samples, i.e. checking a **Siren retake**, where the frozen part should come out
+pure black and only the marked section should light up.
+
+**`gen_extra_info` is usually the clearer answer.** It carries duration, peak, RMS, crest, brightness
+(spectral centroid), the low/mid/high energy split, near-silence, clipped samples and — in stereo —
+correlation and side energy, in the `GEN_INFO` shape **Generation Info** merges. Feed it in alongside
+the sampler settings and **Image Compare**'s `differences` mode tables exactly which of those numbers
+moved between two runs. If you don't read spectrograms, that table answers *"how do these two differ"*
+in a way no picture will.
+
+`time_labels` off removes the ruler **and** its lines, so the panel is pure signal for a pixel-exact
+overlay; the `bpm` grid is musical structure and stays. Rendering is plain torch (a colour ramp and a
+5×7 bitmap font), so there is no plotting library in the graph and no font on disk to go missing.
+Category `Kinburg-Nodes/audio`.
+
+#### `Siren Compare (Audio) 🧜`
+
+**Image Compare** for music. It is a separate node rather than a mode of that one because almost
+nothing carries over — there is no SSIM for a song, and the whole interaction is a *transport* — but
+the delivery is identical: a portable folder (audio + scopes + `index.html` with relative links)
+registered under a token and served by the existing `/image_compare_dir/` route, which already
+streams with Range support. Same "🔗 Open comparison" link widget on the node, same offline bundle.
+
+Collect the takes the way Image Compare does: a **`Set Accumulator (audio)`** on each branch and one
+**`Get Accumulator (audio)`** into this node's single `audios` input. It carries the same
+**`auto_collect`** toggle and **🔌 Collect All** button, so a Set you just added or bypassed is
+re-wired right before the workflow is queued. `labels` takes `Get Accumulator (captions)` (one line
+per take) and `notes` takes either that or `Get Accumulator (prompts)` (`---`-separated blocks);
+`times` takes one line per take the same way Image Compare does — wire **Siren (Music Sampler)**'s
+`time` output through a Set/Get Accumulator (texts) — and shows up next to each take's name plus as
+two rows in Measurements: the raw time and **`time vs fastest`**, which turns it into the question
+you actually have when comparing sampler settings (*what did the extra stage cost?*).
+`settings_data` is Generation Info Filter's, the same output Image Compare uses. Lyrics go to a
+resizable side panel — one block is shared by every take, `---` splits them per take — with
+AceStep's `[section markers]` and `(asides)` coloured apart from the sung words.
+
+**The spectrograms ship as data, so the view is live.** Rather than pre-rendering a picture per
+combination of mode × colour map × dB floor × channel (measured at 288 renders, ~1 minute and 119 MB
+*per track*, and still no continuous sliders or arbitrary A/B pairs), the node writes each take's mel
+spectrogram as a 16-bit dB matrix packed into a PNG's R/G channels — about 580 kB, less than two
+finished colour renders. The page decodes it once and everything after that is array arithmetic:
+colour map, dB floor/ceiling, mode, channel, **zoom**, **diff against any take you pick**, and the
+diff span, all instant and none of them needing a re-run. Only `scope_columns`, `n_fft` and `n_mels`
+stay on the node, because those change the matrix itself — and `scope_columns` defaults to **auto**,
+which ships 25 columns per second (one per AceStep latent frame, 40 ms), finer than any screen so
+there is real detail under the magnifier rather than interpolation. The FFT therefore lives in
+exactly one place — Python — with no JavaScript reimplementation free to drift away from it.
+
+**Zoom** is a window into that matrix: the wheel zooms about the cursor, dragging pans (a click
+without movement still seeks), `to loop` frames the marked bar, and while playing zoomed in the view
+follows the playhead. The scrub bar keeps showing the whole track with the visible window bracketed.
+
+Picking a **reference** puts every *other* take into the diverging diff ramp while the reference keeps
+its own picture, so you have something to read the deltas against.
+
+The page builds it into one canvas per take, so:
+
+- **Every take plays off one Web Audio clock.** Each is decoded into an `AudioBuffer` and all sources
+  are started against the same `AudioContext` time, so they stay sample-accurate for the whole run.
+  Soloing is a **gain change**, not a stop-and-restart, ramped over 12 ms — so switching between takes
+  mid-phrase is instant and silent. That matters more than it sounds: a 30 ms hiccup at the switch is
+  exactly the artifact you'd mistake for a difference between the takes.
+- **Scrubbing moves everything at once**, because there is only ever one position. Click any scope to
+  seek there; the playhead is exact because the scope's pixel grid spans the whole clip by
+  construction.
+- **Shift-drag a scope to mark a loop** and hear one bar over and over — set on the buffer sources
+  themselves, so the wrap is sample-accurate too.
+- **`match level`** trims every take down to the quietest one's RMS. Without it the louder take simply
+  wins, every time. (Down, never up: several unmuted at once would otherwise clip.)
+- **`blind`** hides the labels; the **Measurements / Settings / Notes** tabs share a `differences
+  only` switch that collapses each table to the rows that actually differ between takes.
+- Keyboard: <kbd>space</kbd>, <kbd>1</kbd>…<kbd>9</kbd> to solo, <kbd>0</kbd> for all,
+  <kbd>←</kbd>/<kbd>→</kbd> to seek, <kbd>L</kbd> to loop.
+
+**Sending it to someone: turn `self_contained` on.** The default folder bundle opens fine *in-app*
+and over HTTP, but a browser given a `file://` page treats it as having no origin and refuses to load
+its own siblings — the audio is blocked by CORS and the spectrogram data can't be read back out of a
+canvas ("tainted by cross-origin data"). So a zipped folder, double-clicked, plays nothing and draws
+nothing. `self_contained` writes ONE .html with every take and matrix inlined as a `data:` URI, which
+is same-origin and dodges both rules. Pick MP3 or Opus first unless lossless is the point: base64
+adds a third, and a 3-minute FLAC take inlines to roughly 40 MB. A page opened off disk that *can't*
+load says so on the page rather than sitting there empty.
+
+Every take is measured on **one shared time base** (the longest one), so column *x* is the same
+instant on all of them — which is what lets the diff line up and the playhead be right; a shorter take
+simply stops early instead of being stretched. `audio_format` defaults to **FLAC and should stay
+there** — you are comparing fine detail, and a lossy codec would add differences of its own on top of
+the ones you're listening for.
+
+**The one thing to remember about `extend`:** the `duration` you gave `TextEncodeAceStepAudio1.5`
+describes the **whole** track and is baked into the tokens, so after extending you must raise it to the
+new total and re-encode — the model is otherwise being told the song is shorter than the strip it is
+writing on. It can't be read back out of the conditioning, so both nodes print the new length in
+seconds and leave the check to you.
+
+### `model_presets/` — Model Capture 📥, Model Select 🎛, Settings Select ⚙, Settings Save 💾
+
+A **model library that lives outside the graph**: pick a model in one dropdown, its known-good
+sampler settings in a second, and the workflow holds a single node where it used to hold a loader
+stack plus a pile of `Sampler Settings` "for the other model" and switch logic to choose between
+them.
+
+The problem it solves is that a model is rarely just a file. `krea2` is a UNET + a CLIP + a VAE;
+`z_image_turbo` adds `ModelSamplingAuraFlow` with its own shift; Ideogram adds a *second*
+(unconditional) model and a `CFG Override` on top; old checkpoints carry CLIP and VAE inside;
+GGUF builds need their own loaders. Swapping between them means rewiring several links and
+remembering which settings belonged to which — every time.
+
+**Model Capture 📥** registers an assembly by *reading it out of the graph*. Wire the outputs of a
+loader stack you already have working — however many nodes, whatever they are — give it a `model_id`
+and run. It walks its own inputs upstream through the queued prompt and stores that slice of graph
+as the model's **recipe**. Then those loaders can be deleted from the workflow.
+
+* **It hardcodes no node types.** Classes are looked up in `nodes.NODE_CLASS_MAPPINGS` — the one
+  registry that holds V1 and V3, builtin and third-party — so a model that ships tomorrow with its
+  own custom loader and its own patch node works with no code change, as long as it was captured.
+* **It loads nothing.** The inputs are declared `lazy` and nothing is ever requested, so ComfyUI
+  never executes the upstream loaders. Capturing a 40 GB assembly costs no VRAM and no time.
+* **`mode` starts at `preview`** — the first run reports what it found and writes nothing, so a
+  mis-wired capture can't overwrite a good bundle.
+* **It refuses what it can't rebuild**, by node name and reason: anything needing execution context
+  (hidden inputs), list in/out, subgraph expansion, or an output node. Those stay in the graph and
+  go into Model Select's override inputs instead (below).
+
+**Model Select 🎛** rebuilds the chosen model from its recipe and emits its preset. Outputs:
+`model`, `model_negative` (present when the bundle has an unconditional-pass model — wire it into
+Chimera's `model_negative`), `clip`, `vae`, `sampler_settings`, `width`, `height`, `info`,
+`gen_extra_info` and `model_id`. Because `sampler_settings` is a `SAMPLER_CFG` **chain**, a saved
+multi-stage preset drops straight into Chimera's `stage_a` (it flattens chains into stages) or into
+Ouroboros.
+
+* A **`🏷 family` filter** sits above the model dropdown and narrows it to one family — with a dozen
+  community finetunes per base model, a flat list of everything is unusable. Changing it **clears the
+  model and preset**, since switching family means you're on your way to a different model anyway;
+  nothing is auto-selected, even when the family holds exactly one model, so loading a model is never
+  a side effect of filtering. Only your own click on the filter clears anything — a workflow load or a
+  🔄 Refresh always keeps what was selected. It is deliberately *not* a node input: widget values are
+  part of ComfyUI's cache signature, so a cosmetic filter as a real widget would invalidate this node
+  and everything downstream (i.e. re-sample) on every flip. It lives in `node.properties` instead —
+  saved with the workflow, never sent to the backend, zero cache impact.
+* The `preset` list narrows to what's valid for the picked model, and picking a model lands on that
+  model's **default** preset. Ordering puts the default first, then the best measured score.
+* **Only one model is ever loaded**, no matter how many are registered — the others are data, not
+  nodes. `unload_others` (on by default) frees ComfyUI's resident models and the library's own
+  cache first, keeping the one-heavy-thing-at-a-time discipline the LLM nodes use.
+* `seed_override` `-1` keeps the seed the preset was measured with; anything else replaces it on
+  every stage. `width` / `height` are fallbacks — a preset saved with a latent carries the real size
+  and wins.
+* **`model_override` / `clip_override` / `vae_override`** win over the library. That's the escape
+  hatch for an assembly Capture refused: keep those loaders in the graph, wire them in, and presets
+  keep working. There is no assembly this node can't serve, only ones it can't store.
+
+**Settings Select ⚙** is Model Select minus the loading: pick a preset, get its `sampler_settings`,
+`width`, `height`, `label`, `info` and `gen_extra_info` — and no model. That's the investigating
+case: **one model, several runs at different settings and seeds**, compared side by side, where two
+Model Selects would each want to own the model. `seed_override` is the field to sweep, and `label`
+("`anc4+euler4 · seed 999`") is a ready-made caption for Image Compare via a Set/Get Accumulator.
+
+It still has to know whose presets to offer, and the wired way is the good one: connect **Model
+Select's `model_id`** into its `model_id` input and the picker follows whatever that node has
+selected — so the model is chosen in exactly one place and every Settings Select hanging off it
+re-narrows when you switch. Its own `model` dropdown is the fallback when there's no Model Select to
+follow; the widget's label shows which model is actually in effect. Unlike Model Select it does *not*
+jump to the model's default preset — choosing presets is the point of the node — it only clears a
+choice that isn't valid for the current model. If the preset carries bundle `overrides`, `info` says
+they don't apply here: overrides retune the model, and this node never builds one.
+
+Settings Select carries the same `🏷 family` filter. **Settings Save** doesn't need one: wire Model
+Select's `model_id` into it and the preset is filed under the model that actually ran — no second pick
+to keep in sync, and no way to file a preset under the wrong model by mistake.
+
+**Settings Save 💾** puts a settings chain into a model's library — pass-through, so wire it between
+`Sampler Settings` and Chimera / Ouroboros and the run is unchanged. It **saves while `preset_name`
+is non-empty** (clear the field to stop), the same rule as `save_preset_as` on the card nodes and for
+the same reason: the values worth recording arrive over wires, and a frontend button can't see those.
+Wire `score` (Ouroboros' `best_score`, or a Vision Judge score via JSON Extract), `seconds`
+(Chimera's own measured time) and `latent` (for the size), and the library stops being a notebook —
+Model Select shows `★4.40 · 31.2s` and the picker sorts by it.
+
+**Presets can be shared across models.** A model declares `families` (e.g. `flow-1024`); a preset
+saved with `shared` + matching `families` shows up for every model in them, so one good generic
+recipe isn't copied per model — handy when a base model has a dozen community finetunes that all
+want the same settings.
+
+Families are the one place where a typo has **no symptom**: `flow-1204` raises nothing anywhere, the
+shared preset simply never appears in any picker. So you shouldn't have to type one. Model Capture
+and Settings Save both carry a **`＋ family`** dropdown of families that already exist, which appends
+to the (still comma-separated, still multi-value) `families` field; the Library dialog shows every
+known family as a **click-to-toggle chip** per model, with a text box only for creating a new one.
+And if a family really is new, the report says so and suggests the closest existing name — creating
+one stays possible, mistaking one for it doesn't stay silent.
+
+**Editing a bundle without re-capturing it.** The 🗂 Library dialog's **🔧 Recipe** button opens an
+editor for the captured assembly's settings — every literal input of every node in it. Controls are
+rendered from each node class's *own* schema, fetched from ComfyUI's `/object_info`, so a FLOAT gets
+its declared min/max/step and a combo gets its real option list. For a loader that means the **live
+list of files on disk**, i.e. you can point a bundle at a different checkpoint from the dialog. A
+node type that isn't installed right now is flagged and edited as plain text rather than dropped, and
+a stored value that's no longer among a combo's options is highlighted instead of silently replaced.
+Wired inputs are shown but not editable: a link is the *shape* of the assembly, and changing that
+means re-capturing. Only fields you actually changed are sent.
+
+**Per-preset overrides.** A preset can retune the bundle instead of cloning it — the **🎚** button on
+a preset row lists every `class_type.input` in the bundle with its bundle value, and ticking one
+stores an override. So "same model, shift 3 vs shift 5" is two presets over one bundle rather than
+two near-identical bundles. Keys are class-scoped, not node-scoped, so an override survives
+re-capturing the bundle (which renumbers its nodes); an override that matches nothing is reported as
+a warning by Model Select rather than silently ignored.
+
+Two details that make it behave: results are cached by a merkle key over the recipe, so **changing a
+preset re-runs the cheap patches but never re-reads weights from disk**; and `IS_CHANGED` hashes what
+was *resolved*, so editing a recipe or a preset in the library invalidates the node instead of
+handing back the previous run's model.
+
+Everything else is managed from the same **🗂 Library** dialog: model families, preset tags,
+defaults, rename (presets follow), delete, and a raw view of the stored recipe. Persisted to
+`model_presets/data/store.json`; routes under `/kinburg/models/…`. Category `Kinburg-Nodes/model`.
 
 ### Token Counter (GGUF)
 **`Token Counter (GGUF)`** (in the `local_llm/` package) counts how many tokens a text is under a
@@ -211,16 +781,28 @@ with templates that force an LLM's output into a fixed shape — **Character Car
 disk). Wire the `grammar` output into a **Local LLM (GGUF)** node's `grammar_override` input, feed
 that node a **photo** + a short prompt ("fill the card from this image"), and the vision model
 returns exactly that structure straight from the picture — no multi-image-context gymnastics.
+Pair it with **Card Save** (below) to drop that generated card straight into your library.
 Category `Kinburg-Nodes/LLM`.
 
-### `card_presets/` — Card Presets
-**`Card Presets`** is a saved library of filled cards: pick a character / entity from a dropdown and
-its ready Markdown block comes out the `card` output (feed it into Context Collector). You build the
-library from the **Character Card** / **Entity Card** nodes' `save_preset_as` field (see above);
-presets are rendered back through the card nodes' own logic — so the format always matches — and
-persisted on disk. **🗑 Manage** deletes entries, **🔄 Refresh** re-reads the list. Build a character
-once (by hand or by photo via Grammar Presets), then reuse it from the dropdown instead of
-re-describing the same photo every time. Category `Kinburg-Nodes/LLM`.
+### `card_presets/` — Card Save, Card Presets
+**`Card Save`** closes the loop Grammar Presets opens: wire an LLM's JSON card output (constrained
+by a Grammar Presets grammar) into its `json_string` input and the parsed character / entity lands
+in the **Card Presets** library — no JSON Extract → 12-wire dance into a Character Card (the
+grammar's keys already mirror the card fields 1:1). `card_type` is `auto` (detects character vs
+entity from the keys) / `character` / `entity`; **`save_as`** names the preset (empty → uses the
+JSON's own `name`; since a photo often yields an empty name, `save_as` also becomes the card's
+heading); **`tags`** are comma-separated labels for filtering the library. It outputs the rendered
+`card` block (feed Context Collector in the **same** run), `saved_as`, and a `report` line — and
+never breaks the graph on bad / empty JSON.
+
+**`Card Presets`** is the reader: pick a character / entity from a dropdown and its ready Markdown
+block comes out the `card` output (feed it into Context Collector). The optional **`filter`**
+dropdown narrows the list to one tag. Build the library with **Card Save** (photo → card) or the
+**Character Card** / **Entity Card** nodes' `save_preset_as` (+ `tags`) field (see above); presets
+are rendered back through the card nodes' own logic — so the format always matches — and persisted
+on disk. **🗑 Manage** edits tags / deletes entries, **🔄 Refresh** re-reads the list. Build a
+character once (by hand or by photo), then reuse it from the dropdown instead of re-describing the
+same photo every time. Category `Kinburg-Nodes/LLM`.
 
 ### `gguf_convert/` — Safetensors → GGUF converters
 Turn `.safetensors` weights into `.gguf` from inside ComfyUI. Two nodes (category
@@ -259,7 +841,7 @@ what loads the result). Diffusion models only — for LLMs use the node above.
 Takes a batch **or an image list** (different sizes are fine — e.g. from Get Accumulator (images
 list)) + short labels (`captions`) + full generation prompts (`prompts`)
 and produces an interactive HTML comparison page — grid (columns + max row height),
-before/after slider, opacity overlay, A/B flip, pixel difference, synced loupe, lightbox,
+before/after slider, opacity overlay, A/B flip, pixel difference, **synced zoom &amp; pan**, synced loupe, lightbox,
 drag-to-reorder, and per-result **review** controls — a **hide**/reject button (with a
 toolbar toggle to show/hide hidden results), a **star rating** (1–5), **tags**, and a
 **comment** box — plus a "Save page" button and an `images_captioned` output (a *list*, so
@@ -273,6 +855,75 @@ Accumulator (prompts)**), and `settings_data` (structured per-image settings fro
 **Generation Info Filter**) — rendered under each image as one `[Class] param: value` line
 per field, with its own page toggle. The `url` output is a clickable http
 link. Node: **`Image Compare (HTML)`** (category `Kinburg-Nodes/image/compare`).
+
+The node carries no *view* settings: what's visible — captions, prompts, settings, times, metrics,
+judge, hidden results — is toggled **on the page**, where you can see the effect. It does carry the
+accumulator **🔌 Collect All** button and its **`auto_collect`** toggle (see the accumulators section),
+since gathering the branches is what feeds this node in the first place.
+
+**The page header is three fixed rows** instead of a toolbar that wrapped into five, and it's grouped
+by purpose rather than by accident of order:
+
+- the **title** on its own thin line, never shortened;
+- the **tools** line, read left to right: the five **modes** pinned left (also keys **1…5**), the
+  viewing controls centred on the page — **👁 Panels**, **Zoom**, **⤢ Fit**, **🔍 Loupe** — and
+  **⬇ Save page** / **📊 Report** / **❔ Help** pinned right;
+- a **mode line** that always belongs to what you're doing: **Columns / Rows / Sort** in Grid, and the
+  **A** / **B** selectors in the pair modes, where they meet at the centre of the page — the same seam
+  the wipe divider sits on — so each selector is on the side of the image it controls and long captions
+  grow **outward** instead of being cropped (the full label is in the option list and the tooltip).
+
+The two panels you touch least often stand behind one button each: **👁 Panels** (the six visibility
+toggles + hidden results, with a badge counting them) and **📊 Report** (the DB path, *Save run*,
+*Open report browser*). The **Opacity** slider isn't in the header at all — it appears right above the
+image it fades, as `A ──○── B` with a live percentage. The Kinburg-Nodes credit sits in a thin footer.
+Result: **146 px → 109 px** of header at 1266 px wide (11.5% → 8.6% of the window), with a layout that
+no longer reshuffles itself as the window changes.
+
+**Rows on screen, not pixels.** Grid's height control is **Rows** — how many rows of results you want
+to see at once (default **1**) — instead of a **Max h** in pixels you had to guess and re-guess. One row
+fills the window, scrolling **snaps row by row**, and the page becomes a flipper: one comparison at a
+time, always the same size. **Max h** is still there for when you want a specific scale (set **Rows** to
+**0**), and while Rows is on it just reports the height that was worked out.
+
+The mechanism is deliberately dumb, because the obvious implementation isn't: rather than measure the
+caption/prompt/settings/review chrome and subtract it — a two-pass layout that has to re-run every time
+you toggle a panel, change **Columns**, type in a comment or load a lazy image — a row is simply given a
+**fixed height of one N-th of the visible area**, and each card's own flex layout hands the picture
+whatever its panels leave over. So a card with a long prompt shows a slightly smaller image than its
+neighbour, with no arithmetic anywhere; when the panels would crowd the picture out altogether **they**
+scroll inside the card instead, and the image never drops below a third of it. Exactly **one** number is
+ever measured — the height the stage can show — and only when the window (or the header's own wrapping)
+actually changes it. The page is an app shell now: fixed header and footer, one scrolling stage, which
+is also what lets the pair modes fill the window instead of the old magic `78vh`.
+
+**Synced zoom &amp; pan.** The **Zoom** slider (×1–×8) magnifies **every** image at once, and they all
+show the **same region**: drag any one of them and the visible area moves in all of them together.
+**Ctrl + wheel** over an image zooms **at the cursor** (the bit you point at stays put); **double-click**,
+**0**, or **⤢ Fit** returns to fit. Nothing is re-laid-out — each image is scaled by a CSS transform
+inside a clipping frame, so the grid never moves and only the visible region does. The region is held
+in *picture-relative* coordinates, so it survives switching modes and changing **Columns** / **Rows**,
+and lands on the same content even when the compared images differ in size or aspect. Made for judging
+fine detail — texture, small faces, foliage — without hunting for the same spot in each picture.
+
+The **Loupe stacks on top of it**: the lens shows **zoom × lens** while its surroundings stay at the
+current zoom, so you can park every image on a region and then peek closer still (plain **wheel** =
+lens zoom, **Alt/Shift + wheel** = lens diameter, **Ctrl + wheel** = image zoom, dragging still pans).
+Reordering goes through a **⠿ grip** in each card's top-left corner rather than the card itself, so all
+of a card's text stays selectable and reordering keeps working at any zoom. In **Slider** mode the
+divider's round handle always moves the wipe — which is what makes it reachable when the pointer is
+busy panning or driving the lens — and **the wipe stays where you put it**: switching A/B, toggling a
+panel, hiding a result or stepping through other modes no longer snaps it back to the middle.
+
+The **🔗 Open comparison** link is stored on the node, so it survives tab switches and workflow
+reloads. Three things keep it honest. The token → folder map behind the served URL is **persisted to
+disk** (`<output>/kinburg/compare_dirs.json`, last 300 runs), so a link minted before a ComfyUI
+restart still opens instead of 404-ing. The link is refreshed from the API's `executed` event rather
+than from the `onExecuted` prototype chain, which any other installed extension can break by patching
+it without calling through. And a link that was **restored** rather than produced by a run you just
+did says so — `🔗 Open comparison (previous run)` — and is quietly checked against the server; if that
+run's folder is gone it turns into a dull `⚠ Comparison expired — run to rebuild` and stops being
+clickable, instead of opening a blank 404 tab.
 
 Two more controls. **`embed_images`** chooses how the comparison is saved: **off** (default) writes
 a **portable folder** `<prefix>_<datetime>/` — a light `index.html` + an `images/` subfolder with
@@ -417,13 +1068,22 @@ slots take any type and auto-grow (the node shows the connected ones plus a spar
 selected `output` and its `selected` slot number. It routes a value — ComfyUI still computes the
 other branches (it's not a lazy gate). Category `Kinburg-Nodes/util`.
 
-**`JSON Extract`** pulls fields out of a JSON string by path into separate `STRING` outputs — up
-to six independent paths (`path_1…6`) → six `value_*` outputs, plus a `found` flag (all non-empty
-paths resolved) and a `report` (per-path hit/miss). Path syntax: dot keys, `[n]` / `.n` indices
-(negative allowed), `$` (or empty) for the whole document; an object/array value comes out as
-compact JSON, and prose-wrapped JSON is tolerated (the first `{…}`/`[…]` is parsed). Pairs with
-the structured-output LLM nodes (e.g. `ideogram4_json`) to route sub-fields into different prompt
-inputs. Category `Kinburg-Nodes/util`.
+**`JSON Extract`** pulls fields out of a JSON string by path into separate `STRING` outputs. You
+write **one path per line** in the `paths` field (each line either a bare path or `path -> alias`;
+blank lines and `# comments` are ignored) and the node grows one **auto-labelled `value_*` output
+per line** — named by the alias, or the path's last key — so the graph is self-documenting; no
+fixed slot count and no more guessing which `value_3` is which. Outputs are rebuilt **when you
+click away from the field**, not while you type, so they appear complete and ready to wire. Don't want to type paths? Hit
+**🔍 Explore JSON** to paste a sample (or reuse the node's last run), then click ＋ on any field to
+add its path — arrays also offer a `[*]` button that grabs every element. A **live preview** on the
+node shows the extracted values after each run. Outputs are `found` (True when the JSON parsed and
+every non-empty path resolved) and `report` (per-path hit/miss) first, then the labelled values.
+Path syntax: dot keys, `[n]` / `.n` indices (negative allowed), **`[*]` / `*` wildcard** (grabs
+every element/value and joins them with `array_join`, e.g. `elements[*].desc`), `$` (or empty) for
+the whole document; an object/array value comes out as compact JSON, and prose-wrapped JSON is
+tolerated (the first `{…}`/`[…]` is parsed). Missing paths return `default`. Up to 12 paths map to
+outputs (extras are noted in `report`). Pairs with the structured-output LLM nodes (e.g.
+`ideogram4_json`) to route sub-fields into different prompt inputs. Category `Kinburg-Nodes/util`.
 
 ### `timer/` — Start Timer, Stop Timer
 **`Start Timer`** / **`Stop Timer`** measure the wall-clock time of a slice of a workflow.
@@ -447,6 +1107,15 @@ the node reads ComfyUI's hidden `PROMPT`, walks upstream, and lists the upstream
 widget values (`[RandomNoise] noise_seed: …`, `[KSamplerSelect] sampler_name: …`, etc.). The
 dump shows on the node, collapsed by default — click to expand. Outputs a human dump (`info`)
 and machine-readable `data` (GEN_INFO). Category `Kinburg-Nodes/util`.
+<br>An optional **`extra`** input takes `GEN_INFO` from a node that reports its **own runtime facts**
+— e.g. **Chimera**'s `gen_extra_info`, which knows the resolved step split, the sigma the handoff
+landed on and the per-stage times, none of which a walk over widget literals can see. It is merged
+**in front of** the walked entries into a **single** dump (per-class `ord`s are renumbered so every
+entry stays addressable), so the branch still feeds one `Set Accumulator (gen info)` — one image
+downstream, not a phantom extra one. Such an input is an *addition* to a dump: send it to the
+accumulator directly and that branch carries none of the shared settings, which makes the Filter's
+`differences` mode keep everything (a field present in some branches and absent in others counts as
+a difference).
 
 **`Generation Info Filter`** takes a single `data` bundle (`GEN_INFO_LIST`) from a
 **Get Accumulator (gen info)** — which collects one Generation Info `data` per branch — and
@@ -519,14 +1188,16 @@ dump (in index order) and outputs a single `data` bundle (`GEN_INFO_LIST`) — w
 output straight into **Generation Info Filter**, so its settings no longer need wiring branch
 by branch. The wiring is plain links, so execution and caching are completely standard.
 
-**`Collect All Accumulators`** is a one-button helper for big workflows: a standalone node
-whose single **🔌 Collect All** button (re)wires *every* Get Accumulator in the graph at once,
-so you don't have to visit each one after scaling the workflow. Like the per-node Collect, it
-rebuilds links from scratch and wires only **active** Sets — bypass or mute a Set and re-collect
-to drop it from every accumulator. Its **`auto_collect`** toggle (on by default) re-collects
-automatically right before the workflow is queued, so the run always reflects the current
-(non-bypassed) Sets; turn it off to collect only on the button press. Category
-`Kinburg-Nodes/accumulators`.
+**Collect All lives on `Image Compare (HTML)`** — collecting only ever serves a comparison, so the
+button sits on the node that consumes the accumulators rather than on a helper node of its own. Its
+**🔌 Collect All** button (re)wires *every* Get Accumulator in the graph at once (the label then shows
+how many were wired), so you don't have to visit each one after scaling the workflow. Like the
+per-node Collect it rebuilds links from scratch and wires only **active** Sets — bypass or mute a Set
+and re-collect to drop it from every accumulator. The compare node's **`auto_collect`** toggle (on by
+default) does it automatically right before the workflow is queued, so a run always reflects the
+current, non-bypassed Sets; turn it off to collect only on the button press. *(This replaces the old
+standalone `Collect All Accumulators` node — delete it from older workflows, where it will show up as
+missing.)*
 
 ### `prompt_presets/` — Prompt Presets
 **`Prompt Presets`** is five **flexible preset slots**, each emitting a `STRING` prompt fragment
@@ -613,9 +1284,9 @@ regenerating. Leave the toggle off for the original behavior. Category `Kinburg-
 ### Chat — `Local LLM Chat (GGUF)` + `Local LLM Settings (GGUF)`
 **`Local LLM Chat (GGUF)`** (in the `local_llm/` package) is a self-contained multi-turn chat node.
 It's deliberately bare — just the **chat window** (User/LLM bubbles in a fixed-height, scrollable
-box, so the node doesn't grow as the chat fills), the **`user_message`** field and the **Send /
-Approve / Clear** buttons. Everything about *how* to generate comes through a single **`config`**
-input.
+box, so the node doesn't grow as the chat fills), the message field, a **context meter**, an
+optional row of **persona chips**, and the **Send / Approve / Clear** buttons. Everything about
+*how* to generate comes through the **`persona_1`** input.
 
 **`Local LLM Settings (GGUF)`** is that config node: it holds the options — model, system prompt,
 sampling, loader (`n_ctx` / `n_gpu_layers` / …), reasoning split, `output_format` / grammar,
@@ -624,24 +1295,118 @@ toggles — plus two connect-only inputs: **`context`** (reference material
 appended to the system prompt — e.g. Character Card / Context Collector) and **`vision`** (from a
 **`Vision Settings (GGUF)`** node — `mmproj` / `vision_handler` / `image_max_side`; connect it only
 for vision). It emits everything as one `KINBURG_LLM_CONFIG` bundle. Wire its `config` output into
-any LLM node — the chat node **and** the text/vision nodes take the same bundle, so one Settings
-node can drive several.
+any LLM node — the chat node's **`persona_1`** **and** the text/vision nodes take the same bundle,
+so one Settings node can drive several.
 
 - **📨 Send** runs the workflow up to the chat node: `run()` generates a reply from the stored
   history + your message (+ optional image), **streams it into the bubble live** (over a
   `kinburg.chatllm` websocket event), and **blocks the downstream branch** (`ExecutionBlocker`) so
   nothing past the node runs while you chat. Reasoning models: the `<think>…` stream shows in an
   open **💭 thinking** block during generation, then collapses into a **💭 reasoning** toggle with
-  the answer as the main text (only the answer goes downstream). Each message has a **⧉ copy** button.
+  the answer as the main text (only the answer goes downstream).
 - **✅ Approve** runs with the gate open: `run()` **skips generation** and emits the **last reply**
   on the `text` output, so it flows downstream immediately (no re-generation, any seed).
 
-The dialogue lives in a hidden, serialized `history_json` widget (persists in the workflow;
-**🗑 Clear** wipes it). **Vision is optional:** the `image` input is on the **chat node** (attached
-to the current turn); set an `mmproj` on the Settings node to enable it — connecting an image with
-no `mmproj` set shows an error in the chat. `unload_llm_after_run` defaults **off** so the model
-stays in VRAM for fast back-and-forth. Chat outputs: `text` (the approved reply, gated) and a
-`help` cheat-sheet. Category `Kinburg-Nodes/LLM`.
+**Editing the conversation.** Hover any bubble — yours or the model's — for **⧉ copy · ✎ edit ·
+↻ resend · 🗑 delete**. ✎ swaps the bubble for an inline textarea sized to the message it holds
+(Esc cancels, Ctrl+Enter saves). ↻ replays exactly the turn that produced the message, dropping
+everything below it — a normal question/answer pair goes back to your question, while a persona's
+no-user-message turn replays just that one reply. All of it is plain surgery on the stored history, so the
+next turn simply sees the conversation you left behind. Everything is disabled while a reply is in
+flight; if a run dies before reaching the node, **✕** on the live bubble unsticks it.
+
+**Personas.** Four inputs — **`persona_1..4`** — each take a *whole* `Local LLM Settings (GGUF)`
+bundle, so a persona brings its own **model, sampling and system prompt**, not just a different
+prompt. **`persona_1` is the node's config**: wire only that one and this is an ordinary chat node
+with no chip row. Wire a second and a chip row appears, one chip per persona. Clicking a chip only
+**selects** it — 📨 Send is the sole trigger — and the active persona's bundle becomes the config
+for that turn. All personas share one history, so a prompt-writer sees the whole discussion (as far
+back as its window reaches); when it speaks, the other personas' replies are prefixed with their
+name (`[Order manager]: …`) so it doesn't mistake them for its own past turns. Bubbles are labelled
+with their persona once there's more than one.
+
+The **⚙** chip sets, per persona: the **chip label** (defaults to the title of the wired-in node,
+but only if you renamed it — four stock Settings nodes all read the same), an optional **trigger**
+message, and the two context controls below. With nothing else wired the chip row is hidden and the
+node behaves exactly as before.
+
+**Who sees what.** Two independent per-persona settings decide which turns reach the model. Both
+are worked out per request, never frozen into the history, so changing one takes effect on messages
+that are already there — and the chat dims exactly what the persona you have selected won't see.
+
+- **`Keep in context`** — *how long*. A prompt-writer emits a 300-token draft every press, and after
+  an iteration or two the newer one supersedes it. This is how many of that persona's **own** most
+  recent turns survive: blank = all (the default), `0` = none, `2` = the last two. It counts its own
+  turns, not every turn since — chatting with someone else for twenty messages shouldn't make the
+  writer forget the draft you're revising. A turn is the reply *plus* the instruction that produced
+  it, so nothing is left dangling.
+- **`Private`** — *for whom*. The persona's turns go to nobody but itself. It still reads its own
+  back (that's what makes revising a draft work), while the persona you're brainstorming with never
+  wades through prompt sprawl. Combine them: private + keep 2 = "I see my own last two, nobody else
+  sees any."
+
+Withheld messages stay in the chat, dimmed with 🚫; hover for which rule caught them. A message you
+hide by hand is a third, separate thing and comes back with the **👁** button on its bubble.
+✅ Approve releases the last reply regardless of any of this.
+
+**What 📨 Send does with an empty input box** depends on who spoke last:
+
+| Situation | What happens |
+|---|---|
+| You typed something | A normal turn, as always. |
+| Box empty, **you switched persona** | A turn with **no user message at all** — the persona works from the conversation and its own system prompt, so nothing prods it in a way everyone else would then see in the context. Set a **trigger** in ⚙ if you'd rather send a standing instruction. |
+| Box empty, **the last reply is the active persona's own** | **Continues that reply** from where `max_tokens` cut it off, appending to the same bubble instead of starting a new one. |
+
+Two caveats on those: a no-user-message turn asks the model for a second `assistant` block in a row,
+which a few chat templates (mistral-family) reject outright — the trigger field is the way out. And
+continuing a reply uses a raw prefill, so it needs a chat template and doesn't work on the vision
+path. Both modes also skip `thinking_directive`, since it would have to *become* the user turn.
+
+**Context meter.** A thin row under the chat shows the KV-cache fill after the last turn —
+`ctx 3 412 / 8 192 · 42% · 120 out · 4.2s` — from the same worker numbers `LLM Live Log` reports.
+The bar turns amber past 75% and red past 90%. When a reply stops because it hit `max_tokens` the
+row says so, which is the cue to press Send with an empty box and let the persona finish it.
+
+**Archiving (`⤵ Archive N`).** When the conversation starts crowding the window, this folds the
+older turns into a single **🗂 archived summary** and the model reads *that* instead of them. The
+originals stay right where they were, dimmed — nothing is deleted, and **🗑 on the summary puts them
+all back**. The summary is an ordinary bubble, so **✎ edits it** when the model dropped something
+it shouldn't have.
+
+It is one one-shot request with an empty history, so it still works when the chat is *already* over
+budget, and it never touches VRAM: by default the summariser borrows the active persona's
+already-loaded model with a compression prompt swapped in. Pick a dedicated persona in ⚙ if you'd
+rather have a small fast model do it in its own voice. Turns that are already withheld — hidden by
+hand, aged out of a retention window, or belonging to a private persona — are never folded in, so a
+private thread can't leak into a shared brief.
+
+The summary is **cumulative**: each pass rewrites it from the previous one plus the next block, so
+archiving repeatedly never loses the first pass. One press folds at most 30 messages, which keeps
+the summariser's own prompt from overflowing on a very long chat — press again for the next block.
+In ⚙: **`Keep verbatim`** is how many recent messages are never folded (default 8), and **`Nag at`**
+is the fill % at which the button turns amber (default 70). It's manual on purpose — the button
+tells you how many would go, and you decide when.
+
+**VRAM.** Personas that share a model *and* the loader fields (`n_ctx`, `n_gpu_layers`, `n_batch`,
+`flash_attn`, `kv_cache_type`, `extra_load_args`, mmproj) cost **no reload** when you switch —
+the worker's load signature ignores the system prompt and sampling. Differ in any of them and the
+worker process is killed and restarted, which does free the VRAM but costs a full load; a chip is
+marked **⟳** when picking it would reload the model. **`unload_on_approve`** (on by default) frees
+the LLM entirely when you press ✅ Approve, so the image model downstream has room.
+
+The dialogue — plus your pending message, the picked persona and the turn descriptor — lives in a
+single **`chat_state`** JSON input that persists in the workflow (**🗑 Clear** wipes it; personas are
+untouched). It is one input rather than six on purpose: the Vue frontend draws a 24 px row for
+*every* widget a node owns, hidden or not, so six little carriers left 168 px of dead grey space
+under the chat. The frontend doesn't render this one as a widget at all — it removes the
+auto-created widget and lets the chat window itself carry the value — so the node has no invisible
+rows. Workflows saved in the older six-widget format are migrated on load.
+
+**Vision is optional:** the `image` input is on the
+**chat node** (attached to the current turn); set an `mmproj` on the Settings node to enable it —
+connecting an image with no `mmproj` set shows an error in the chat. `unload_llm_after_run` defaults
+**off** so the model stays in VRAM for fast back-and-forth. Chat outputs: `text` (the approved
+reply, gated) and a `help` cheat-sheet. Category `Kinburg-Nodes/LLM`.
 
 ### `save_song/` — Save Song
 **`Save Song`** saves an **`audio`** clip (required) as a song, with an optional **`image`**
@@ -679,10 +1444,24 @@ name or colour dot to _focus_ it** — the canvas pans/zooms to that group. A **
 non-matching rows by name (handy with many groups; view-only, never touches the graph), and while
 a filter is active the header **`all on`** / **`all off`** / **`all ✕`** (set to Never) buttons act
 only on the matching groups (otherwise on every group).
+**Hide the groups you never touch.** A group that just loads the base models, VAE or LoRAs is
+set-and-forget — it only clutters the panel. Pick **`🚫 Hide from this list`** in a row's **`⋯`**
+menu and the row disappears; the header count shows how many are put away (`7 +2🚫`). Nothing is
+lost and nothing is destructive: the group keeps its current mode, and hidden groups are
+deliberately **skipped by `all on` / `all off` / `all ✕` and by Solo**, so a bulk switch-off can
+never disable the loaders your workflow needs. To get one back, click the header **`👁`** button —
+hidden rows reappear **dimmed** (marked `🚫`), fully usable, with **`👁 Unhide`** in their `⋯` menu;
+click `👁` again to put them away, or **right-click `👁` to unhide everything at once**. The hidden
+set is saved on the node (in `properties`), so it travels with the workflow and survives a reload,
+while the reveal toggle itself is per-session. If you hide a group that has nested groups inside it,
+the children stay listed and simply shift one level left.
 **Reorder the rows** to taste: **`sort ⇅`** sorts by name (click toggles A–Z / Z–A; **right-click**
-restores the original order), or **drag a row by its `⠿` handle**. The chosen order is saved on the
-node (in `properties`), so it travels with the workflow and survives a reload — it's purely
-cosmetic and never affects the prompt. The node itself has no inputs or outputs and never runs on
+restores the original order), or **drag a row by its `⠿` handle**. Reordering is **nesting-aware**:
+a group can only be moved **among its siblings** (groups sharing the same parent), and dragging a
+parent **carries its whole subtree** — so a nested group can't be stranded under an unrelated parent
+in the list. The chosen order is saved on the node (in `properties`), so it travels with the
+workflow and survives a reload — it's purely cosmetic and never affects the prompt (or the actual
+group nesting, which is defined by the groups' positions on the canvas). The node itself has no inputs or outputs and never runs on
 the backend — it's excluded from the prompt and only manipulates other nodes' modes on the client
 before the run. Category `Kinburg-Nodes/util`.
 

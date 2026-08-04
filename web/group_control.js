@@ -18,9 +18,18 @@ import { api } from "../../scripts/api.js";
 //   * ⋯ button / right-click → a menu with Run · Always · Bypass · Never (the discoverable way
 //                              to set Never / mute a group).
 //
+// Rows can also be HIDDEN (⋯ → "Hide from this list") — for set-and-forget groups (base loaders,
+// VAE, …) you never toggle and don't want in the way. Hidden names are saved on the node
+// (node.properties._kbHidden) so they travel with the workflow, and hidden groups are excluded
+// from the bulk buttons and from Solo, so "all off" can never switch off your loaders. The header
+// 👁 button reveals hidden rows (dimmed) so they can still be used or unhidden.
+//
 // The rows can be reordered: "sort" sorts by name (toggling A–Z / Z–A; right-click restores the
-// original order), or drag a row by its ⠿ handle. The chosen order is saved on the node
-// (node.properties._kbOrder) so it travels with the workflow; it's purely cosmetic.
+// original order), or drag a row by its ⠿ handle. Reordering is TREE AWARE and respects nesting:
+// a group can only be moved among its siblings (same parent), and dragging a parent carries its
+// whole subtree — so the panel can't be left showing a child under an unrelated parent. The chosen
+// order is saved on the node (node.properties._kbOrder) so it travels with the workflow; it's
+// purely cosmetic (never changes the actual group nesting, which is defined by canvas geometry).
 
 const CLASS = "KinburgGroupControl";
 
@@ -60,20 +69,13 @@ function groupNodes(group) {
   });
 }
 
-// How many other groups fully contain this one (→ nesting depth for indentation).
-function depthOf(group, all) {
-  const b = bboxOf(group);
-  if (!b) return 0;
-  const [x, y, w, h] = b, area = w * h;
-  let d = 0;
-  for (const o of all) {
-    if (o === group) continue;
-    const ob = bboxOf(o);
-    if (!ob) continue;
-    const [ox, oy, ow, oh] = ob;
-    if (x >= ox && y >= oy && x + w <= ox + ow && y + h <= oy + oh && ow * oh > area) d++;
-  }
-  return d;
+// Geometric containment between two bounding boxes (outer strictly bigger). This is how the group
+// tree is derived — a group whose bbox sits inside another's is that other's child.
+function areaOf(b) { return b ? b[2] * b[3] : 0; }
+function strictlyContains(outer, inner) {
+  if (!outer || !inner) return false;
+  const [x, y, w, h] = inner, [ox, oy, ow, oh] = outer;
+  return x >= ox && y >= oy && x + w <= ox + ow && y + h <= oy + oh && ow * oh > w * h;
 }
 
 // Collapse groups to one entry per unique (trimmed) title, in first-appearance order.
@@ -84,10 +86,43 @@ function collectEntries() {
     const name = String(g.title ?? "").trim();
     if (!name) continue;
     let e = byName.get(name);
-    if (!e) { e = { name, groups: [], depth: depthOf(g, groups), color: g.color }; byName.set(name, e); }
+    if (!e) { e = { name, groups: [], color: g.color }; byName.set(name, e); }
     e.groups.push(g);
   }
   return [...byName.values()];
+}
+
+// Build a parent/child tree over the entries from geometric containment (each entry represented by
+// its first group's bbox). The immediate parent is the TIGHTEST (smallest-area) group that contains
+// it. Sets e.parent (entry|null) and e.depth on every entry, and returns { roots, childrenOf } for
+// pre-order traversal. This tree is what pins a group under its real parent in the panel — all
+// reordering below is constrained to siblings of the same parent, so subtrees can't be interleaved.
+function buildTree(entries) {
+  const bb = new Map(entries.map((e) => [e, bboxOf(e.groups[0])]));
+  for (const e of entries) {
+    let parent = null, parentArea = Infinity;
+    const be = bb.get(e);
+    if (be) {
+      for (const o of entries) {
+        if (o === e) continue;
+        const bo = bb.get(o);
+        if (strictlyContains(bo, be) && areaOf(bo) < parentArea) { parent = o; parentArea = areaOf(bo); }
+      }
+    }
+    e.parent = parent;
+  }
+  const childrenOf = new Map();
+  const roots = [];
+  for (const e of entries) {
+    if (e.parent) {
+      if (!childrenOf.has(e.parent)) childrenOf.set(e.parent, []);
+      childrenOf.get(e.parent).push(e);
+    } else {
+      roots.push(e);
+    }
+  }
+  for (const e of entries) { let d = 0, p = e.parent; while (p) { d++; p = p.parent; } e.depth = d; }
+  return { roots, childrenOf };
 }
 
 // -------------------------------------------------------------------- ordering (sort / drag)
@@ -99,19 +134,25 @@ function setOrder(node, names) {
   node.properties._kbOrder = names;
 }
 
-// Reorder entries to match the saved order. Names not in the list keep their natural
-// first-appearance order, placed after the ones that are (so new groups show up at the bottom).
-function applyOrder(entries, node) {
-  const order = node.properties && node.properties._kbOrder;
-  if (!Array.isArray(order) || !order.length) return entries;
+// Produce the pre-order render list from the tree, ordering SIBLINGS (not the whole flat list) by
+// the saved order. Names not listed keep first-appearance order, after the listed ones. Applying
+// the order per-sibling is the core of the fix: the saved order can only shuffle children within
+// one parent, never lift a group out of its subtree or interleave two subtrees.
+function orderEntries(node, entries, tree) {
+  const order = (node.properties && node.properties._kbOrder) || [];
   const pos = new Map(order.map((n, i) => [n, i]));
-  const orig = new Map(entries.map((e, i) => [e.name, i]));
+  const firstIdx = new Map(entries.map((e, i) => [e, i]));
   const big = order.length + entries.length;
-  return entries.slice().sort((a, b) => {
-    const pa = pos.has(a.name) ? pos.get(a.name) : big + orig.get(a.name);
-    const pb = pos.has(b.name) ? pos.get(b.name) : big + orig.get(b.name);
-    return pa - pb;
-  });
+  const rank = (e) => (pos.has(e.name) ? pos.get(e.name) : big + firstIdx.get(e));
+  const sortSibs = (list) => list.slice().sort((a, b) => rank(a) - rank(b));
+  const out = [];
+  const walk = (e) => {
+    out.push(e);
+    const kids = tree.childrenOf.get(e);
+    if (kids) for (const c of sortSibs(kids)) walk(c);
+  };
+  for (const r of sortSibs(tree.roots)) walk(r);
+  return out;
 }
 
 // Sort by name; each click flips A→Z / Z→A. Natural (numeric-aware) collation.
@@ -135,14 +176,14 @@ function clearOrder(node) {
   rebuild(node);
 }
 
-// Pointer-driven drag reorder from a row's grip handle. Reorders the DOM live as the pointer
-// moves, then commits the new row order to node.properties on release. paint()/rebuild() are
-// held off while dragging (see refresh) so the list DOM isn't rebuilt mid-drag.
-//
-// Pointer capture and the move/up listeners live on the LIST, never on the row/handle: the
-// dragged row is reparented by insertBefore on every step, which momentarily detaches it and
-// would drop capture held on it — the drag would then stall after one move and never get its
-// pointerup (so the highlight would stick). The list stays put, so capture survives the drag.
+// Pointer-driven drag reorder from a row's grip handle — TREE AWARE.
+//   * The dragged unit is the group's whole SUBTREE (its row + all descendant rows, which are
+//     contiguous in the pre-order render), so a parent always moves together with its children.
+//   * It can only be dropped among its SIBLINGS (same parent, same depth) — never lifted out of
+//     its subtree — so the panel can't end up showing a child under an unrelated parent.
+// A thin drop-line marks the target gap; the rows aren't shuffled live (only the indicator moves),
+// and the new order is committed + rebuilt on release. paint()/rebuild() are held off mid-drag
+// (see refresh). Pointer capture + listeners live on the LIST so they survive DOM changes.
 function attachDrag(node, row, handle) {
   handle.addEventListener("pointerdown", (downEvt) => {
     if (downEvt.button !== 0) return; // left button only
@@ -152,28 +193,69 @@ function attachDrag(node, row, handle) {
 
     const list = node._kbEls && node._kbEls.list;
     if (!list) return;
+
+    const rows = [...list.children].filter((c) => c._kbEntry);
+    const startIdx = rows.indexOf(row);
+    if (startIdx < 0) return;
+    const depth = row._kbDepth || 0;
+    const parentKey = row._kbParentKey || "";
+
+    // Dragged subtree = this row + the following rows of greater depth (contiguous in pre-order).
+    let blockEnd = startIdx + 1;
+    while (blockEnd < rows.length && (rows[blockEnd]._kbDepth || 0) > depth) blockEnd++;
+    const block = rows.slice(startIdx, blockEnd);
+
+    // Sibling blocks (same parent + depth), excluding the dragged one, in display order.
+    const sibs = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (i === startIdx) continue;
+      if ((rows[i]._kbDepth || 0) === depth && (rows[i]._kbParentKey || "") === parentKey) {
+        let e = i + 1;
+        while (e < rows.length && (rows[e]._kbDepth || 0) > depth) e++;
+        sibs.push({ first: rows[i], lastIdx: e - 1, firstIdx: i });
+        i = e - 1;
+      }
+    }
+    if (!sibs.length) return; // only child under its parent — nowhere to reorder to
+
     node._kbDragging = true;
     handle.style.cursor = "grabbing";
-    const prevBg = row.style.background;
-    const prevOpacity = row.style.opacity;
-    row.style.opacity = "0.55";
-    row.style.background = "#2b6cb055";
+    const savedOpacity = block.map((r) => r.style.opacity);
+    block.forEach((r) => (r.style.opacity = "0.5"));
+
+    const line = document.createElement("div");
+    line.style.cssText =
+      "height:2px;background:#3b82f6;border-radius:1px;margin:0 6px;pointer-events:none;" +
+      "box-shadow:0 0 4px #3b82f6;";
+
+    // gap = insertion index among the sibling blocks [0..sibs.length]; start at the dragged row's
+    // own current sibling position so the indicator doesn't jump before the first move.
+    let gap = sibs.filter((s) => s.firstIdx < startIdx).length;
+
+    const positionLine = () => {
+      if (line.parentNode) line.remove();
+      if (gap < sibs.length) {
+        list.insertBefore(line, sibs[gap].first);
+      } else {
+        const after = rows[sibs[sibs.length - 1].lastIdx].nextElementSibling;
+        if (after) list.insertBefore(line, after); else list.appendChild(line);
+      }
+    };
+
     const pid = downEvt.pointerId;
     try { list.setPointerCapture(pid); } catch (e) { /* not fatal */ }
 
     const onMove = (e) => {
+      if (line.parentNode) line.remove(); // measure layout without the indicator shifting it
       const y = e.clientY;
-      let before = null;
-      for (const sib of list.children) {
-        if (sib === row) continue;
-        const r = sib.getBoundingClientRect();
-        if (y < r.top + r.height / 2) { before = sib; break; }
+      let k = 0;
+      for (const sb of sibs) {
+        const top = sb.first.getBoundingClientRect().top;
+        const bottom = rows[sb.lastIdx].getBoundingClientRect().bottom;
+        if (y > (top + bottom) / 2) k++; else break;
       }
-      if (before) {
-        if (before !== row.nextElementSibling) list.insertBefore(row, before);
-      } else if (list.lastElementChild !== row) {
-        list.appendChild(row);
-      }
+      gap = k;
+      positionLine();
     };
 
     const finish = () => {
@@ -181,19 +263,81 @@ function attachDrag(node, row, handle) {
       list.removeEventListener("pointerup", finish);
       list.removeEventListener("pointercancel", finish);
       try { list.releasePointerCapture(pid); } catch (e) { /* already released */ }
+      if (line.parentNode) line.remove();
       handle.style.cursor = "grab";
-      row.style.opacity = prevOpacity;
-      row.style.background = prevBg;
+      block.forEach((r, i) => (r.style.opacity = savedOpacity[i]));
       node._kbDragging = false;
-      const names = [...list.children].map((c) => c._kbEntry && c._kbEntry.name).filter(Boolean);
-      setOrder(node, names);
+
+      // Rebuild the full pre-order name list with the dragged block moved to `gap` among siblings.
+      const rest = rows.filter((r) => !block.includes(r));
+      let insertAt;
+      if (gap < sibs.length) insertAt = rest.indexOf(sibs[gap].first);
+      else insertAt = rest.indexOf(rows[sibs[sibs.length - 1].lastIdx]) + 1;
+      const newRows = rest.slice();
+      newRows.splice(insertAt, 0, ...block);
+      setOrder(node, newRows.map((r) => r._kbEntry.name));
+      rebuild(node);                      // re-render from the tree so depth/indent stay correct
       app.graph?.setDirtyCanvas(true, true);
     };
 
     list.addEventListener("pointermove", onMove);
     list.addEventListener("pointerup", finish);
     list.addEventListener("pointercancel", finish);
+    positionLine();
   });
+}
+
+// ------------------------------------------------------------------------------ hidden groups
+// Some groups are set-and-forget (base model loaders, VAE, LoRAs you never disable) — they only
+// clutter the panel. Hiding one drops its row from the list. The hidden names live on the node
+// (node.properties._kbHidden), so they serialize with the workflow just like the row order.
+//
+// Hiding is a PANEL-level thing only: the group keeps whatever mode it has, and hidden groups are
+// deliberately EXCLUDED from the header bulk buttons and from Solo (see activeEntries) — so "all
+// off" / "all ✕" / Solo can never silently switch off the groups you hid because they must stay on.
+// Nothing is lost: the header 👁 button reveals hidden rows (dimmed) so they can be used again or
+// unhidden, and right-clicking 👁 unhides everything at once.
+function hiddenNames(node) {
+  return (node.properties && node.properties._kbHidden) || [];
+}
+
+function isHidden(node, entry) {
+  return hiddenNames(node).includes(entry.name);
+}
+
+// Hidden names that actually exist as rows right now (stale names from renamed/deleted groups are
+// kept in properties — harmless, same as _kbOrder — but never counted).
+function hiddenCount(node) {
+  return (node._kbAllEntries || []).filter((e) => isHidden(node, e)).length;
+}
+
+function setHidden(node, name, hide) {
+  node.properties = node.properties || {};
+  const list = hiddenNames(node).filter((n) => n !== name);
+  if (hide) list.push(name);
+  if (list.length) node.properties._kbHidden = list;
+  else delete node.properties._kbHidden;
+  rebuild(node);
+  app.graph?.setDirtyCanvas(true, true);
+}
+
+function unhideAll(node) {
+  if (!hiddenNames(node).length) return;
+  if (node.properties) delete node.properties._kbHidden;
+  rebuild(node);
+  flash(node, "👁 all groups unhidden");
+}
+
+function toggleShowHidden(node) {
+  node._kbShowHidden = !node._kbShowHidden;
+  rebuild(node);
+}
+
+// Entries the bulk buttons and Solo may touch: everything except the hidden ones — regardless of
+// whether hidden rows are currently revealed. Hidden means protected.
+function activeEntries(node) {
+  const all = node._kbAllEntries || collectEntries();
+  return all.filter((e) => !isHidden(node, e));
 }
 
 // Aggregate on/off state across every node of every same-named group.
@@ -325,10 +469,11 @@ function focusEntry(entry) {
 // executes only this branch. Snapshots the prior modes (in memory) so "Undo solo" can restore
 // them. Only nodes that belong to groups are touched; ungrouped nodes are left alone. Others are
 // bypassed first and the target set Always last, so the soloed group wins even under nesting.
+// HIDDEN groups are left completely alone — a hidden "load the models" group must survive a solo.
 function soloEntry(node, entry) {
-  const entries = node._kbEntries || collectEntries();
+  const entries = activeEntries(node);
   const snap = new Map();
-  for (const e of entries) for (const g of e.groups) for (const n of groupNodes(g)) {
+  for (const e of [...entries, entry]) for (const g of e.groups) for (const n of groupNodes(g)) {
     if (!snap.has(n.id)) snap.set(n.id, n.mode);
   }
   node._kbSolo = { name: entry.name, modes: snap };
@@ -370,6 +515,29 @@ function openRowMenu(node, entry, evt) {
   if (node._kbSolo) {
     items.push({ content: `↩ Undo solo (${node._kbSolo.name})`, callback: () => undoSolo(node) });
   }
+  // Hide / unhide this row, plus the reveal toggle when anything is hidden.
+  items.push(null);
+  if (isHidden(node, entry)) {
+    items.push({
+      content: "👁 Unhide — keep in the list",
+      callback: () => { setHidden(node, entry.name, false); flash(node, `👁 “${entry.name}” unhidden`); },
+    });
+  } else {
+    items.push({
+      content: "🚫 Hide from this list",
+      callback: () => {
+        setHidden(node, entry.name, true);
+        flash(node, `🚫 “${entry.name}” hidden — 👁 in the header shows it again`);
+      },
+    });
+  }
+  const hn = hiddenCount(node);
+  if (hn) {
+    items.push({
+      content: node._kbShowHidden ? `🙈 Stop showing hidden (${hn})` : `👁 Show hidden groups (${hn})`,
+      callback: () => toggleShowHidden(node),
+    });
+  }
   new CM(items, { event: evt, title: entry.name });
 }
 
@@ -392,27 +560,54 @@ function flash(node, msg, isError) {
 function applyFilter(node) {
   const els = node._kbEls;
   if (!els) return;
-  const total = (node._kbEntries || []).length;
   const q = node._kbFilter || "";
-  let shown = 0;
+  let total = 0, shown = 0;
   for (const row of els.list.children) {
     const e = row._kbEntry;
-    const ok = !q || (e && e.name.toLowerCase().includes(q));
+    if (!e) continue; // e.g. the drag drop-line — not a row
+    total++;
+    const ok = !q || e.name.toLowerCase().includes(q);
     // Show with "grid" (the row's real display), NOT "" — an empty string deletes the inline
     // display and the row falls back to block, which would kill the grid column alignment.
     row.style.display = ok ? "grid" : "none";
     if (ok) shown++;
   }
-  els.count.textContent = total ? (q ? `${shown}/${total}` : `${total}`) : "";
-  if (!total) { els.empty.textContent = "No named groups in this workflow."; els.empty.style.display = ""; }
-  else if (shown === 0) { els.empty.textContent = "No groups match the filter."; els.empty.style.display = ""; }
+  // Count reads "<shown>/<total>" under a filter, and appends "+N🚫" for rows kept out of sight.
+  const hn = hiddenCount(node);
+  const extra = !node._kbShowHidden && hn ? ` +${hn}🚫` : "";
+  els.count.textContent = total ? `${q ? `${shown}/${total}` : total}${extra}` : extra.trim();
+  if (!total) {
+    els.empty.textContent = hn
+      ? `All ${hn} group(s) are hidden — click 👁 in the header to show them.`
+      : "No named groups in this workflow.";
+    els.empty.style.display = "";
+  } else if (shown === 0) { els.empty.textContent = "No groups match the filter."; els.empty.style.display = ""; }
   else { els.empty.style.display = "none"; }
+  paintEye(node);
 }
 
-// Which entries the header bulk buttons act on: the filtered (visible) set when a filter is
-// active, otherwise every entry.
+// Keep the header 👁 button in sync: it shows how many groups are hidden and whether they're
+// currently revealed.
+function paintEye(node) {
+  const els = node._kbEls;
+  if (!els || !els.eye) return;
+  const n = hiddenCount(node), on = !!node._kbShowHidden;
+  els.eye.textContent = n ? (on ? `👁 ${n}` : `🚫 ${n}`) : "👁";
+  els.eye.style.background = on ? "#3b3b5c" : "#2a2a32";
+  els.eye.style.color = n ? "#ddd" : "#6d6d76";
+  els.eye.title = n
+    ? (on
+        ? `Showing ${n} hidden group(s) as dimmed rows — click to put them away again. ` +
+          "Right-click: unhide all."
+        : `${n} group(s) hidden from this list — click to reveal them (dimmed). Right-click: unhide all.`)
+    : "No hidden groups. Use a row's ⋯ menu → “Hide from this list” to keep set-and-forget " +
+      "groups (loaders, VAE, …) out of the way. Hidden groups are also skipped by all on/off/✕ and Solo.";
+}
+
+// Which entries the header bulk buttons act on: never the hidden ones, and only the filtered
+// (visible) set when a filter is active.
 function bulkEntries(node) {
-  const all = node._kbEntries || [];
+  const all = activeEntries(node);
   const q = node._kbFilter || "";
   return q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all;
 }
@@ -469,20 +664,24 @@ function buildPanel(node) {
     clearOrder(node);
     sortBtn.textContent = "sort ⇅";
   };
-  // Bulk buttons act on the filtered set when a filter is active (else everything).
-  const allOn = mkBtn("all on", "Set matching groups to Always (all when no filter)", () => {
+  // 👁 reveals the hidden rows (dimmed) so they can be used or unhidden; right-click unhides all.
+  const eye = mkBtn("👁", "", () => toggleShowHidden(node));
+  eye.oncontextmenu = (e) => { e.preventDefault(); unhideAll(node); };
+  // Bulk buttons act on the filtered set when a filter is active (else everything), and never on
+  // hidden groups — that's the point of hiding a "load the base models" group.
+  const allOn = mkBtn("all on", "Set matching groups to Always (all when no filter; hidden groups untouched)", () => {
     for (const e of bulkEntries(node)) applyMode(e, ALWAYS());
     refresh(node);
   });
-  const allOff = mkBtn("all off", "Bypass matching groups (all when no filter)", () => {
+  const allOff = mkBtn("all off", "Bypass matching groups (all when no filter; hidden groups untouched)", () => {
     for (const e of bulkEntries(node)) applyMode(e, BYPASS());
     refresh(node);
   });
-  const allNever = mkBtn("all ✕", "Set matching groups to Never/mute (all when no filter)", () => {
+  const allNever = mkBtn("all ✕", "Set matching groups to Never/mute (all when no filter; hidden groups untouched)", () => {
     for (const e of bulkEntries(node)) applyMode(e, MUTE());
     refresh(node);
   });
-  header.append(title, count, sortBtn, allOn, allOff, allNever);
+  header.append(title, count, sortBtn, eye, allOn, allOff, allNever);
 
   // Live name filter — hides non-matching rows (view only; never touches the graph).
   const filter = document.createElement("input");
@@ -513,7 +712,8 @@ function buildPanel(node) {
   empty.style.cssText = "color:#777;padding:8px 6px;font-style:italic;";
 
   root.append(header, filter, status, list, empty);
-  node._kbEls = { root, list, count, empty, status, filter };
+  node._kbEls = { root, list, count, empty, status, filter, eye };
+  paintEye(node);
   return root;
 }
 
@@ -521,11 +721,26 @@ function buildPanel(node) {
 function rebuild(node) {
   const els = node._kbEls;
   if (!els) return;
-  const entries = applyOrder(collectEntries(), node);
+  const all = collectEntries();
+  const tree = buildTree(all);
+  const ordered = orderEntries(node, all, tree);
+  node._kbAllEntries = ordered;   // every entry — what activeEntries()/hiddenCount() work from
+  // Hidden entries get no row unless the 👁 toggle is on (then they render dimmed).
+  const entries = ordered.filter((e) => node._kbShowHidden || !isHidden(node, e));
+  const shownSet = new Set(entries);
   node._kbEntries = entries;
   els.list.innerHTML = "";
 
   for (const entry of entries) {
+    const hidden = isHidden(node, entry);
+    // A hidden parent leaves no row, so indentation and the drag sibling-grouping below follow the
+    // nearest VISIBLE ancestor: children of a hidden group are promoted a level instead of being
+    // indented under a row that isn't there.
+    let vparent = entry.parent;
+    while (vparent && !shownSet.has(vparent)) vparent = vparent.parent;
+    let depth = 0;
+    for (let p = vparent; p; p = p.parent) if (shownSet.has(p)) depth++;
+
     // Fixed grid columns keep the controls in the same place on every row, whatever the name
     // length: [grip][dot][name grows][▶][switch][⋯]. NOTE: applyFilter() must re-show rows with
     // display:"grid" (not ""), or it wipes this inline display and the row falls back to block.
@@ -533,7 +748,8 @@ function rebuild(node) {
     row.style.cssText =
       "display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto auto;" +
       "align-items:center;column-gap:6px;padding:3px 6px;border-radius:5px;" +
-      `background:#00000022;margin-left:${entry.depth * 14}px;`;
+      `background:#00000022;margin-left:${depth * 14}px;` +
+      (hidden ? "opacity:.5;" : "");
 
     const grip = document.createElement("span");
     grip.textContent = "⠿";
@@ -553,7 +769,9 @@ function rebuild(node) {
     const name = document.createElement("span");
     name.textContent = entry.name;
     if (entry.groups.length > 1) name.textContent += `  ×${entry.groups.length}`;
+    if (hidden) name.textContent += "  🚫";
     name.title = entry.name + (entry.groups.length > 1 ? ` (${entry.groups.length} groups)` : "") +
+      (hidden ? " — HIDDEN (skipped by all on/off/✕ and Solo; ⋯ → Unhide to keep it)" : "") +
       " — click to focus on canvas";
     name.style.cssText =
       "min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#ddd;cursor:pointer;";
@@ -584,13 +802,16 @@ function rebuild(node) {
     // ⋯ menu: the discoverable home for Always / Bypass / Never (+ Run).
     const menu = document.createElement("button");
     menu.textContent = "⋯";
-    menu.title = "More: Run · Focus · Always / Bypass / Never · Solo";
+    menu.title = "More: Run · Focus · Always / Bypass / Never · Solo · Hide from list";
     menu.style.cssText =
       "cursor:pointer;border:1px solid #3a3a44;background:#2a2a32;color:#bbb;" +
       "border-radius:4px;width:20px;height:20px;font-size:12px;line-height:1;padding:0;";
     menu.onclick = (e) => { e.preventDefault(); openRowMenu(node, entry, e); };
 
     row._kbEntry = entry;
+    row._kbHidden = hidden;
+    row._kbDepth = depth;
+    row._kbParentKey = vparent ? vparent.name : "";
     row._kbSwitch = sw;
     // Right-click anywhere on the row also opens the menu (except the switch, handled above).
     row.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(node, entry, e); };

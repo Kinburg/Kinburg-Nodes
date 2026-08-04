@@ -7,21 +7,66 @@
 <style>
   :root { --bg:#1b1b1f; --fg:#e7e7ea; --panel:#2a2a30; --accent:#4f8cff; --muted:#9a9aa2; --row-h:320px; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  /* App shell: the header and footer are fixed bands, #stage is the ONLY scroller. That's what makes
+     a grid row able to be an exact fraction of the visible area — see "Rows" in the toolbar. */
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg);
+         height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
   body.dragging, body.dragging * { user-select:none !important; -webkit-user-select:none !important; }
-  header { position:sticky; top:0; z-index:5; background:var(--panel); padding:10px 14px; box-shadow:0 2px 8px #0006; }
-  h1 { font-size:16px; margin:0; font-weight:600; }
-  .titlerow { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:0 0 8px; }
-  .kn-brand { color:var(--muted); font-size:12px; text-decoration:none; white-space:nowrap; flex:none; }
+  header { flex:none; z-index:5; background:var(--panel); padding:10px 14px; box-shadow:0 2px 8px #0006; }
+  /* The title gets its own thin line, so it never has to be cut down to keep the tools tidy. */
+  h1 { font-size:15px; margin:0 0 6px; font-weight:600; }
+  .kn-brand { color:var(--muted); font-size:12px; text-decoration:none; white-space:nowrap; }
   .kn-brand:hover { color:var(--accent); text-decoration:underline; }
+  footer { flex:none; text-align:center; padding:8px 14px 12px; font-size:11px; color:var(--muted); }
   .toolbar { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; }
+  /* The tools line is three zones: modes pinned left, the viewing controls centred, the
+     save/report/help actions pinned right. 1fr-auto-1fr keeps the middle centred on the PAGE,
+     not merely after the left zone. */
+  .toolbar.tools { display:grid; grid-template-columns:1fr auto 1fr; gap:10px; align-items:center; }
+  .toolbar.tools > .zone { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
+  .toolbar.tools > .zone.c { justify-content:center; }
+  .toolbar.tools > .zone.r { justify-content:flex-end; }
+  /* Row 3 carries whatever belongs to the CURRENT mode — grid knobs, or the A/B pair. */
+  .toolbar.row2 { margin-top:6px; }
   .group { display:flex; gap:4px; align-items:center; }
+  /* Popover groups: one button standing in for a whole panel of rarely-touched controls. */
+  .pop { position:relative; }
+  .pop > .menu { position:absolute; top:calc(100% + 6px); left:0; z-index:7; display:none;
+                 background:var(--panel); border:1px solid #ffffff26; border-radius:8px;
+                 box-shadow:0 10px 28px #000b; padding:6px; }
+  .pop > .menu.right { left:auto; right:0; }
+  .pop > .menu.open { display:block; }
+  .pop > .menu > button { display:block; width:100%; text-align:left; margin:2px 0; white-space:nowrap; }
+  /* In the panels menu the on/off state reads as a checklist, not as six loud blue bars.
+     (Scoped to that menu — the report menu holds action buttons, which keep the normal look.) */
+  #panelsMenu > button::before { content:"○ "; color:var(--muted); }
+  #panelsMenu > button.active { background:#3a3a42; border-color:#4a4a52; color:var(--fg); }
+  #panelsMenu > button.active::before { content:"● "; color:var(--accent); }
+  .pop > .menu .sep { height:1px; background:#ffffff1f; margin:6px 2px; }
+  .pop > .menu .row { display:flex; gap:4px; align-items:center; margin:2px 0; }
+  .badge { position:absolute; top:-5px; right:-5px; min-width:15px; height:15px; padding:0 3px;
+           border-radius:8px; background:#e55735; color:#fff; font-size:10px; line-height:15px;
+           text-align:center; pointer-events:none; }
+  /* A and B meet at the page centre — the same seam the wipe divider sits on — and long captions
+     grow OUTWARD into empty space instead of being cropped. */
+  #pairctl { flex:1; display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:center; min-width:0; }
+  #pairctl .side { display:flex; gap:5px; align-items:center; min-width:0; }
+  #pairctl .side.a { justify-content:flex-end; }
+  #pairctl .side.b { justify-content:flex-start; }
+  #pairctl select { min-width:60px; max-width:100%; text-overflow:ellipsis; }
   .group .lbl { color:var(--muted); font-size:12px; margin-right:2px; }
   button, select, input[type=number] { background:#3a3a42; color:var(--fg); border:1px solid #4a4a52; border-radius:6px; padding:5px 9px; font-size:13px; cursor:pointer; }
+  input:disabled { opacity:.5; cursor:default; }
   button:hover { border-color:var(--accent); }
   button.active { background:var(--accent); border-color:var(--accent); color:#fff; }
   input[type=range] { vertical-align:middle; }
-  #stage { padding:14px; }
+  /* min-height does double duty: it lets the stage shrink below its content (which is what makes it
+     the scroller) and it keeps a floor under it, so a header that has wrapped onto many lines in a
+     narrow window can never squeeze the pictures out of existence. */
+  #stage { flex:1; min-height:140px; overflow:auto; padding:14px; }
+  /* With rows fitted to the screen every row is the same height, so snapping lands exactly on a row —
+     at Rows 1 that turns the page into a one-comparison-at-a-time flipper. */
+  #stage.snap { scroll-snap-type:y proximity; }
   .surface.bg-dark { background:#161618; }
   .surface.bg-light { background:#f0f0f2; }
   .surface.bg-checker { background-color:#888; background-image:
@@ -29,13 +74,31 @@
       linear-gradient(45deg,#bbb 25%,#777 25%,#777 75%,#bbb 75%,#bbb);
       background-size:24px 24px; background-position:0 0,12px 12px; }
   #grid { display:grid; gap:10px; }
-  figure { margin:0; background:var(--panel); border-radius:8px; overflow:hidden; position:relative; }
+  figure { margin:0; background:var(--panel); border-radius:8px; overflow:hidden; position:relative;
+           display:flex; flex-direction:column; }
   figure img { width:100%; display:block; cursor:zoom-in; height:auto; max-height:var(--row-h,320px); object-fit:contain; }
+  /* ---- "Rows on screen" mode. Every row is a FIXED height (one N-th of the visible area), so the
+     picture simply takes whatever the panels leave — per card, decided by flex, with nothing measured.
+     Toggling a panel, changing Columns or a very long prompt therefore need no recomputation at all:
+     that card's image band just grows or shrinks. When the panels would starve the image, they scroll
+     inside the card instead (the image never drops below --img-min). */
+  #grid.fit { grid-auto-rows:var(--row-h); }
+  #grid.fit figure { scroll-snap-align:start; }
+  #grid.fit .imgwrap { flex:1 1 0; min-height:var(--img-min,110px); }
+  #grid.fit figure img { height:100%; max-height:none; }
+  #grid.fit .cardbody { flex:0 1 auto; min-height:0; overflow:auto; scrollbar-width:thin; }
+  #grid.fit .prompt, #grid.fit .settings { max-height:var(--panel-h,7.5em); }
   figcaption { padding:6px 8px; font-size:12px; color:var(--fg); white-space:pre-wrap; word-break:break-word; }
   .hide-cap figcaption { display:none; }
   #grid figure.kn-dragging { opacity:.35; }
   #grid figure.kn-over { outline:2px dashed var(--accent); outline-offset:-2px; }
-  #grid figure[draggable=true] figcaption { cursor:move; }
+  /* Reordering is driven by this grip alone — a draggable card would hijack every attempt to
+     select text in the caption, prompt or settings panels. */
+  figure .kn-grip { position:absolute; top:6px; left:6px; z-index:4; width:26px; height:26px; padding:0;
+                    line-height:1; font-size:12px; border-radius:50%; background:#000a; color:#fff;
+                    border:1px solid #ffffff33; cursor:grab; opacity:.35; }
+  figure:hover .kn-grip { opacity:1; }
+  figure .kn-grip:active { cursor:grabbing; border-color:var(--accent); }
   .prompt { padding:5px 8px; font-size:11px; color:var(--muted); white-space:pre-wrap; word-break:break-word; max-height:7.5em; overflow:auto; border-top:1px solid #ffffff14; }
   .pairprompt { max-width:1000px; margin:10px auto 0; display:flex; gap:12px; }
   .pairprompt > div { flex:1; font-size:12px; color:var(--muted); white-space:pre-wrap; word-break:break-word; max-height:10em; overflow:auto; background:#0004; padding:6px 10px; border-radius:6px; }
@@ -90,9 +153,26 @@
   .loupe-layer { position:absolute; inset:0; background-repeat:no-repeat; }
   #loupeInfo { position:fixed; right:12px; bottom:12px; background:#000c; color:#fff; padding:4px 10px;
                border-radius:6px; font-size:12px; display:none; z-index:6; }
+  /* Synced zoom & pan. The <img> is scaled with a transform inside a clipping wrapper, so the
+     layout (and therefore the grid) never moves — only what's visible inside each frame does. */
+  .imgwrap { position:relative; overflow:hidden; line-height:0; }
+  .imgwrap img, .vbox img { transform-origin:0 0; }
+  body.zoomed:not(.loupe-on) .imgwrap img, body.zoomed:not(.loupe-on) .vbox img { cursor:grab !important; }
+  body.zoomed.panning:not(.loupe-on) .imgwrap img, body.zoomed.panning:not(.loupe-on) .vbox img { cursor:grabbing !important; }
+  /* Opacity belongs to the picture, not to the toolbar — it sits right above the image it fades. */
+  .opbar { display:flex; gap:8px; align-items:center; justify-content:center; margin:0 auto 10px;
+           max-width:420px; font-size:12px; color:var(--muted); }
+  .opbar input[type=range] { flex:1; min-width:120px; }
+  .opbar .val { min-width:38px; text-align:right; color:var(--fg); font-weight:600; }
   .viewwrap { display:flex; justify-content:center; }
   .vbox { position:relative; max-width:100%; line-height:0; user-select:none; -webkit-user-select:none; }
-  .vbox img.base { display:block; max-width:100%; max-height:78vh; -webkit-user-drag:none; user-drag:none; }
+  .vbox.zoomed { overflow:hidden; }
+  /* The pair modes get the same treatment as the grid: the picture is capped by the space #stage
+     actually has (minus its padding) instead of a magic 78vh, so it fills the window and the panels
+     below it scroll. */
+  .vbox img.base { display:block; max-width:100%; max-height:calc(var(--stage-h,78vh) - 28px);
+                   -webkit-user-drag:none; user-drag:none; }
+  .overwrap { position:absolute; inset:0; }
   .vbox img.over { position:absolute; top:0; left:0; width:100%; height:100%; -webkit-user-drag:none; }
   .divider { position:absolute; top:0; bottom:0; width:2px; background:var(--accent); cursor:ew-resize; z-index:2; }
   .divider::after { content:""; position:absolute; top:50%; left:50%; width:24px; height:24px; transform:translate(-50%,-50%);
@@ -131,37 +211,61 @@
 </head>
 <body>
 <header>
-  <div class="titlerow">
-    <h1 id="title">Image comparison</h1>
-    <a class="kn-brand" href="https://github.com/Kinburg/Kinburg-Nodes" target="_blank" rel="noopener" title="Generated with Kinburg-Nodes — ComfyUI custom nodes">⚙ Generated with Kinburg-Nodes</a>
-  </div>
-  <div class="toolbar">
+  <h1 id="title">Image comparison</h1>
+  <div class="toolbar tools">
+   <div class="zone l">
     <div class="group" id="modes">
-      <button data-mode="grid" class="active">Grid</button>
-      <button data-mode="slider">Slider</button>
-      <button data-mode="opacity">Opacity</button>
-      <button data-mode="flip">Flip</button>
-      <button data-mode="diff">Difference</button>
+      <button data-mode="grid" class="active" title="Every image at once (1)">Grid</button>
+      <button data-mode="slider" title="Wipe between A and B (2)">Slider</button>
+      <button data-mode="opacity" title="Fade B over A (3)">Opacity</button>
+      <button data-mode="flip" title="Toggle A↔B in place — click, Space or ← → (4)">Flip</button>
+      <button data-mode="diff" title="Per-pixel difference of A and B (5)">Difference</button>
     </div>
-    <div class="group"><button id="capBtn" class="active">Captions</button>
-      <button id="promptBtn" class="active">Prompts</button>
-      <button id="settingsBtn" class="active">Settings</button>
-      <button id="timeBtn" class="active">Time</button>
-      <button id="metricsBtn" class="active" title="Show/hide the SSIM · PSNR similarity metrics (shown when a reference was set)">Metrics</button>
-      <button id="judgeBtn" class="active" title="Show/hide the AI judge's verdict (shown when Vision LLM Judge data is connected)">🤖 Judge</button>
-      <button id="hiddenBtn" title="Show or hide the results you've marked hidden">Hidden: off</button>
-      <button id="dlBtn" title="Download this page as a self-contained HTML file">⬇ Save page</button>
-      <button id="loupeBtn" title="Magnifier — works in all modes. Wheel = zoom, Ctrl/Alt + wheel = diameter">🔍 Loupe</button>
-      <button id="helpBtn" title="How this page works + what SSIM / PSNR mean">❔ Help</button></div>
-    <div class="group" id="reportctl"><span class="lbl">Report DB</span>
-      <input type="text" id="dbPath" style="width:240px" title="SQLite file this run is saved to">
-      <button id="saveReportBtn" title="Save this run (images, settings, your verdicts/comments) to the report database">💾 Save run to report</button>
-      <button id="openReportBtn" title="Open the report browser for this database">📊 Report</button>
-      <span class="lbl" id="reportStatus"></span></div>
+   </div>
+   <div class="zone c">
+    <div class="group pop">
+      <button id="panelsBtn" title="Which panels are shown under each image, and whether hidden results are listed">👁 Panels ▾<span class="badge" id="panelsBadge" style="display:none"></span></button>
+      <div class="menu" id="panelsMenu">
+        <button id="capBtn" class="active">Captions</button>
+        <button id="promptBtn" class="active">Prompts</button>
+        <button id="settingsBtn" class="active">Settings</button>
+        <button id="timeBtn" class="active">Time</button>
+        <button id="metricsBtn" class="active" title="SSIM · PSNR similarity metrics (shown when a reference was set)">Metrics</button>
+        <button id="judgeBtn" class="active" title="The AI judge's verdict (shown when Vision LLM Judge data is connected)">🤖 Judge</button>
+        <div class="sep"></div>
+        <button id="hiddenBtn" title="Show or hide the results you've marked hidden">Hidden: off</button>
+      </div>
+    </div>
+    <div class="group" id="zoomctl"><span class="lbl">Zoom</span>
+      <input type="range" id="zoom" min="1" max="8" step="0.1" value="1" style="width:110px"
+             title="Zoom every image at once, around the same point. Drag any image to pan them ALL together; Ctrl + wheel over an image zooms at the cursor; double-click or 0 resets.">
+      <span class="lbl" id="zoomVal" style="min-width:34px">×1.0</span>
+      <button id="zoomReset" title="Back to fit (also: double-click an image, or press 0)">⤢ Fit</button>
+      <button id="loupeBtn" title="Magnifier — works in all modes, and stacks on top of Zoom (lens = zoom × lens). Wheel = lens zoom, Alt/Shift + wheel = lens diameter, Ctrl + wheel = image zoom.">🔍 Loupe</button></div>
+   </div>
+   <div class="zone r">
+    <button id="dlBtn" title="Download this page as a self-contained HTML file">⬇ Save page</button>
+    <div class="group pop">
+      <button id="reportBtn" title="Save this run to the report database, or open the report browser">📊 Report ▾</button>
+      <div class="menu right" id="reportMenu">
+        <div class="row"><span class="lbl">DB</span>
+          <input type="text" id="dbPath" style="width:260px" title="SQLite file this run is saved to"></div>
+        <button id="saveReportBtn" title="Save this run (images, settings, your verdicts/comments) to the report database">💾 Save run to report</button>
+        <button id="openReportBtn" title="Open the report browser for this database">📊 Open report browser</button>
+        <div class="row"><span class="lbl" id="reportStatus"></span></div>
+      </div>
+    </div>
+    <button id="helpBtn" title="How this page works + what SSIM / PSNR mean">❔ Help</button>
+   </div>
+  </div>
+  <div class="toolbar row2">
     <div class="group" id="gridctl"><span class="lbl">Columns</span>
       <input type="number" id="cols" min="1" max="12" value="3" style="width:56px">
+      <span class="lbl">Rows</span>
+      <input type="number" id="rows" min="0" max="8" value="1" style="width:50px"
+             title="How many rows of results fit on the screen at once — the image height is worked out to match, and scrolling snaps row by row. 0 = off: set the height yourself in px (Max h).">
       <span class="lbl">Max h</span>
-      <input type="number" id="rowH" min="80" max="4000" step="20" value="320" style="width:64px" title="Max image height in Grid (px)">
+      <input type="number" id="rowH" min="80" max="4000" step="20" value="320" style="width:64px" title="Max image height in Grid (px). While Rows ≥ 1 this is computed for you — set Rows to 0 to type your own.">
       <span class="lbl">Sort</span>
       <select id="sortSel" title="Grid order. Drag-to-reorder works in 'Original order'.">
         <option value="orig">Original order</option>
@@ -173,13 +277,9 @@
         <option value="caption">Caption A→Z</option>
       </select>
     </div>
-    <div class="group" id="pairctl" style="display:none">
-      <span class="lbl">A</span><select id="selA"></select>
-      <span class="lbl">B</span><select id="selB"></select>
-      <span id="opctl" style="display:none"><span class="lbl">Opacity</span><input type="range" id="opacity" min="0" max="100" value="50"></span>
-    </div>
-    <div class="group" id="flipctl" style="display:none">
-      <span class="lbl" id="flipState"></span><span class="lbl">— click / Space / ← → to flip A↔B</span>
+    <div id="pairctl" style="display:none">
+      <div class="side a"><span class="lbl">A</span><select id="selA"></select></div>
+      <div class="side b"><span class="lbl">B</span><select id="selB"></select></div>
     </div>
   </div>
 </header>
@@ -194,21 +294,47 @@
   <h2>Image Compare — help</h2>
   <p>Compare a set of images side by side and review them. Click any image to open it full-screen (← → to browse, Esc to close).</p>
 
-  <h3>Comparison modes</h3>
+  <h3>Comparison modes <span style="color:var(--muted);font-weight:400">— keys 1…5</span></h3>
   <ul>
-    <li><b>Grid</b> — every image at once.</li>
-    <li><b>Slider</b> — drag the divider to wipe between the A and B images.</li>
-    <li><b>Opacity</b> — fade B over A with the Opacity slider.</li>
-    <li><b>Flip</b> — toggle A↔B in place (click, Space, or ← →) to spot small changes.</li>
-    <li><b>Difference</b> — per-pixel difference of A and B; darker = more identical.</li>
+    <li><b>Grid</b> (1) — every image at once.</li>
+    <li><b>Slider</b> (2) — drag the divider to wipe between the A and B images.</li>
+    <li><b>Opacity</b> (3) — fade B over A with the slider that appears just above the image.</li>
+    <li><b>Flip</b> (4) — toggle A↔B in place (click, Space, or ← →) to spot small changes; the plate on the image tells you which one you're looking at.</li>
+    <li><b>Difference</b> (5) — per-pixel difference of A and B; darker = more identical.</li>
   </ul>
-  <p>Use the <b>A</b> / <b>B</b> selectors to choose which two images the pair/flip modes compare.</p>
+  <p>The header reads left to right by purpose: <b>modes</b> pinned left, the viewing controls
+  (<b>👁 Panels</b>, <b>Zoom</b>, <b>⤢ Fit</b>, <b>🔍 Loupe</b>) centred, and <b>⬇ Save page</b> /
+  <b>📊 Report</b> / <b>❔ Help</b> pinned right. Its <b>last row always belongs to the current mode</b>:
+  <b>Columns / Rows / Sort</b> in Grid, and the <b>A</b> / <b>B</b> selectors in the pair modes — where
+  they meet at the centre of the page, on the same seam the wipe divider sits on, so each one is on the
+  side of the image it controls.</p>
+
+  <h3>Zoom &amp; pan — synced across every image</h3>
+  <p>The <b>Zoom</b> slider magnifies <b>all</b> images at once, and they all show the <b>same region</b>: drag any one of them and the visible area moves in every image together. Made for comparing fine detail — texture, small faces, fabric, foliage — without hunting for the same spot in each picture.</p>
+  <ul>
+    <li><b>Drag</b> any image (once zoomed) — pans them all.</li>
+    <li><b>Ctrl + wheel</b> over an image — zooms at the cursor, so the bit you point at stays put.</li>
+    <li><b>Double-click</b>, <b>0</b>, or <b>⤢ Fit</b> — back to fit.</li>
+    <li>The region is kept in <i>relative</i> coordinates, so it holds when you switch modes, change <b>Columns</b> / <b>Rows</b>, or compare images of different sizes.</li>
+  </ul>
+  <p>In <b>Slider</b> mode while zoomed, drag the divider's round handle to move the wipe (dragging the picture pans instead). Reordering keeps working at any zoom — it goes through each card's <b>⠿</b> grip.</p>
 
   <h3>Loupe (magnifier)</h3>
-  <p>Turn on <b>🔍 Loupe</b> and hover an image to magnify it — it works in <b>every</b> mode (in Slider/Opacity/Difference it magnifies both A and B with the same blend; in Grid it's synced across all images). <b>Wheel</b> = zoom, <b>Ctrl/Alt + wheel</b> = lens size.</p>
+  <p>Turn on <b>🔍 Loupe</b> and hover an image to magnify it — it works in <b>every</b> mode (in Slider/Opacity/Difference it magnifies both A and B with the same blend; in Grid it's synced across all images). <b>Wheel</b> = lens zoom, <b>Alt/Shift + wheel</b> = lens size.</p>
+  <p>It <b>stacks on top of Zoom</b>: the lens shows <b>zoom × lens</b> while everything around it stays at the current zoom, so you can hold every image on a region and then peek closer still. <b>Ctrl + wheel</b> is always the image zoom, even with the lens on, and dragging still pans.</p>
 
   <h3>Panels &amp; review</h3>
-  <p>Header buttons toggle the <b>Captions</b>, <b>Prompts</b>, <b>Settings</b>, <b>Time</b>, <b>Metrics</b> and <b>🤖 Judge</b> panels; <b>Hidden</b> shows/hides results you rejected. In Grid you also set <b>Columns</b>, <b>Max h</b> (row height) and <b>Sort</b>, and can drag images to reorder in “Original order”.</p>
+  <p><b>👁 Panels</b> holds what's shown under each image — <b>Captions</b>, <b>Prompts</b>, <b>Settings</b>, <b>Time</b>, <b>Metrics</b>, <b>🤖 Judge</b> — plus <b>Hidden</b>, which lists the results you rejected (a badge on the button counts them). The menu stays open while you flip several. In Grid you also set <b>Columns</b>, <b>Rows</b> and <b>Sort</b>, and can reorder cards in “Original order” by dragging the <b>⠿</b> grip in a card's top-left corner — everything else on the card, including the prompt and settings text, stays selectable.</p>
+
+  <h3>Rows on screen</h3>
+  <p><b>Rows</b> is how many rows of results you want to see at once, and the image height follows from
+  it — at <b>1</b> (the default) one row fills the window, and scrolling <b>snaps row by row</b>, so the
+  page behaves like a flipper: one comparison at a time, always the same size. It adapts by itself when
+  you toggle a panel or change <b>Columns</b>, and never asks for more rows than there actually are.</p>
+  <p>Each card gives the picture whatever its panels leave over, so a card with a long prompt shows a
+  slightly smaller image than its neighbour; if the panels would crowd the picture out altogether they
+  scroll inside the card instead. Set <b>Rows</b> to <b>0</b> when you'd rather fix the height yourself —
+  <b>Max h</b> (px) then takes over, and it's what you want for comparing at a specific scale.</p>
   <p>Each image has your own review: a <b>★ rating</b>, <b>tags</b>, a <b>comment</b>, and a <b>✕ hide/reject</b> — all saved in this browser, so they survive reloads.</p>
 
   <h3>Similarity metrics — SSIM &amp; PSNR</h3>
@@ -223,15 +349,22 @@
   <p>When a <b>Vision LLM Judge</b> is connected, each image shows the AI's read-only verdict — stars, tags and a comment — kept separate from your own review. In <b>multi-criteria</b> mode it also lists a coloured <b>per-criterion score</b> chip (e.g. <i>anatomy 4/5</i>), and the <b>Sort</b> menu gains <b>Judge score ↓</b> plus a <b>Judge: &lt;criterion&gt; ↓</b> entry for each criterion.</p>
 
   <h3>Report &amp; saving</h3>
-  <p><b>Save run to report</b> stores this run (images, settings, your verdicts) to a SQLite database; <b>📊 Report</b> opens a browser over it. <b>⬇ Save page</b> downloads this comparison as a standalone HTML file (enable “embed images” on the node for a fully portable file).</p>
+  <p><b>📊 Report</b> opens a small panel with the database path: <b>Save run to report</b> stores this run (images, settings, your verdicts) to that SQLite file, and <b>Open report browser</b> opens a browser over it. <b>⬇ Save page</b> downloads this comparison as a standalone HTML file (enable “embed images” on the node for a fully portable file).</p>
+
 </div></div>
+
+<footer><a class="kn-brand" href="https://github.com/Kinburg/Kinburg-Nodes" target="_blank" rel="noopener"
+   title="ComfyUI custom nodes">⚙ Generated with Kinburg-Nodes</a></footer>
 
 <script>
 const CONFIG = /*__COMPARE_DATA__*/null;
 (function(){
   const data = CONFIG || {title:"No data", columns:3, items:[]};
   const items = data.items || [];
+  // The heading is capped (and dropped entirely on narrow windows) to keep the toolbar on one row,
+  // so the full title lives in its tooltip and in the browser tab.
   document.getElementById('title').textContent = data.title || 'Image comparison';
+  document.getElementById('title').title = data.title || 'Image comparison';
   document.title = data.title || 'Image comparison';
 
   // Review state (hidden flag + comment) persists per result via localStorage, keyed by
@@ -257,7 +390,10 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   const S = { mode:'grid', bg:'dark', caps:true, cols:data.columns||3,
               a:0, b:Math.min(1,items.length-1), opacity:50,
               loupe:false, loupeZoom:2.5, loupeSize:160, flipB:false, showHidden:false,
-              rowH:320, prompts:(data.show_prompts!==false), settings:(data.show_settings!==false),
+              zoom:1, cx:0.5, cy:0.5,   // synced zoom + the shared centre of the visible region
+              wipe:50,                  // Slider divider position, kept across re-renders
+              rows:1, rowH:320,          // rows on screen (0 = off, honour the px height instead)
+              prompts:(data.show_prompts!==false), settings:(data.show_settings!==false),
               time:true, metrics:true, judge:true, sort:'orig' };
 
   const stage = document.getElementById('stage');
@@ -276,13 +412,34 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   $('#timeBtn').onclick=()=>{ S.time=!S.time; $('#timeBtn').classList.toggle('active',S.time); document.body.classList.toggle('hide-time',!S.time); };
   $('#metricsBtn').onclick=()=>{ S.metrics=!S.metrics; $('#metricsBtn').classList.toggle('active',S.metrics); document.body.classList.toggle('hide-metrics',!S.metrics); };
   $('#judgeBtn').onclick=()=>{ S.judge=!S.judge; $('#judgeBtn').classList.toggle('active',S.judge); document.body.classList.toggle('hide-judge',!S.judge); };
+  // Popover groups. The controls inside are the SAME elements as before with the same handlers —
+  // they just live behind one button now, which is what got the toolbar down to a single row.
+  // A click inside a menu doesn't close it (you usually flip several panels in a row).
+  const POPS=[["#panelsBtn","#panelsMenu"],["#reportBtn","#reportMenu"]].map(([b,m])=>({b:$(b),m:$(m)}));
+  function closePops(except){
+    POPS.forEach(p=>{ if(p!==except){ p.m.classList.remove('open'); p.b.classList.remove('active'); } });
+  }
+  POPS.forEach(p=>{
+    p.b.onclick=e=>{ e.stopPropagation();
+      const open=p.m.classList.contains('open');
+      closePops(p);
+      p.m.classList.toggle('open', !open); p.b.classList.toggle('active', !open); };
+    p.m.onclick=e=>e.stopPropagation();
+  });
+  document.addEventListener('click', ()=>closePops());
+
   const help=$('#help');
   $('#helpBtn').onclick=()=>{ help.style.display='flex'; };
   help.onclick=(e)=>{ if(e.target===help) help.style.display='none'; };
   help.querySelector('.hclose').onclick=()=>{ help.style.display='none'; };
+  // The hidden-results count is the one bit of panel state worth seeing with the menu closed, so it
+  // rides on the Panels button as a badge.
   function syncHiddenBtn(){ const n=items.filter(it=>it.hidden).length;
     $('#hiddenBtn').textContent = 'Hidden: '+(S.showHidden?'shown':'off')+(n?` (${n})`:'');
-    $('#hiddenBtn').classList.toggle('active', S.showHidden); }
+    $('#hiddenBtn').classList.toggle('active', S.showHidden);
+    const b=$('#panelsBadge');
+    if(b){ b.textContent = n ? String(n) : ''; b.style.display = n ? '' : 'none';
+      b.title = n+' hidden result(s)'; } }
   $('#hiddenBtn').onclick=()=>{ S.showHidden=!S.showHidden; syncHiddenBtn(); render(); };
   $('#dlBtn').onclick=()=>{
     const html='<!doctype html>\n'+document.documentElement.outerHTML;
@@ -328,7 +485,13 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     window.open('/kinburg/report' + (db ? ('?db=' + encodeURIComponent(db)) : ''), '_blank');
   };
   $('#cols').value=S.cols; $('#cols').oninput=()=>{ S.cols=Math.max(1,+$('#cols').value||1); render(); };
-  $('#rowH').value=S.rowH; $('#rowH').oninput=()=>{ S.rowH=Math.max(40,+$('#rowH').value||320); render(); };
+  // Rows on screen is the primary height control; the px field stays as the manual escape hatch
+  // (Rows 0) and otherwise just reports what was computed.
+  $('#rows').value=S.rows; $('#rows').oninput=()=>{ S.rows=clamp(+$('#rows').value||0,0,8); syncRowCtl(); render(); };
+  $('#rowH').value=S.rowH; $('#rowH').oninput=()=>{ if(S.rows>=1) return;
+    S.rowH=Math.max(40,+$('#rowH').value||320); render(); };
+  function syncRowCtl(){ $('#rowH').disabled = S.rows>=1; }
+  syncRowCtl();
   // Add judge sort options only when judge data is connected: an overall score sort, plus one
   // per criterion found in the data (multi-criteria mode).
   (function initJudgeSort(){
@@ -340,29 +503,74 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     keys.forEach(k=> add('jc-desc::'+k, 'Judge: '+k+' ↓'));
   })();
   $('#sortSel').value=S.sort; $('#sortSel').onchange=()=>{ S.sort=$('#sortSel').value; render(); };
-  $('#loupeBtn').onclick=()=>{ S.loupe=!S.loupe; $('#loupeBtn').classList.toggle('active',S.loupe); if(!S.loupe) info.style.display='none'; render(); };
-  $('#opacity').oninput=()=>{ S.opacity=+$('#opacity').value; const o=$('.over'); if(o) o.style.opacity=S.opacity/100; };
+  // The loupe stacks ON TOP of the zoom (lens magnification = zoom × lens), so neither resets the other.
+  $('#loupeBtn').onclick=()=>{ S.loupe=!S.loupe;
+    $('#loupeBtn').classList.toggle('active',S.loupe);
+    document.body.classList.toggle('loupe-on',S.loupe);
+    if(!S.loupe) info.style.display='none';
+    render(); };
+  $('#zoom').oninput=()=>{ S.zoom=clamp(+$('#zoom').value||1,1,8); applyZoom(); };
+  $('#zoomReset').onclick=()=>resetZoom();
 
   const selA=$('#selA'), selB=$('#selB');
+  // Full captions in the options (they used to be cut at 40 chars): A and B each own half the
+  // header row and grow outward, so the layout — not a hard crop — decides what fits, and the
+  // closed select carries the whole label as its tooltip.
+  function syncSelTitles(){
+    [selA,selB].forEach(s=>{ const o=s.options[s.selectedIndex]; s.title = o ? o.textContent : ''; });
+  }
   function buildSelectors(){
     selA.innerHTML=''; selB.innerHTML='';
     items.forEach((it,i)=>{
-      const t=`${i+1}. ${(it.caption||'').slice(0,40)||'image '+(i+1)}`;
+      const cap=(it.caption||'').replace(/\s+/g,' ').trim();
+      const t=`${i+1}. ${cap || 'image '+(i+1)}`;
       selA.add(new Option(t,i)); selB.add(new Option(t,i));
     });
     S.a=clamp(S.a,0,items.length-1); S.b=clamp(S.b,0,items.length-1);
     selA.value=S.a; selB.value=S.b;
+    syncSelTitles();
   }
   buildSelectors();
-  selA.onchange=()=>{S.a=+selA.value; render();};
-  selB.onchange=()=>{S.b=+selB.value; render();};
+  selA.onchange=()=>{S.a=+selA.value; syncSelTitles(); render();};
+  selB.onchange=()=>{S.b=+selB.value; syncSelTitles(); render();};
 
+  // Row 2 of the header belongs to whatever the current mode needs — the grid knobs, or the A/B
+  // pair. (Flip needs no state readout: the image itself is tagged 'A' or 'B'.)
   function syncCtl(){
     const pair = ['slider','opacity','diff','flip'].includes(S.mode);
     $('#gridctl').style.display = S.mode==='grid' ? '' : 'none';
     $('#pairctl').style.display = pair ? '' : 'none';
-    $('#opctl').style.display = S.mode==='opacity' ? '' : 'none';
-    $('#flipctl').style.display = S.mode==='flip' ? '' : 'none';
+  }
+
+  // ============================================================ rows on screen
+  // The whole "fit N rows" feature rests on ONE measured number — the height #stage can actually show —
+  // turned into a fixed row height. Everything that used to make this fragile (which panels are on,
+  // how many columns, how long a prompt is, a resized comment box) is handled by each card's own flex
+  // layout in CSS, so none of it comes back here. This runs on a real resize and on a re-render, and
+  // that's it.
+  const GRID_GAP = 10;      // must match #grid's gap
+  const STAGE_PAD = 28;     // #stage padding, top + bottom
+  let gridRows = 1;         // rows the current grid actually has (set by renderGrid)
+
+  function measureStage(){
+    document.documentElement.style.setProperty('--stage-h', stage.clientHeight+'px');
+  }
+  function fitRows(){
+    const g=document.getElementById('grid');
+    if(!g) return;
+    if(S.rows<1){ g.style.setProperty('--row-h', S.rowH+'px'); return; }
+    // Never ask for more rows than there are: 3 images in 3 columns is ONE row, and fitting two of
+    // them would halve the pictures for nothing.
+    const n=Math.max(1, Math.min(S.rows, gridRows||1));
+    const avail=stage.clientHeight - STAGE_PAD;
+    const h=Math.max(120, Math.floor((avail - (n-1)*GRID_GAP)/n));
+    // The image's floor is a third of the card — but never less than ~96px while the card can spare
+    // it, so packing many rows into a short window still leaves something you can actually look at.
+    const imgMin=Math.round(Math.max(h*0.34, Math.min(96, h*0.6)));
+    g.style.setProperty('--row-h', h+'px');
+    g.style.setProperty('--img-min', imgMin+'px');               // panels scroll before the image starves
+    g.style.setProperty('--panel-h', Math.round(h*0.28)+'px');   // cap for the prompt / settings boxes
+    const inp=$('#rowH'); if(inp) inp.value=h;                   // the px field reports what was computed
   }
 
   function render(){
@@ -371,6 +579,164 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     else if(S.mode==='flip') renderFlip();
     else renderPair();
   }
+
+  // ============================================================ synced zoom & pan
+  // ONE zoom factor and ONE centre — held in picture-relative coordinates (0..1), not pixels — are
+  // shared by every visible image, so zooming or dragging any of them shows the SAME region in all
+  // of them even if they differ in size. Nothing is re-laid-out: each image is scaled by a CSS
+  // transform inside a clipping wrapper, so the grid stays put and only the visible region moves.
+  let zoomTargets=[];
+  let refreshLoupe=null;   // set by the loupe wiring so a zoom change re-paints the lens too
+  function afterRender(){
+    stage.classList.toggle('snap', S.mode==='grid' && S.rows>=1);
+    collectZoomTargets(); applyZoom();
+  }
+
+  function collectZoomTargets(){
+    zoomTargets=[];
+    const push=(img,fill)=>{
+      zoomTargets.push({img, fill:!!fill});
+      // A lazy/not-yet-decoded image has no naturalWidth, so its region can only be placed on load.
+      if(!img.complete) img.addEventListener('load', ()=>applyZoom(), {once:true});
+    };
+    if(S.mode==='grid'){ stage.querySelectorAll('#grid figure .imgwrap img').forEach(img=>push(img)); return; }
+    const box=stage.querySelector('.vbox'); if(!box) return;
+    const base=box.querySelector('img.base'); if(!base) return;
+    push(base);
+    // The B layer is stretched over A's box (width/height 100%), so its picture fills the element —
+    // taking its own aspect into account here would misalign the two halves.
+    const over=box.querySelector('img.over'); if(over) push(over, true);
+  }
+
+  // Where the picture actually sits inside its <img> element: in Grid, `object-fit:contain` plus a
+  // max height letterboxes it, and panning must follow the picture, not the padding around it.
+  function targetRect(t){
+    const el=t.img, ew=el.clientWidth, eh=el.clientHeight;
+    if(t.fill || !el.naturalWidth || !el.naturalHeight || !ew || !eh) return {x:0, y:0, w:ew, h:eh};
+    const s=Math.min(ew/el.naturalWidth, eh/el.naturalHeight);
+    const w=el.naturalWidth*s, h=el.naturalHeight*s;
+    return {x:(ew-w)/2, y:(eh-h)/2, w, h};
+  }
+
+  // The element's LAYOUT origin on screen. `getBoundingClientRect()` on the image itself reports the
+  // transformed box once it's zoomed, which would make every pointer position after the first zoom
+  // step wrong — so we read it from the (never transformed) wrapper the image sits in.
+  function originOf(el){
+    const p=el.parentElement;
+    const pr=(p||el).getBoundingClientRect();
+    return {left:pr.left+el.offsetLeft, top:pr.top+el.offsetTop};
+  }
+
+  // Keep the window inside the picture — and centre it on the axes the zoom can't fill.
+  function centreFor(Z, r, ew, eh){
+    const hx=(ew/2)/(Z*r.w), hy=(eh/2)/(Z*r.h);
+    return { cx: hx>=0.5 ? 0.5 : clamp(S.cx,hx,1-hx),
+             cy: hy>=0.5 ? 0.5 : clamp(S.cy,hy,1-hy) };
+  }
+
+  // The transform currently on an image, and the two conversions between element pixels and picture
+  // fractions that everything else (wheel zoom, panning, the loupe) is built from.
+  function xform(el, r){
+    const Z=S.zoom;
+    if(Z<=1.001 || !r.w || !r.h) return {Z:1, tx:0, ty:0};
+    const c=centreFor(Z, r, el.clientWidth, el.clientHeight);
+    return {Z, tx:el.clientWidth/2 - Z*(r.x + c.cx*r.w), ty:el.clientHeight/2 - Z*(r.y + c.cy*r.h)};
+  }
+  function fracAtPoint(el, r, ex, ey){ const m=xform(el,r);
+    return {fx:((ex-m.tx)/m.Z - r.x)/r.w, fy:((ey-m.ty)/m.Z - r.y)/r.h}; }
+  function pointOfFrac(el, r, fx, fy){ const m=xform(el,r);
+    return {ex:m.tx + m.Z*(r.x + fx*r.w), ey:m.ty + m.Z*(r.y + fy*r.h)}; }
+  function rectOfImg(img){ const t=zoomTargets.find(x=>x.img===img);
+    return t ? targetRect(t) : {x:0, y:0, w:img.clientWidth, h:img.clientHeight}; }
+
+  function applyZoom(){
+    const Z=S.zoom, on=Z>1.001;
+    document.body.classList.toggle('zoomed', on);
+    const zv=$('#zoomVal'); if(zv) zv.textContent='×'+Z.toFixed(1);
+    const zi=$('#zoom'); if(zi && Math.abs(+zi.value-Z)>0.001) zi.value=Z;
+    stage.querySelectorAll('.vbox').forEach(b=>b.classList.toggle('zoomed', on));
+    zoomTargets.forEach(t=>{
+      const el=t.img, r=targetRect(t);
+      if(!on || !r.w || !r.h){ el.style.transform=''; return; }
+      const m=xform(el,r);
+      el.style.transform=`translate(${m.tx.toFixed(2)}px,${m.ty.toFixed(2)}px) scale(${m.Z})`;
+    });
+    if(refreshLoupe) refreshLoupe();   // the lens sits on top of the zoom, so it moves with it
+  }
+
+  function resetZoom(){ S.zoom=1; S.cx=S.cy=0.5; applyZoom(); }
+
+  // Zoom toward the cursor: whatever bit of the picture is under the pointer stays under it.
+  function zoomAt(img, ex, ey, nz){
+    const r=rectOfImg(img); if(!r.w||!r.h) return;
+    const f=fracAtPoint(img, r, ex, ey);
+    S.zoom=nz;
+    S.cx=f.fx + (img.clientWidth/2-ex)/(nz*r.w);
+    S.cy=f.fy + (img.clientHeight/2-ey)/(nz*r.h);
+    applyZoom();
+  }
+
+  // Drag anywhere on any image to pan them all. Delegated on #stage and installed once, so it
+  // survives every re-render; a drag that moved swallows the click that would open the lightbox.
+  let panning=null, panSuppress=false;
+  const zoomTargetFor=el=>{ const img=el&&el.closest?el.closest('img'):null;
+    return img ? zoomTargets.find(t=>t.img===img) : null; };
+  stage.addEventListener('pointerdown', e=>{
+    panSuppress=false;
+    if(S.zoom<=1.001 || e.button!==0) return;
+    const t=zoomTargetFor(e.target); if(!t) return;
+    const r=targetRect(t); if(!r.w||!r.h) return;
+    e.preventDefault();   // also stops the grid's native drag-to-reorder from starting
+    panning={t, r, x:e.clientX, y:e.clientY, moved:false};
+    document.body.classList.add('panning');
+    try { t.img.setPointerCapture(e.pointerId); } catch(_) {}
+  });
+  stage.addEventListener('pointermove', e=>{
+    if(!panning) return;
+    const dx=e.clientX-panning.x, dy=e.clientY-panning.y;
+    if(Math.abs(dx)>3||Math.abs(dy)>3) panning.moved=true;
+    panning.x=e.clientX; panning.y=e.clientY;
+    const Z=S.zoom, r=panning.r, el=panning.t.img;
+    S.cx-=dx/(Z*r.w); S.cy-=dy/(Z*r.h);
+    const hx=(el.clientWidth/2)/(Z*r.w), hy=(el.clientHeight/2)/(Z*r.h);
+    S.cx = hx>=0.5 ? 0.5 : clamp(S.cx,hx,1-hx);
+    S.cy = hy>=0.5 ? 0.5 : clamp(S.cy,hy,1-hy);
+    applyZoom();
+  });
+  const endPan=()=>{ if(!panning) return; panSuppress=panning.moved;
+    panning=null; document.body.classList.remove('panning'); };
+  stage.addEventListener('pointerup', endPan);
+  stage.addEventListener('pointercancel', endPan);
+  // A card is only draggable while its grip is held. No pointerup arrives during a real HTML5 drag
+  // (dragend clears it there), so this just undoes a press on the grip that never became a drag.
+  document.addEventListener('pointerup', ()=>{
+    document.querySelectorAll('#grid figure[draggable=true]').forEach(f=>{ f.draggable=false; });
+  });
+  stage.addEventListener('click', e=>{ if(panSuppress){ e.stopPropagation(); e.preventDefault(); panSuppress=false; } }, true);
+  // Ctrl/⌘ + wheel zooms at the cursor; a plain wheel is left alone so the page still scrolls (with
+  // the loupe on, a plain wheel is the lens's own zoom — see wireLoupe).
+  stage.addEventListener('wheel', e=>{
+    if(!(e.ctrlKey||e.metaKey)) return;
+    const t=zoomTargetFor(e.target); if(!t) return;
+    e.preventDefault();
+    const nz=clamp(S.zoom*(e.deltaY<0?1.15:1/1.15), 1, 8);
+    const o=originOf(t.img);
+    if(nz<=1.001) resetZoom(); else zoomAt(t.img, e.clientX-o.left, e.clientY-o.top, nz);
+  }, {passive:false});
+  stage.addEventListener('dblclick', e=>{
+    if(S.zoom>1.001 && zoomTargetFor(e.target)){ e.preventDefault(); e.stopPropagation(); resetZoom(); }
+  });
+  // The ONE thing that has to be re-measured: how much room #stage has. A ResizeObserver catches
+  // everything a plain resize listener misses — the header re-wrapping to another line, the browser
+  // zoom, a phone's toolbar sliding away — and coalescing on a frame keeps a drag-resize cheap.
+  let fitPending=0;
+  function scheduleFit(){
+    if(fitPending) return;
+    fitPending=requestAnimationFrame(()=>{ fitPending=0;
+      measureStage(); if(S.mode==='grid') fitRows(); applyZoom(); });
+  }
+  if(window.ResizeObserver) new ResizeObserver(scheduleFit).observe(stage);
+  window.addEventListener('resize', scheduleFit);
 
   // Grid display order. 'orig' keeps the (drag-reorderable) items order; the other modes
   // sort a copy, always keeping the original index so the lightbox / selectors stay aligned.
@@ -413,13 +779,21 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     const grid=document.createElement('div'); grid.id='grid';
     grid.style.gridTemplateColumns=`repeat(${S.cols},1fr)`;
     grid.style.setProperty('--row-h', S.rowH+'px');
+    let shown=0;
     orderedItems().forEach(({it,i})=>{
       if(it.hidden && !S.showHidden) return;
+      shown++;
       const fig=document.createElement('figure');
       if(it.hidden) fig.classList.add('kn-result-hidden');
       const img=document.createElement('img'); img.src=it.src; img.loading='lazy'; img.draggable=false;
       img.onclick=()=>openLightbox(i);
-      fig.appendChild(img);
+      // The wrapper is the window the zoomed image is clipped to — without it a scaled image would
+      // spill over the caption and panels below.
+      const iw=document.createElement('div'); iw.className='imgwrap';
+      iw.appendChild(img); fig.appendChild(iw);
+      // Everything under the picture lives in one band. In "Rows" mode that band is what gives way
+      // when the card runs out of room (it scrolls) — which is why the image never has to.
+      const body=document.createElement('div'); body.className='cardbody';
       const hb=document.createElement('button'); hb.className='kn-hidebtn';
       hb.textContent = it.hidden ? '↺' : '✕'; hb.title = it.hidden ? 'Unhide this result' : 'Hide this result';
       hb.addEventListener('pointerdown', e=>e.stopPropagation());
@@ -428,40 +802,50 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       const cap=document.createElement('figcaption'); cap.textContent=it.caption||('image '+(i+1));
       if(it.color) cap.style.color=it.color;
       if(it.band) cap.style.background=it.band;
-      fig.appendChild(cap);
-      if(it.time){ const tm=document.createElement('div'); tm.className='time'; tm.textContent='⏱ '+it.time; fig.appendChild(tm); }
-      if(it.metrics){ const mt=document.createElement('div'); mt.className='metric'; mt.textContent='◈ '+it.metrics; fig.appendChild(mt); }
-      if(it.settings){ const se=document.createElement('div'); se.className='settings'; se.textContent=it.settings; fig.appendChild(se); }
-      if(it.prompt){ const pr=document.createElement('div'); pr.className='prompt'; pr.textContent=it.prompt; fig.appendChild(pr); }
+      body.appendChild(cap);
+      if(it.time){ const tm=document.createElement('div'); tm.className='time'; tm.textContent='⏱ '+it.time; body.appendChild(tm); }
+      if(it.metrics){ const mt=document.createElement('div'); mt.className='metric'; mt.textContent='◈ '+it.metrics; body.appendChild(mt); }
+      if(it.settings){ const se=document.createElement('div'); se.className='settings'; se.textContent=it.settings; body.appendChild(se); }
+      if(it.prompt){ const pr=document.createElement('div'); pr.className='prompt'; pr.textContent=it.prompt; body.appendChild(pr); }
       const review=document.createElement('div'); review.className='kn-review';
-      review.appendChild(buildStars(it)); review.appendChild(buildTags(it, fig));
-      fig.appendChild(review);
+      review.appendChild(buildStars(it)); review.appendChild(buildTags(it));
+      body.appendChild(review);
       const cm=document.createElement('textarea'); cm.className='comment'; cm.placeholder='comment…';
       cm.value=it.comment||''; if(cm.value) cm.classList.add('has-text');
-      cm.addEventListener('focus', ()=>{ fig.draggable=false; });
-      cm.addEventListener('blur', ()=>{ fig.draggable=!S.loupe; });
       cm.addEventListener('input', ()=>{ it.comment=cm.value; cm.classList.toggle('has-text',!!cm.value); persist(); });
-      fig.appendChild(cm);
-      const jb=buildJudge(it); if(jb) fig.appendChild(jb);
+      body.appendChild(cm);
+      const jb=buildJudge(it); if(jb) body.appendChild(jb);
+      fig.appendChild(body);
       if(S.loupe){ const lp=document.createElement('div'); lp.className='loupe'; fig.appendChild(lp); }
-      if(!S.loupe && S.sort==='orig') wireDrag(fig, i);
+      if(S.sort==='orig') wireDrag(fig, i);
       grid.appendChild(fig);
     });
+    gridRows = Math.max(1, Math.ceil(shown / Math.max(1, S.cols)));
+    grid.classList.toggle('fit', S.rows>=1);
     surf.appendChild(grid); stage.innerHTML=''; stage.appendChild(surf);
+    fitRows();
     if(S.loupe) wireLoupe(grid);
+    afterRender();
   }
 
   // Grid drag-to-reorder. Mutates `items` (so the new order sticks across re-renders
   // and mode switches this session); not written back into a downloaded page.
+  // The card is draggable ONLY while its ⠿ grip is held: that keeps all of its text selectable, and
+  // it means reordering still works while the images are zoomed (where dragging a picture pans it).
   let dragFrom=-1;
   function wireDrag(fig, i){
-    fig.draggable=true;
+    fig.draggable=false;
+    const grip=document.createElement('button'); grip.className='kn-grip'; grip.textContent='⠿';
+    grip.title='Drag this handle to reorder';
+    grip.addEventListener('pointerdown', e=>{ e.stopPropagation(); fig.draggable=true; });
+    grip.addEventListener('click', e=>{ e.stopPropagation(); e.preventDefault(); });
+    fig.appendChild(grip);
     fig.addEventListener('dragstart', e=>{
       dragFrom=i; fig.classList.add('kn-dragging');
       e.dataTransfer.effectAllowed='move';
       try{ e.dataTransfer.setData('text/plain', String(i)); }catch(_){}
     });
-    fig.addEventListener('dragend', ()=>{ fig.classList.remove('kn-dragging');
+    fig.addEventListener('dragend', ()=>{ fig.draggable=false; fig.classList.remove('kn-dragging');
       document.querySelectorAll('#grid figure.kn-over').forEach(f=>f.classList.remove('kn-over')); });
     fig.addEventListener('dragover', e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; fig.classList.add('kn-over'); });
     fig.addEventListener('dragleave', ()=> fig.classList.remove('kn-over'));
@@ -490,7 +874,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   }
 
   // Per-result tags: chips with remove, plus an input (Enter / comma adds).
-  function buildTags(it, fig){
+  function buildTags(it){
     if(!Array.isArray(it.tags)) it.tags=[];
     const wrap=document.createElement('div'); wrap.className='kn-tags';
     const redraw=()=>{
@@ -503,8 +887,6 @@ const CONFIG = /*__COMPARE_DATA__*/null;
         chip.appendChild(x); wrap.appendChild(chip);
       });
       const inp=document.createElement('input'); inp.className='kn-taginp'; inp.placeholder='+tag';
-      inp.addEventListener('focus', ()=>{ fig.draggable=false; });
-      inp.addEventListener('blur', ()=>{ fig.draggable=!S.loupe; });
       const add=()=>{ const v=inp.value.trim(); if(v && !it.tags.includes(v)){ it.tags.push(v); persist(); redraw();
         wrap.querySelector('.kn-taginp').focus(); } };
       inp.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===','){ e.preventDefault(); add(); } });
@@ -566,7 +948,10 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     const box=document.createElement('div'); box.className='vbox';
     const base=document.createElement('img'); base.className='base'; base.src=A.src; base.onclick=()=>openLightbox(S.a);
     const over=document.createElement('img'); over.className='over'; over.src=B.src;
-    box.appendChild(base); box.appendChild(over);
+    // B lives in a wrapper: the mode's compositing (wipe clip / opacity / blend) goes on the WRAPPER
+    // so it stays in screen space, while the image inside is what the zoom transform moves.
+    const ow=document.createElement('div'); ow.className='overwrap'; ow.appendChild(over);
+    box.appendChild(base); box.appendChild(ow);
     const tagL=document.createElement('div'); tagL.className='tag l'; tagL.textContent='A: '+(A.caption||('image '+(S.a+1)));
     if(A.color) tagL.style.color=A.color;
     if(A.band) tagL.style.background=A.band;
@@ -576,29 +961,60 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     box.appendChild(tagL); box.appendChild(tagR);
 
     const loupeLayers=[{src:A.src}];
+    let opbar=null;   // opacity mode builds a control strip that goes right above the image
     if(S.mode==='slider'){
-      let pos=50;
+      // The wipe position lives in S, not in this closure: switching A/B, toggling a panel or
+      // hiding a result re-renders the view, and it would be maddening to lose the spot you set.
       const div=document.createElement('div'); div.className='divider';
-      const setPos=p=>{ pos=clamp(p,0,100); over.style.clipPath=`inset(0 0 0 ${pos}%)`; div.style.left=pos+'%'; };
-      box.appendChild(div); setPos(50);
-      if(!S.loupe){  // the loupe uses the pointer, so dragging is disabled while it's on
-        const drag=e=>{ const r=box.getBoundingClientRect(); const cx=e.touches?e.touches[0].clientX:e.clientX; setPos((cx-r.left)/r.width*100); };
-        box.onmousedown=e=>{ e.preventDefault(); document.body.classList.add('dragging'); drag(e);
-          const mv=ev=>{ev.preventDefault();drag(ev);};
-          const up=()=>{ document.body.classList.remove('dragging'); document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); };
-          document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up); };
-        box.ontouchmove=e=>{ e.preventDefault(); drag(e); };
+      // Guard the value on the way in: now that it OUTLIVES the render, one bad number — a drag
+      // before the image has laid out, when the box is still 0 wide — would stick around forever.
+      const setPos=p=>{ if(!isFinite(p)) return;
+                        S.wipe=clamp(p,0,100); ow.style.clipPath=`inset(0 0 0 ${S.wipe}%)`;
+                        div.style.left=S.wipe+'%'; };
+      box.appendChild(div); setPos(S.wipe);
+      const drag=e=>{ const r=box.getBoundingClientRect(); if(!r.width) return;
+        const cx=e.touches?e.touches[0].clientX:e.clientX; setPos((cx-r.left)/r.width*100); };
+      const startWipe=e=>{ e.preventDefault(); document.body.classList.add('dragging'); drag(e);
+        const mv=ev=>{ev.preventDefault();drag(ev);};
+        const up=()=>{ document.body.classList.remove('dragging'); document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); };
+        document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up); };
+      // The divider's own round handle ALWAYS moves the wipe — that's what keeps it usable when the
+      // pointer is busy elsewhere: zoomed in it pans the picture, and with the lens on it magnifies.
+      div.addEventListener('mousedown', e=>{ e.stopPropagation(); startWipe(e); });
+      if(!S.loupe){   // at fit, with no lens tracking the pointer, the whole image is the wipe control
+        box.onmousedown=e=>{ if(S.zoom>1.001) return; startWipe(e); };
+        box.ontouchmove=e=>{ if(S.zoom>1.001) return; e.preventDefault(); drag(e); };
       }
-      // in the loupe, split the over layer at the image's mid-line
-      loupeLayers.push({src:B.src, apply:(d,c)=>{ const x=clamp((0.5-c.rx)*c.w*c.Z + c.SZ/2, 0, c.SZ); d.style.clipPath=`inset(0 0 0 ${x}px)`; }});
+      // Inside the lens, split the B layer on the wipe line — found from the divider's actual
+      // position and converted to a picture fraction, so it stays put when the images are zoomed.
+      loupeLayers.push({src:B.src, apply:(d,c)=>{
+        const dv=c.box.querySelector('.divider');
+        const px=((parseFloat(dv&&dv.style.left)||50)/100)*c.ref.clientWidth;
+        const fdiv=fracAtPoint(c.ref, c.r, px, 0).fx;
+        const x=clamp(c.SZ/2 + (fdiv-c.fx)*c.r.w*c.M, 0, c.SZ);
+        d.style.clipPath=`inset(0 0 0 ${x}px)`; }});
     } else if(S.mode==='opacity'){
-      over.style.opacity=S.opacity/100;
+      ow.style.opacity=S.opacity/100;
+      // The fade control lives with the image (it was a stray slider at the far end of the header).
+      const bar=document.createElement('div'); bar.className='opbar';
+      const lab=document.createElement('span'); lab.textContent='A'; bar.appendChild(lab);
+      const sl=document.createElement('input'); sl.type='range'; sl.min=0; sl.max=100; sl.value=S.opacity;
+      sl.title='Fade B over A';
+      const val=document.createElement('span'); val.className='val'; val.textContent=S.opacity+'%';
+      sl.oninput=()=>{ S.opacity=+sl.value; ow.style.opacity=S.opacity/100; val.textContent=S.opacity+'%';
+                       if(refreshLoupe) refreshLoupe(); };
+      bar.appendChild(sl);
+      const labB=document.createElement('span'); labB.textContent='B'; bar.appendChild(labB);
+      bar.appendChild(val);
+      opbar=bar;
       loupeLayers.push({src:B.src, apply:(d)=>{ d.style.opacity=S.opacity/100; }});
     } else if(S.mode==='diff'){
-      over.style.mixBlendMode='difference';
+      ow.style.mixBlendMode='difference';
       loupeLayers.push({src:B.src, apply:(d)=>{ d.style.mixBlendMode='difference'; }});
     }
-    wrap.appendChild(box); surf.appendChild(wrap);
+    wrap.appendChild(box);
+    if(opbar) surf.appendChild(opbar);
+    surf.appendChild(wrap);
     if(S.loupe) wireBoxLoupe(box, loupeLayers);
     if(A.prompt||B.prompt){
       const pp=document.createElement('div'); pp.className='pairprompt';
@@ -631,6 +1047,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       pj.appendChild(ja); pj.appendChild(jb); surf.appendChild(pj);
     }
     stage.innerHTML=''; stage.appendChild(surf);
+    afterRender();
   }
 
   function renderFlip(){
@@ -666,39 +1083,60 @@ const CONFIG = /*__COMPARE_DATA__*/null;
       se.style.maxWidth='1000px'; se.style.margin='6px auto 0'; se.style.borderTop='none';
       se.textContent=it.settings; surf.appendChild(se); }
     stage.innerHTML=''; stage.appendChild(surf);
-    $('#flipState').textContent = S.flipB ? 'showing B' : 'showing A';
+    afterRender();
   }
   function toggleFlip(){ S.flipB=!S.flipB; renderFlip(); }
 
-  // synced loupe; wheel = zoom, Ctrl/Alt + wheel = diameter
+  // Synced loupe. Everything is tracked as a PICTURE fraction (not a fraction of the element), so the
+  // lens lands on the same detail in every image even when they differ in size or are letterboxed —
+  // and it composes with the global zoom: inside the lens the magnification is zoom × lens, while the
+  // surroundings stay at zoom. Plain wheel = lens zoom, Alt/Shift + wheel = lens diameter;
+  // Ctrl + wheel stays the image zoom (handled on #stage).
+  function loupeInfo(M){
+    info.style.display='block';
+    info.textContent = (S.zoom>1.001)
+      ? `zoom ×${S.zoom.toFixed(1)} · lens ×${S.loupeZoom.toFixed(1)} = ×${M.toFixed(1)} · ⌀${S.loupeSize}px`
+      : `zoom ×${S.loupeZoom.toFixed(1)} · ⌀${S.loupeSize}px`;
+  }
+  function paintLens(lp, img, r, fx, fy, M, SZ){
+    const p=pointOfFrac(img, r, fx, fy);
+    lp.style.width=SZ+'px'; lp.style.height=SZ+'px'; lp.style.display='block';
+    lp.style.left=(p.ex-SZ/2)+'px'; lp.style.top=(p.ey-SZ/2)+'px';
+    lp.style.backgroundSize=(r.w*M)+'px '+(r.h*M)+'px';
+    lp.style.backgroundPosition=`-${fx*r.w*M-SZ/2}px -${fy*r.h*M-SZ/2}px`;
+  }
   function wireLoupe(grid){
     const figs=[...grid.querySelectorAll('figure')];
-    let lastRx=null, lastRy=null;
-    const show=(rx,ry)=>{
-      lastRx=rx; lastRy=ry; const Z=S.loupeZoom, SZ=S.loupeSize;
+    let lf=null;
+    const show=(fx,fy)=>{
+      lf={fx,fy};
+      const M=S.zoom*S.loupeZoom, SZ=S.loupeSize;
       figs.forEach(f=>{
-        const img=f.querySelector('img'), lp=f.querySelector('.loupe'); if(!lp) return;
-        const w=img.clientWidth, h=img.clientHeight;
-        lp.style.width=SZ+'px'; lp.style.height=SZ+'px'; lp.style.display='block';
-        lp.style.left=(rx*w-SZ/2)+'px'; lp.style.top=(ry*h-SZ/2)+'px';
+        const img=f.querySelector('.imgwrap img'), lp=f.querySelector('.loupe');
+        if(!img||!lp) return;
+        const r=rectOfImg(img); if(!r.w||!r.h) return;
         lp.style.backgroundImage=`url(${img.src})`;
-        lp.style.backgroundSize=(w*Z)+'px '+(h*Z)+'px';
-        lp.style.backgroundPosition=`-${rx*w*Z-SZ/2}px -${ry*h*Z-SZ/2}px`;
+        paintLens(lp, img, r, fx, fy, M, SZ);
       });
-      info.style.display='block';
-      info.textContent=`zoom ×${S.loupeZoom.toFixed(1)} · ⌀${S.loupeSize}px`;
+      loupeInfo(M);
     };
-    const hide=()=>{ figs.forEach(f=>{const lp=f.querySelector('.loupe'); if(lp) lp.style.display='none';}); info.style.display='none'; };
+    const hide=()=>{ lf=null; figs.forEach(f=>{const lp=f.querySelector('.loupe'); if(lp) lp.style.display='none';}); info.style.display='none'; };
+    refreshLoupe=()=>{ if(S.loupe && lf) show(lf.fx,lf.fy); };
     figs.forEach(f=>{
-      const img=f.querySelector('img'); img.style.cursor='crosshair'; img.onclick=null;
-      img.onmousemove=e=>{ const r=img.getBoundingClientRect(); show((e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height); };
+      const img=f.querySelector('.imgwrap img'); if(!img) return;
+      img.style.cursor='crosshair'; img.onclick=null;
+      img.onmousemove=e=>{ const r=rectOfImg(img); if(!r.w||!r.h) return;
+        const o=originOf(img);
+        const p=fracAtPoint(img, r, e.clientX-o.left, e.clientY-o.top);
+        show(clamp(p.fx,0,1), clamp(p.fy,0,1)); };
       img.onmouseleave=hide;
     });
     grid.addEventListener('wheel', e=>{
-      if(!S.loupe) return; e.preventDefault();
-      if(e.ctrlKey||e.altKey) S.loupeSize=clamp(S.loupeSize - Math.sign(e.deltaY)*16, 60, 480);
+      if(!S.loupe || e.ctrlKey || e.metaKey) return;   // Ctrl+wheel belongs to the image zoom
+      e.preventDefault();
+      if(e.altKey||e.shiftKey) S.loupeSize=clamp(S.loupeSize - Math.sign(e.deltaY)*16, 60, 480);
       else S.loupeZoom=clamp(S.loupeZoom - Math.sign(e.deltaY)*0.25, 1.2, 10);
-      if(lastRx!=null) show(lastRx,lastRy);
+      if(lf) show(lf.fx,lf.fy);
     }, {passive:false});
   }
 
@@ -709,25 +1147,29 @@ const CONFIG = /*__COMPARE_DATA__*/null;
     const lp=document.createElement('div'); lp.className='loupe'; box.appendChild(lp);
     const els=layers.map(L=>{ const d=document.createElement('div'); d.className='loupe-layer';
       d.style.backgroundImage=`url(${L.src})`; lp.appendChild(d); return d; });
-    let lastRx=null,lastRy=null;
-    const show=(rx,ry)=>{ lastRx=rx; lastRy=ry; const Z=S.loupeZoom, SZ=S.loupeSize, w=ref.clientWidth, h=ref.clientHeight;
-      if(!w||!h) return;
-      lp.style.width=SZ+'px'; lp.style.height=SZ+'px'; lp.style.display='block';
-      lp.style.left=(rx*w-SZ/2)+'px'; lp.style.top=(ry*h-SZ/2)+'px';
+    let lf=null;
+    const show=(fx,fy)=>{ lf={fx,fy};
+      const M=S.zoom*S.loupeZoom, SZ=S.loupeSize, r=rectOfImg(ref);
+      if(!r.w||!r.h) return;
+      paintLens(lp, ref, r, fx, fy, M, SZ);
       els.forEach((d,i)=>{ d.style.clipPath=''; d.style.opacity=''; d.style.mixBlendMode='';
-        d.style.backgroundSize=(w*Z)+'px '+(h*Z)+'px';
-        d.style.backgroundPosition=`-${rx*w*Z-SZ/2}px -${ry*h*Z-SZ/2}px`;
-        if(layers[i].apply) layers[i].apply(d,{rx,ry,w,h,Z,SZ}); });
-      info.style.display='block'; info.textContent=`zoom ×${S.loupeZoom.toFixed(1)} · ⌀${S.loupeSize}px`;
+        d.style.backgroundSize=(r.w*M)+'px '+(r.h*M)+'px';
+        d.style.backgroundPosition=`-${fx*r.w*M-SZ/2}px -${fy*r.h*M-SZ/2}px`;
+        if(layers[i].apply) layers[i].apply(d,{fx,fy,r,M,SZ,ref,box}); });
+      loupeInfo(M);
     };
-    const hide=()=>{ lp.style.display='none'; info.style.display='none'; };
+    const hide=()=>{ lf=null; lp.style.display='none'; info.style.display='none'; };
+    refreshLoupe=()=>{ if(S.loupe && lf) show(lf.fx,lf.fy); };
     ref.style.cursor='crosshair'; ref.onclick=null;
-    box.onmousemove=e=>{ const r=ref.getBoundingClientRect(); show((e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height); };
+    box.onmousemove=e=>{ const r=rectOfImg(ref); if(!r.w||!r.h) return;
+      const o=originOf(ref);
+      const p=fracAtPoint(ref, r, e.clientX-o.left, e.clientY-o.top);
+      show(clamp(p.fx,0,1), clamp(p.fy,0,1)); };
     box.onmouseleave=hide;
-    box.addEventListener('wheel', e=>{ if(!S.loupe) return; e.preventDefault();
-      if(e.ctrlKey||e.altKey) S.loupeSize=clamp(S.loupeSize - Math.sign(e.deltaY)*16, 60, 480);
+    box.addEventListener('wheel', e=>{ if(!S.loupe || e.ctrlKey || e.metaKey) return; e.preventDefault();
+      if(e.altKey||e.shiftKey) S.loupeSize=clamp(S.loupeSize - Math.sign(e.deltaY)*16, 60, 480);
       else S.loupeZoom=clamp(S.loupeZoom - Math.sign(e.deltaY)*0.25, 1.2, 10);
-      if(lastRx!=null) show(lastRx,lastRy); }, {passive:false});
+      if(lf) show(lf.fx,lf.fy); }, {passive:false});
   }
 
   // lightbox
@@ -748,6 +1190,13 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   document.addEventListener('keydown',e=>{
     if(help.style.display==='flex'){ if(e.key==='Escape') help.style.display='none'; return; }
     if(lb.style.display==='flex'){ if(e.key==='Escape')lb.style.display='none'; if(e.key==='ArrowLeft')lbNav(-1); if(e.key==='ArrowRight')lbNav(1); return; }
+    // Don't hijack typing in a comment box or tag field (Space used to flip the image mid-word).
+    if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||'')) return;
+    if(e.key==='Escape'){ closePops(); return; }
+    if(e.key==='0' && S.zoom>1.001){ e.preventDefault(); resetZoom(); return; }
+    // 1..5 pick a comparison mode — the modes are the one thing you switch constantly.
+    const mk={'1':'grid','2':'slider','3':'opacity','4':'flip','5':'diff'}[e.key];
+    if(mk){ e.preventDefault(); document.querySelector(`#modes button[data-mode="${mk}"]`)?.click(); return; }
     if(S.mode==='flip' && (e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key===' ')){ e.preventDefault(); toggleFlip(); }
   });
 
@@ -762,6 +1211,7 @@ const CONFIG = /*__COMPARE_DATA__*/null;
   document.body.classList.toggle('hide-judge', !S.judge);
   $('#judgeBtn').classList.toggle('active', S.judge);
   syncHiddenBtn();
+  measureStage();       // the row height is derived from this, so it has to exist before the first render
   syncCtl(); render();
 })();
 </script>

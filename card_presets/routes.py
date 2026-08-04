@@ -1,7 +1,8 @@
 """PromptServer routes for Card Presets.
 
-  GET  /kinburg/cards/data  -- saved preset names + their types
-  POST /kinburg/cards/save  -- {name, type, values, delete?} add/update/delete a saved card
+  GET  /kinburg/cards/data  -- saved preset names, their types + tags, and the tag list
+  POST /kinburg/cards/save  -- {name, type, values, tags?, delete?} add/update/delete a saved card
+  POST /kinburg/cards/tags  -- {name, tags} set an existing card's tags (no values needed)
 
 Guarded so the package still imports without ComfyUI/aiohttp present.
 """
@@ -31,10 +32,23 @@ try:
                 body.get("name") or "",
                 body.get("type") or "character",
                 body.get("values") or {},
+                tags=body.get("tags"),
                 delete=bool(body.get("delete")),
             )
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+        return web.json_response({"ok": True, **data})
+
+    @routes.post("/kinburg/cards/tags")
+    async def _tags(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+        try:
+            data = store.retag(body.get("name") or "", body.get("tags"))
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=500)
         return web.json_response({"ok": True, **data})

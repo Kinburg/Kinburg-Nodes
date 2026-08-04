@@ -117,12 +117,22 @@ def _gguf_dir():
         return None
 
 
-def _list_models():
-    d = _gguf_dir()
-    files = []
+def _list_gguf_rel(d):
+    """Every .gguf under `d`, RECURSIVELY, as paths relative to `d` with forward-slash separators —
+    so models organized into subfolders show up as 'family/model.gguf' in the dropdown (the newer
+    ComfyUI frontend even renders '/' as nested submenus), and the choice serializes the same on any
+    OS. Sorted case-insensitively so files in the same subfolder group together."""
+    out = []
     if d and os.path.isdir(d):
-        files = sorted(f for f in os.listdir(d) if f.lower().endswith(".gguf"))
-    return [PLACEHOLDER] + files
+        for root, _dirs, files in os.walk(d):
+            for f in files:
+                if f.lower().endswith(".gguf"):
+                    out.append(os.path.relpath(os.path.join(root, f), d).replace(os.sep, "/"))
+    return sorted(out, key=str.lower)
+
+
+def _list_models():
+    return [PLACEHOLDER] + _list_gguf_rel(_gguf_dir())
 
 
 def _split_reasoning(raw, marker=""):
@@ -367,21 +377,20 @@ _VISION_HANDLER_KEY = {lbl: key for lbl, key in _VISION_HANDLERS}
 
 
 def _list_mmproj():
-    """models/llm .gguf files for the mmproj dropdown, mmproj-named ones first."""
-    d = _gguf_dir()
-    files = []
-    if d and os.path.isdir(d):
-        allg = [f for f in os.listdir(d) if f.lower().endswith(".gguf")]
-        files = sorted(f for f in allg if "mmproj" in f.lower()) + \
-                sorted(f for f in allg if "mmproj" not in f.lower())
+    """models/llm .gguf files (recursive, subfolders included) for the mmproj dropdown, with
+    mmproj-named ones (or ones under an mmproj folder) first."""
+    allg = _list_gguf_rel(_gguf_dir())
+    files = [f for f in allg if "mmproj" in f.lower()] + [f for f in allg if "mmproj" not in f.lower()]
     return [PLACEHOLDER] + files
 
 
 def _resolve_path(choice, manual):
-    """A models/llm dropdown selection wins; else the manual path (quotes/space stripped)."""
+    """A models/llm dropdown selection wins; else the manual path (quotes/space stripped). The
+    dropdown value may be a subfolder-relative path ('family/model.gguf'); split on '/' so it
+    rejoins with the OS separator (a plain root filename has no '/', so this is a no-op for it)."""
     if choice and choice != PLACEHOLDER:
         d = _gguf_dir()
-        return os.path.join(d, choice) if d else choice
+        return os.path.join(d, *choice.split("/")) if d else choice
     return (manual or "").strip().strip('"').strip("'").strip()
 
 
@@ -482,11 +491,14 @@ def _encode_images(image, max_side):
 
 def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
                          unload_llm_after_run, directive, strip_think, answer_marker, help_text,
-                         token_cb=None, show_progress=True):
+                         token_cb=None, show_progress=True, stats=None):
     """Shared core for both LLM nodes: optionally free ComfyUI VRAM, talk to the worker with a
     live token progress bar, then split reasoning out and return the 10-output tuple.
     `show_progress=False` suppresses the per-token progress bar — used by callers (e.g. the
-    Vision Judge) that drive their own image-level progress bar for the whole node."""
+    Vision Judge) that drive their own image-level progress bar for the whole node.
+    `stats` (a dict, when passed) is filled on success with this call's token / context-fill
+    figures (prompt_tokens, output_tokens, context_used, n_ctx, finish_reason) — the 10-tuple
+    return is unchanged, so existing callers are unaffected."""
     if unload_comfy_models:
         try:
             import comfy.model_management as mm
@@ -542,6 +554,16 @@ def _generate_and_format(req, load_sig, max_tokens, unload_comfy_models,
         denom = len(answer) + len(thoughts)
         thoughts_tokens = round(out_tok * len(thoughts) / denom) if (denom and out_tok) else 0
         answer_tokens = max(0, out_tok - thoughts_tokens)
+        if isinstance(stats, dict):
+            stats.update({
+                "prompt_tokens": int(data.get("prompt_tokens", 0)),
+                "output_tokens": out_tok,
+                "sys_tokens": int(data.get("sys_tokens", 0)),
+                "user_tokens": int(data.get("user_tokens", 0)),
+                "context_used": int(data.get("context_used", 0)),
+                "n_ctx": int(data.get("n_ctx", 0)),
+                "finish_reason": data.get("finish_reason", ""),
+            })
         return (text, thoughts, data.get("finish_reason", ""),
                 int(data.get("sys_tokens", 0)), int(data.get("user_tokens", 0)),
                 out_tok, gen_seconds, help_text, thoughts_tokens, answer_tokens)
@@ -554,7 +576,7 @@ def _base_config_widgets():
     """The model / sampling / loader / reasoning / output widgets carried by the Local LLM
     Settings node. The LLM nodes read these from the config bundle instead of hosting them."""
     return {
-        "model": (_list_models(), {"tooltip": "Pick a .gguf from ComfyUI/models/llm. Choose the placeholder to type any path in model_path"}),
+        "model": (_list_models(), {"tooltip": "Pick a .gguf from ComfyUI/models/llm (subfolders included — organize models into folders and they show as 'folder/model.gguf'). Choose the placeholder to type any path in model_path"}),
         "model_path": ("STRING", {"default": "", "tooltip": "Full path to a .gguf, used when 'model' is the placeholder. Surrounding quotes (e.g. from Windows 'Copy as path') are stripped automatically."}),
         "system_prompt": ("STRING", {"multiline": True, "default": "You are a helpful assistant."}),
         "max_tokens": ("INT", {"default": 512, "min": 16, "max": 32768, "step": 16}),
@@ -714,7 +736,9 @@ class LocalLLMGGUF:
                 "system_override": ("STRING", {"forceInput": True, "tooltip": "Optional: replaces the config's system_prompt for this node (connect-only). Context still applies."}),
                 "grammar_override": ("STRING", {"forceInput": True, "tooltip": "Optional: a GBNF grammar (connect-only) that replaces the config's grammar and forces gbnf_grammar output for this node."}),
                 "unload_after_run": (UNLOAD_MODES, {"default": "config default", "tooltip": "Free the model from VRAM after THIS node runs, without touching the shared config. 'config default' follows the Settings node; 'unload after run' frees VRAM (a different model runs next); 'keep loaded' stays warm (the same model runs next)."}),
+                "live_preview": ("BOOLEAN", {"default": False, "tooltip": "Stream the generated text to an 'LLM Live Log' node as it's written, token by token. Text generation only — a grammar/JSON run (e.g. a card via grammar_override) can't stream, so the log shows its result once it finishes."}),
             },
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "STRING", "INT", "INT")
@@ -723,15 +747,53 @@ class LocalLLMGGUF:
     CATEGORY = "Kinburg-Nodes/LLM"
 
     def run(self, config, user_prompt, image=None, system_override=None, grammar_override=None,
-            unload_after_run="config default"):
+            unload_after_run="config default", live_preview=False, unique_id=None):
         err, ctx = build_llm_request(config, user_prompt, image=image,
                                      system_override=system_override, grammar_override=grammar_override)
         if err:
             return _err(err, VISION_HELP_TEXT if image is not None else HELP_TEXT)
         unload_llm = resolve_unload(unload_after_run, config)
-        return _generate_and_format(ctx["req"], ctx["load_sig"], ctx["max_tokens"], ctx["unload_comfy"],
-                                    unload_llm, ctx["directive"], ctx["strip_think"],
-                                    ctx["answer_marker"], ctx["help"])
+
+        # Optional live text streaming to an LLM Live Log node over ComfyUI's websocket — same
+        # mechanism the Chat node uses. Text runs only; a grammar run takes the worker's non-stream
+        # path, so token_cb never fires and the log just gets the final text on 'done'.
+        token_cb, emit = None, None
+        if live_preview:
+            try:
+                from server import PromptServer
+                nid = str(unique_id[0] if isinstance(unique_id, list) else unique_id)
+
+                def emit(payload):
+                    try:
+                        PromptServer.instance.send_sync("kinburg.llm", {"id": nid, **payload})
+                    except Exception:
+                        pass
+
+                ctx["req"]["stream_text"] = True
+
+                def token_cb(delta):
+                    emit({"event": "delta", "delta": delta})
+
+                # The log counts deltas live against this ceiling ("142/512 tok"); n_ctx lets it
+                # show the context fill once the exact figures land on 'done', and answer_marker
+                # lets it split reasoning from the answer exactly the way _split_reasoning does.
+                emit({"event": "start", "max_tokens": int(ctx["max_tokens"]),
+                      "n_ctx": int(ctx["req"].get("n_ctx", 0) or 0),
+                      "answer_marker": ctx["answer_marker"] or ""})
+            except Exception:
+                token_cb, emit = None, None
+
+        stats = {} if emit else None
+        out = _generate_and_format(ctx["req"], ctx["load_sig"], ctx["max_tokens"], ctx["unload_comfy"],
+                                   unload_llm, ctx["directive"], ctx["strip_think"],
+                                   ctx["answer_marker"], ctx["help"], token_cb=token_cb, stats=stats)
+        if emit:
+            emit({"event": "done", "text": out[0], "finish_reason": out[2], "gen_seconds": out[6],
+                  "max_tokens": int(ctx["max_tokens"]), "output_tokens": int(out[5]),
+                  "prompt_tokens": int((stats or {}).get("prompt_tokens", 0) or 0),
+                  "context_used": int((stats or {}).get("context_used", 0) or 0),
+                  "n_ctx": int((stats or {}).get("n_ctx", 0) or ctx["req"].get("n_ctx", 0) or 0)})
+        return out
 
 
 NODE_CLASS_MAPPINGS = {"LocalLLMGGUF": LocalLLMGGUF}

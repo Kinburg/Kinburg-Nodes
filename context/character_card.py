@@ -9,6 +9,7 @@ meant to be gathered by Context Collector and fed into an LLM node's `context` i
     - Age: 35
     - Eyes: brown
     - Hair color: dark brown
+    - Notes: quiet, keeps to himself
 
 Giving the model such reference cards lets it weave each named character's looks into an
 expanded image prompt (see README). Category `Kinburg-Nodes/LLM`.
@@ -38,8 +39,9 @@ class CharacterCard:
         }
         for key, label in _FIELDS:
             fields[key] = ("STRING", dict(opt, tooltip=f"{label}. " + opt["tooltip"]))
-        fields["notes"] = ("STRING", {"multiline": True, "default": "", "tooltip": "Anything else (personality, accessories, scars…). Added verbatim under the card."})
+        fields["notes"] = ("STRING", {"multiline": True, "default": "", "tooltip": "Anything else (personality, accessories, scars…). Added as a '- Notes:' line at the end of the card."})
         fields["save_preset_as"] = ("STRING", {"default": "", "tooltip": "Type a name to save this card to the Card Presets library on the next run. Works whether the fields are typed OR wired in from outside (saved at run time). Empty = don't save. (Re-runs overwrite the same name.)"})
+        fields["tags"] = ("STRING", {"default": "", "tooltip": "Comma-separated tags for filtering the library in Card Presets (e.g. 'heroes, medieval'). Only used when save_preset_as is set. Empty = leave existing tags untouched."})
         return {"required": fields}
 
     RETURN_TYPES = ("STRING",)
@@ -47,21 +49,20 @@ class CharacterCard:
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
-    def run(self, name="", notes="", save_preset_as="", **kwargs):
+    def run(self, name="", notes="", save_preset_as="", tags="", **kwargs):
         lines = []
         for key, label in _FIELDS:
             v = (kwargs.get(key) or "").strip()
             if v:
                 lines.append(f"- {label}: {v}")
         notes = (notes or "").strip()
+        if notes:
+            lines.append(f"- Notes: {notes}")   # same bullet format as every other field
 
         result = ""
-        if lines or notes:
+        if lines:
             header = (name or "").strip() or "Character"
-            block = [f"### {header}"] + lines
-            if notes:
-                block.append(notes)
-            result = "\n".join(block)
+            result = "\n".join([f"### {header}"] + lines)
 
         # Backend save: captures the values as resolved at run time (typed OR wired in), which a
         # frontend button can't see. Overwrites the same name on re-runs.
@@ -72,7 +73,7 @@ class CharacterCard:
                 values = {"name": name or "", "notes": notes}
                 for key, _ in _FIELDS:
                     values[key] = (kwargs.get(key) or "")
-                upsert(sp, "character", values)
+                upsert(sp, "character", values, tags=(tags if (tags or "").strip() else None))
                 print(f"[CharacterCard] saved preset '{sp}'")
             except Exception as e:
                 print(f"[CharacterCard] save preset '{sp}' failed: {e}")

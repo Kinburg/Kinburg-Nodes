@@ -21,6 +21,7 @@ class EntityCard:
                 "name": ("STRING", {"default": "", "tooltip": "The thing's name / label (e.g. 'Cafe', 'Bronze pitcher', 'Old town hall'). Becomes the card heading the LLM binds the description to. Empty = description is emitted on its own, with no heading."}),
                 "description": ("STRING", {"multiline": True, "default": "", "tooltip": "Free-form description of the entity — looks, materials, mood, signature details… Written verbatim under the heading. Empty (with an empty name) => nothing is emitted, so Context Collector skips this card."}),
                 "save_preset_as": ("STRING", {"default": "", "tooltip": "Type a name to save this card to the Card Presets library on the next run. Works whether the fields are typed OR wired in from outside (saved at run time). Empty = don't save."}),
+                "tags": ("STRING", {"default": "", "tooltip": "Comma-separated tags for filtering the library in Card Presets (e.g. 'buildings, city'). Only used when save_preset_as is set. Empty = leave existing tags untouched."}),
             },
         }
 
@@ -29,7 +30,7 @@ class EntityCard:
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
-    def run(self, name="", description="", save_preset_as=""):
+    def run(self, name="", description="", save_preset_as="", tags=""):
         name = (name or "").strip()
         description = (description or "").strip()
 
@@ -45,7 +46,8 @@ class EntityCard:
         if sp and (name or description):
             try:
                 from ..card_presets.store import upsert
-                upsert(sp, "entity", {"name": name, "description": description})
+                upsert(sp, "entity", {"name": name, "description": description},
+                       tags=(tags if (tags or "").strip() else None))
                 print(f"[EntityCard] saved preset '{sp}'")
             except Exception as e:
                 print(f"[EntityCard] save preset '{sp}' failed: {e}")

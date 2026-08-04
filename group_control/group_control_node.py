@@ -19,6 +19,10 @@ Design notes for the frontend side:
   * Clicking a row's name/colour dot focuses that group on the canvas.
   * A name filter box hides non-matching rows (view-only); bulk on/off/never then act on the
     matching set.
+  * Rows can be **hidden** (⋯ → "Hide from this list") for set-and-forget groups you never toggle.
+    Hidden names are saved on the node (`properties._kbHidden`) so they travel with the workflow,
+    hidden groups are skipped by the bulk buttons and by Solo (so "all off" can't disable your
+    loaders), and the header 👁 button reveals them again (right-click 👁 unhides everything).
   * The panel polls the graph and grows/rebuilds itself as groups are added, renamed or removed.
   * No per-node state is stored here — the on/off state is the `mode` already saved on the
     target nodes, so it survives a workflow reload for free.
@@ -41,7 +45,8 @@ class KinburgGroupControl:
         "Control panel for enabling/bypassing/muting workflow groups by name, and running a "
         "single group on its own (▶ = queue just that group's outputs + their dependencies). "
         "Groups sharing a name are toggled together; nested groups are supported. The list "
-        "grows automatically as groups are added to the workflow."
+        "grows automatically as groups are added to the workflow. Groups you never toggle "
+        "(loaders, VAE, …) can be hidden from the list and brought back with the 👁 button."
     )
 
     def noop(self):
