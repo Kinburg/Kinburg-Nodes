@@ -308,8 +308,11 @@ function clearLog(node) {
 // New empty block for a source, appended to this node's history + DOM (with the top-drop cap).
 function pushBlock(node, srcId, d) {
   const snap = snapFor(node.id);
+  // A source may label its individual calls (Morpheus Storyboard sends "shot 2/4"); without a
+  // label the block is just the node's title, exactly as before.
+  const label = typeof d?.label === "string" && d.label ? ` · ${d.label}` : "";
   const block = {
-    srcId: String(srcId), title: titleFor(srcId), text: "", done: false, seconds: null, finish: "",
+    srcId: String(srcId), title: titleFor(srcId) + label, text: "", done: false, seconds: null, finish: "",
     hadDelta: false, tokens: 0, maxTokens: Number(d?.max_tokens) || 0, outTokens: null,
     promptTokens: 0, ctxUsed: 0, nCtx: Number(d?.n_ctx) || 0, t0: 0, tEnd: 0,
     marker: d?.answer_marker || "", thinkOpen: true, thinkTouched: false, thinkStart: 0, thinkEnd: 0,
