@@ -26,7 +26,7 @@ import re
 
 from . import cache as shot_cache
 from .storyboard import (ANCHOR_CLAUSE, KinburgMorpheusStoryboard, SHOT_SYSTEM_MORPH,
-                         SHOT_SYSTEM_START, _LABELS_SHOT, _blocks)
+                         SHOT_SYSTEM_START, _LABELS_SHOT, _blocks, dedupe_dialogue)
 
 SCOPES = ["auto", "off", "opening", "full"]
 
@@ -39,8 +39,9 @@ Rewrite only the opening, to match what is really in the first image:
 - Say what is ALREADY true there. Never describe that state being arrived at, and never mention anything that happened before it.
 - The shot opens MID-MOVEMENT: state that the subject is already travelling at speed and keep it steady. Never write "begins to", "starts to", "picks up speed" or "accelerates from".
 - Keep the wording, subject names and register of the existing prompt. Change no other section.
+- If the beat you are replacing contained a spoken line, keep that line in the beat, once, with its voice specification — verbatim, in whatever language and alphabet it was written in. Never translate it, never move it elsewhere, never duplicate it.
 
-Whatever language the input is in, answer in ENGLISH, with EXACTLY these two labelled blocks and nothing else — no preamble, no commentary:
+Whatever language the input is in, answer in ENGLISH — except for a spoken line, which keeps its own language and alphabet, verbatim. Use EXACTLY these two labelled blocks and nothing else — no preamble, no commentary:
 
 [SITUATION]: one sentence — what is already true as the shot opens, naming who or what is on screen and where.
 [BEAT 1]: the replacement text for the first beat only, without its timing bracket — what happens in the shot's first stretch, starting from the state above."""
@@ -90,6 +91,13 @@ def splice_opening(prompt, situation, beat1):
         sec[2] = (sec[2][0], (situation.strip() + " " + ANCHOR_CLAUSE).strip())
     if 3 in sec and beat1:
         sec[3] = (sec[3][0], swap_first_beat(sec[3][1], beat1))
+        # a rewritten beat can introduce a line the audio block already carries
+        if 5 in sec:
+            cleaned = dedupe_dialogue(sec[3][1], sec[5][1])
+            if cleaned:
+                sec[5] = (sec[5][0], cleaned)
+            else:
+                sec.pop(5)
     return _join(sec)
 
 
@@ -110,8 +118,9 @@ def rebuild_full(prompt, body, anchored):
         out[3] = ("Storyboard", body["STORYBOARD"].strip())
     if body.get("CAMERA"):
         out[4] = ("Camera", body["CAMERA"].strip())
-    if body.get("AUDIO"):
-        out[5] = ("Audio & Voice", body["AUDIO"].strip())
+    audio = dedupe_dialogue(body.get("STORYBOARD", ""), body.get("AUDIO", ""))
+    if audio:
+        out[5] = ("Audio & Voice", audio)
     if negative:
         out[6] = ("Negative Prompt/Constraints", negative)
     return _join(out) if out else None

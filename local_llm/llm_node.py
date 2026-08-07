@@ -736,7 +736,7 @@ class LocalLLMGGUF:
                 "system_override": ("STRING", {"forceInput": True, "tooltip": "Optional: replaces the config's system_prompt for this node (connect-only). Context still applies."}),
                 "grammar_override": ("STRING", {"forceInput": True, "tooltip": "Optional: a GBNF grammar (connect-only) that replaces the config's grammar and forces gbnf_grammar output for this node."}),
                 "unload_after_run": (UNLOAD_MODES, {"default": "config default", "tooltip": "Free the model from VRAM after THIS node runs, without touching the shared config. 'config default' follows the Settings node; 'unload after run' frees VRAM (a different model runs next); 'keep loaded' stays warm (the same model runs next)."}),
-                "live_preview": ("BOOLEAN", {"default": False, "tooltip": "Stream the generated text to an 'LLM Live Log' node as it's written, token by token. Text generation only — a grammar/JSON run (e.g. a card via grammar_override) can't stream, so the log shows its result once it finishes."}),
+                "live_preview": ("BOOLEAN", {"default": False, "tooltip": "Stream the generated text to a 'Kinburg Live Log' node as it's written, token by token. Text generation only — a grammar/JSON run (e.g. a card via grammar_override) can't stream, so the log shows its result once it finishes."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -754,7 +754,7 @@ class LocalLLMGGUF:
             return _err(err, VISION_HELP_TEXT if image is not None else HELP_TEXT)
         unload_llm = resolve_unload(unload_after_run, config)
 
-        # Optional live text streaming to an LLM Live Log node over ComfyUI's websocket — same
+        # Optional live text streaming to a Kinburg Live Log node over ComfyUI's websocket — same
         # mechanism the Chat node uses. Text runs only; a grammar run takes the worker's non-stream
         # path, so token_cb never fires and the log just gets the final text on 'done'.
         token_cb, emit = None, None

@@ -11,7 +11,7 @@ the node mappings from the root `__init__.py`, and the sets are split into subpa
 > `config` + `user_prompt`, plus an optional **`image`** input (connect it, with a `Vision Settings`
 > node on the config, for vision) and two optional connect-only overrides — **`system_override`**
 > (replaces the config's system prompt) and **`grammar_override`** (a GBNF grammar that forces
-> `gbnf_grammar` output). A **`live_preview`** toggle streams the output to an **`LLM Live Log`**
+> `gbnf_grammar` output). A **`live_preview`** toggle streams the output to a **`Kinburg Live Log`**
 > node as it's written (see below). The chat node uses the same bundle. (See the Settings/chat section below.)
 
 Run a GGUF LLM right inside ComfyUI **with guaranteed VRAM unloading**: inference
@@ -28,10 +28,16 @@ unknown keys are ignored and changing it reloads the model. Note these are **Pyt
 args, not llama.cpp CLI flags** — CLI-only flags like `--spec-type draft-mtp` have no effect
 here. These options live on the **`Local LLM Settings (GGUF)`** node (see below).
 
-**`LLM Live Log`** — turn on the `Local LLM (GGUF)` node's **`live_preview`** toggle and drop an
-`LLM Live Log` node anywhere (no connections): it shows the output as it streams, token by token,
-a block per generation labelled by the source node (like the Ouroboros Live Log). One log node
-shows the stream from every LLM node. Each block's header counts the tokens generated so far
+**`Kinburg Live Log 📜`** — turn on a source node's **`live_preview`** toggle and drop a
+`Kinburg Live Log` node anywhere (no connections): it shows the output as it streams, token by token,
+a block per generation labelled by the source node — and, when the source labels its individual
+calls, by the call (`Morpheus Storyboard · shot 2/4 (2 keyframes)`). One log shows every LLM node in
+the pack at once: `Local LLM (GGUF)`, `Chat`, `Morpheus Storyboard` and the Morpheus sampler's
+in-loop writer. Blocks can carry **thumbnails** — the frames a vision call was actually shown, and
+Morpheus posts each shot's last frame as it is decoded, so the log doubles as a live storyboard of a
+render; thumbnails have a hover copy-to-clipboard button. (The old `LLM Live Log` id still loads and
+behaves identically, hidden from the picker. The Ouroboros loop keeps its own
+`Ouroboros Live Log 🐍📜`, whose iteration/score/stage layout is a different shape.) Each block's header counts the tokens generated so far
 against the run's `max_tokens` ceiling (`142/512 tok`) plus the live `tok/s`, with a thin **budget
 bar** under it, and on finish adds the context fill (`ctx 1780/4096 (43%) · prompt 1268 + gen 512`)
 — amber when the output hit `max_tokens` or the context is nearly full. **Reasoning is separated
@@ -723,7 +729,9 @@ Memory, on purpose: the default kills the LLM worker after every call and frees 
 it, because on 12 GB a 26B vision model and H3 cannot coexist. That costs one H3 reload per seam;
 `llm_keep_loaded` trades the safety for the speed if you have the headroom. The report breaks out
 **write** and **sample** time per shot so the trade is visible rather than guessed at, and the writing
-streams to `LLM Live Log` like everything else (`refine 2/4 (opening)`).
+streams to `Kinburg Live Log` like everything else (`refine 2/4 (opening)`) — with the frames it was
+shown, plus each shot's last frame as it is decoded, so the log doubles as a live storyboard of the
+run. That works with `live_preview` on whether or not an LLM is wired.
 
 The `MiniMax H3 Sigma Shift` patch (video 12 / audio 3) is applied inside the node unless the wired model
 already carries it, and wiring your own `sigmas` into a model that carried no shift gets a warning,
@@ -790,6 +798,21 @@ The prompts come out in **MiniMax's own recommended format** — the numbered `[
   resolve, and it resolves it by turning the demon back into a cyclist. The bible comes out on the
   `style` output; paste it into the `style` input of a later run to keep one look across sessions.
 
+**A spoken line lives in exactly one place: the beat that speaks it.** MiniMax's own template puts
+voice-over in `[Audio & Voice]`, but measured on real renders the line lands far better inside its beat,
+with its timing — `(Male, 30s, gravelly, urgent, American) "They found me."` — and a line written in
+*both* blocks is sometimes performed **twice**, or lands at the wrong moment. So the shot prompts put
+speech in the storyboard and forbid quoting it in the audio block, and the assembler drops from the
+audio any sentence that repeats a line already spoken in a beat (whole sentences only, so what is left
+still reads; if that empties the block, the bible's sound bed fills in).
+
+**The prose is English; the dialogue is not.** H3 speaks other languages, so a quoted line keeps the
+language and alphabet it was written in, carried through the planner and the shot writer verbatim —
+`(Female, 30s, flat, resigned, Russian, slow) "Он не придёт."` — with the language filling the voice
+spec's accent slot so the model knows how to say it. Only if the direction *describes* speech without
+quoting it does the writer invent the words, in the language the direction itself is written in.
+Everything else — description, camera, sound, negatives — stays English, which is what the model wants.
+
 Each shot is written by **one of three system prompts**, picked by how many keyframes that shot got —
 two images ("describe the change that carries the first into the second"), one ("carry on from this
 state, there is no target"), none ("invent it from the direction and the previous end state"). They are
@@ -843,7 +866,7 @@ The LLM plumbing is the `Vision Judge` one (`build_llm_request` + `_generate_and
 the same `Local LLM Settings (GGUF)` bundle; attach a `Vision Settings (GGUF)` mmproj if you wire
 keyframes, or it writes blind (and says so in the report). `unload_after_run` defaults to **unloading**,
 because what runs next is H3 plus a 30B text encoder. `live_preview` is **on** by default and streams
-every call to an `LLM Live Log` node — one labelled block per call (`style bible`, `shot 2/4`), over the
+every call to a `Kinburg Live Log` node — one labelled block per call (`style bible`, `shot 2/4`), over the
 same `kinburg.llm` channel the Local LLM node uses, so no new node and no wiring: writing a storyboard is
 otherwise minutes of silence.
 
@@ -1584,7 +1607,7 @@ continuing a reply uses a raw prefill, so it needs a chat template and doesn't w
 path. Both modes also skip `thinking_directive`, since it would have to *become* the user turn.
 
 **Context meter.** A thin row under the chat shows the KV-cache fill after the last turn —
-`ctx 3 412 / 8 192 · 42% · 120 out · 4.2s` — from the same worker numbers `LLM Live Log` reports.
+`ctx 3 412 / 8 192 · 42% · 120 out · 4.2s` — from the same worker numbers `Kinburg Live Log` reports.
 The bar turns amber past 75% and red past 90%. When a reply stops because it hit `max_tokens` the
 row says so, which is the cue to press Send with an empty box and let the persona finish it.
 

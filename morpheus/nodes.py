@@ -130,6 +130,23 @@ def _parse_range(text, n):
     return lo, hi
 
 
+def _log_uris(images, max_side=320):
+    """Small JPEG data URIs for the live log — the same encoder the LLM vision path uses.
+
+    Deliberately downscaled: these go over the websocket on every shot, and the log only needs a
+    thumbnail. Never raises: a picture that fails to encode must not take a render down."""
+    try:
+        from ..local_llm.llm_node import _encode_images
+        frames = [im for im in (images or []) if im is not None]
+        if not frames:
+            return []
+        batch = frames[0] if len(frames) == 1 else torch.cat(frames, dim=0)
+        return _encode_images(batch, max_side)
+    except Exception as e:  # pragma: no cover
+        logging.debug(f"[Morpheus] live-log image encode skipped: {e}")
+        return []
+
+
 def _fp16_round(img):
     """Every handoff frame goes through fp16 so the fresh path and the cached path are identical.
 
@@ -237,7 +254,7 @@ class KinburgMorpheus:
                 "cache_tag": ("STRING", {"default": "", "advanced": True,
                                          "tooltip": "Free text folded into every cache key. The key covers architecture + LoRA patches, NOT the exact weight file — so if you swap to another H3 checkpoint of the same size, bump this to invalidate."}),
                 "live_preview": ("BOOLEAN", {"default": True,
-                                             "tooltip": "Stream the in-loop LLM's writing to an 'LLM Live Log' node, one labelled block per shot ('refine 2/4 (opening)'). Only does anything when 'llm_config' is wired."}),
+                                             "tooltip": "Stream the in-loop LLM's writing to a 'Kinburg Live Log' node, one labelled block per shot ('refine 2/4 (opening)'). Only does anything when 'llm_config' is wired."}),
                 "llm_keep_loaded": ("BOOLEAN", {"default": False, "advanced": True,
                                                 "tooltip": "Leave the LLM in memory between shots instead of shutting its worker down after every call. Faster (no reload per seam) but it holds its VRAM and RAM while H3 samples — on 12 GB with a 26B model that means OOM. Off is the safe default: the LLM is loaded, used and killed around each shot."}),
                 "shots_range": ("STRING", {"default": "", "advanced": True,
@@ -413,23 +430,26 @@ class KinburgMorpheus:
                                   s["keyframe_strength"], shot_cache.tensor_key(s.get("start_frame")),
                                   shot_cache.tensor_key(s.get("end_frame")))
 
-        # --- the in-loop writer (optional): it exists to replace forecasts with real frames --------
-        refine, emit = None, None
+        # --- live log + the in-loop writer --------------------------------------------------------
+        # The log is wired up whether or not an LLM is: every decoded shot posts its last frame, so
+        # the panel becomes a storyboard of the run even on a plain sampling pass.
+        emit = None
+        if live_preview:
+            try:
+                from server import PromptServer
+                nid = str(unique_id[0] if isinstance(unique_id, list) else unique_id)
+
+                def emit(payload):
+                    try:
+                        PromptServer.instance.send_sync("kinburg.llm", {"id": nid, **payload})
+                    except Exception:
+                        pass
+            except Exception:
+                emit = None
+        refine = None
         if llm_config:
             from . import refine as refine_mod  # deferred: refine -> storyboard -> nodes is a cycle
             refine = refine_mod
-            if live_preview:
-                try:
-                    from server import PromptServer
-                    nid = str(unique_id[0] if isinstance(unique_id, list) else unique_id)
-
-                    def emit(payload):
-                        try:
-                            PromptServer.instance.send_sync("kinburg.llm", {"id": nid, **payload})
-                        except Exception:
-                            pass
-                except Exception:
-                    emit = None
 
         # --- the loop ---------------------------------------------------------------------------
         sr = int(getattr(audio_vae, "audio_sample_rate_output",
@@ -541,6 +561,12 @@ class KinburgMorpheus:
                 tail = _fp16_round(decoded[-1:])
             if next_needs:
                 handoff = entry["handoff"].to(torch.float32) if have_handoff else tail
+            if emit is not None and (tail is not None or have_handoff):
+                # the run's storyboard, building up live: this is the frame the next shot starts on
+                emit({"event": "frames",
+                      "label": f"shot {i + 1}/{len(chain)} · last frame"
+                               + (" (cached)" if cached else ""),
+                      "images": _log_uris([tail if tail is not None else entry["handoff"]])})
 
             if p["in_range"]:
                 frames = decoded[p["drop"]:]

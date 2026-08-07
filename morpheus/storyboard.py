@@ -43,8 +43,8 @@ import torch
 import comfy.utils
 
 from . import cache as shot_cache
-from .nodes import (MORPHEUS_SHOT, KinburgMorpheusDream, LINK_MODES, _frames_for, _require_h3,
-                    _seconds, h3)
+from .nodes import (MORPHEUS_SHOT, KinburgMorpheusDream, LINK_MODES, _frames_for, _log_uris,
+                    _require_h3, _seconds, h3)
 from ..local_llm.llm_node import (LLM_CONFIG, PLACEHOLDER, UNLOAD_MODES, _generate_and_format,
                                   _resolve_path, _shutdown_worker, build_llm_request,
                                   resolve_unload)
@@ -80,7 +80,9 @@ Rules:
 - Never summarise the whole arc inside a line, and never mention what happened before that shot — only what is true in it.
 - Keep one subject, one location and one continuous action unless the brief asks for a cut.
 
-Whatever language the brief is in, answer in ENGLISH, with EXACTLY one labelled line per shot and nothing else — no preamble, no headings, no commentary:
+Whatever language the brief is in, answer in ENGLISH — except for spoken words: if the brief quotes a line of dialogue, carry it into the shot that says it verbatim, in its own language and alphabet, and never translate it. The video model can speak those languages.
+
+Answer with EXACTLY one labelled line per shot and nothing else — no preamble, no headings, no commentary:
 
 [SHOT 1]: ...
 [SHOT 2]: ..."""
@@ -92,14 +94,18 @@ Whatever language the brief is in, answer in ENGLISH, with EXACTLY one labelled 
 # the split by hand before it was built here.
 _SHOT_ROLE = """You are an expert AI video prompt engineer, a director of photography and a voice director, writing for the multimodal MiniMax H3 model, which generates picture and sound together.
 
-Whatever language the input is in, your output MUST be entirely in ENGLISH — the model works best that way. Answer with the labelled blocks and nothing else: no preamble, no explanation of what you did, no closing remarks."""
+Whatever language the input is in, your output MUST be entirely in ENGLISH — the model works best that way. Answer with the labelled blocks and nothing else: no preamble, no explanation of what you did, no closing remarks.
+
+THE ONE EXCEPTION IS SPOKEN WORDS. The model speaks other languages, so a line of dialogue keeps the language it was given in, verbatim, character for character: if the direction quotes what someone says, copy it exactly, in its own alphabet, and never translate, transliterate or "correct" it. When a line is not in English, name its language in the voice specification where the accent goes — (Female, 30s, quiet and unsteady, stunned, Russian, slow). If the direction only says that someone speaks without quoting the words, write the line yourself in the language the direction itself is written in.
+
+A spoken line belongs to EXACTLY ONE place: the beat in which it is said. Written in two blocks, it gets spoken twice."""
 
 _SHOT_TAIL = """Answer with EXACTLY these five labelled blocks, in this order, and nothing else. (Style, look and the negative list are added downstream — do not write them.)
 
 [SITUATION]: one sentence — what is ALREADY true as this shot opens, naming who or what is on screen and where. Present tense. No history, no outcome beyond this shot.
-[STORYBOARD]: the beat lines, each formatted `[<from>s-<to>s] Beat <n>: <what happens>`, together spanning 0s to the shot length you are given. These are beats of ONE continuous take, not separate shots: no cuts, no scene changes.
+[STORYBOARD]: the beat lines, each formatted `[<from>s-<to>s] Beat <n>: <what happens>`, together spanning 0s to the shot length you are given. These are beats of ONE continuous take, not separate shots: no cuts, no scene changes. SPEECH LIVES HERE: if anyone speaks, put the line inside the beat where it is spoken, once, as `(gender, age, tone, emotion, accent, pacing) "the exact words"` — e.g. `[2.5s-5.17s] Beat 2: he leans into the wind and says (Male, 30s, deep and gravelly, breathless, American, hurried) "They found me."` — and a line the direction gave in another language stays in that language, with the language in the accent slot: `… says (Female, 30s, flat, resigned, Russian, slow) "Он не придёт."`
 [CAMERA]: one sentence — angle, framing and movement, in professional terms (low-angle tracking, slow push in, locked-off medium).
-[AUDIO]: one or two sentences — ambience, Foley and score. If anyone speaks, give the exact line in quotes and specify the voice as (gender, age, tone, emotion, accent, pacing), e.g. (Male, 30s, deep and gravelly, breathless, American, hurried). Otherwise write "No dialogue."
+[AUDIO]: one or two sentences — ambience, Foley and score ONLY. Never repeat a spoken line here and never quote dialogue here: it already has its place and its moment in the storyboard, and a line written twice gets performed twice. Write "No dialogue." only when nobody speaks in this shot.
 [END STATE]: one sentence describing this shot's LAST frame as a still photograph, precise enough that the next shot can start from it — and end it by naming the MOTION at that instant: what is moving, how fast and in which direction (or that everything is at rest).
 
 Write plainly, present tense, no markdown emphasis."""
@@ -167,9 +173,9 @@ There are no images. Write the shot from the direction you are given, and — if
 [SITUATION]: A woman in a grey travelling coat stands alone on an empty platform, a telegram open in both hands, gaslight above her.
 [STORYBOARD]:
 [0s-2s] Beat 1: Her eyes move down the page and stop; her hands lower a fraction as the paper goes slack.
-[2s-5.17s] Beat 2: She lifts her head slowly, breath clouding, and stares down the empty track while steam drifts across the lamps behind her.
+[2s-5.17s] Beat 2: She lifts her head slowly, breath clouding, and says (Female, 30s, quiet and unsteady, stunned, English, slow) "He isn't coming.", then stares down the empty track while steam drifts across the lamps behind her.
 [CAMERA]: Slow push in from a medium to a tight medium, settling as she raises her head.
-[AUDIO]: Distant steam venting, a station clock ticking, one restrained piano figure entering as she looks up. Voice (Female, 30s, quiet and unsteady, stunned, English, slow): "He isn't coming."
+[AUDIO]: Distant steam venting, a station clock ticking, one restrained piano figure entering as she looks up.
 [END STATE]: A tight medium of the woman looking off down the track, telegram hanging at her side, gaslight catching the side of her face; she is motionless apart from her breath, the steam still drifting behind her."""
 
 # "SCENE" stays accepted so a bible pasted from an older run still parses.
@@ -230,6 +236,36 @@ def _parse_script(text, n):
         for i, ln in enumerate([x for x in (text or "").splitlines() if x.strip()][:n]):
             out[i] = " ".join(ln.split())
     return out
+
+
+_QUOTED = re.compile(r"[\"“”«]([^\"“”«»]{3,300})[\"“”»]")
+
+
+def dedupe_dialogue(storyboard, audio):
+    """Strip from the audio block any sentence that repeats a line already spoken in a beat.
+
+    MiniMax's own template puts voice-over in [Audio & Voice], but measured on real renders the line
+    lands far better inside the beat that speaks it — with its timing — and a line present in BOTH
+    blocks is sometimes performed TWICE. The prompts say so; this is the net for when the model does
+    it anyway. Only whole sentences are dropped, so what is left still reads."""
+    sb, au = storyboard or "", (audio or "").strip()
+    if not sb or not au:
+        return au
+    lines = [m.group(1).strip() for m in _QUOTED.finditer(sb)]
+    lines = [ln for ln in lines if len(ln) >= 3]
+    if not lines:
+        return au
+    # Sentence boundaries have to allow a terminator INSIDE a quote (`… me." Next sentence`) or a
+    # quoted line swallows what follows it, and must NOT fire mid-sentence (`shouts "Run!" here.`) or
+    # the drop leaves a fragment behind — so a boundary also needs the next word to start a sentence.
+    kept = []
+    for sentence in re.split(r'(?<=[.!?]["”»\')\]])\s+(?=["“«(]?[A-ZА-ЯЁ])'
+                             r'|(?<=[.!?])\s+(?=["“«(]?[A-ZА-ЯЁ])', au):
+        low = sentence.lower()
+        if any(ln.lower().rstrip(" .!?,") in low for ln in lines):
+            continue
+        kept.append(sentence)
+    return " ".join(s.strip() for s in kept if s.strip()).strip()
 
 
 def _beat_lines(text):
@@ -306,7 +342,7 @@ class KinburgMorpheusStoryboard:
                 "script": (["auto", "off"], {"default": "auto",
                                             "tooltip": "auto = before writing any shot, break the brief into ONE DIRECTION PER SHOT with a text-only call, and use those as the shots' direction. This is what stops the brief being handed to every shot whole — a shot told the entire story replays the entire story. Skipped automatically when you fill 'beats' yourself (your lines win).\n\noff = no plan. Shots then take their direction only from 'beats', their keyframes and the previous shot's end state — fine for a chain where every shot is bounded by two keyframes, thin for a text-driven one.\n\nThe plan comes out on the 'script' output in exactly the format 'beats' takes: edit a line, paste it back, and only that shot onwards is rewritten."}),
                 "live_preview": ("BOOLEAN", {"default": True,
-                                             "tooltip": "Stream every call to an 'LLM Live Log' node as it's written, one labelled block per call ('style bible', 'shot 2/4'). Drop an LLM Live Log anywhere on the canvas — no wiring. On by default: writing a storyboard is minutes of otherwise silent work."}),
+                                             "tooltip": "Stream every call to a 'Kinburg Live Log' node as it's written, one labelled block per call ('style bible', 'shot 2/4'), with the frames it was shown. Drop a Kinburg Live Log anywhere on the canvas — no wiring. On by default: writing a storyboard is minutes of otherwise silent work."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
             "optional": {
@@ -349,7 +385,7 @@ class KinburgMorpheusStoryboard:
     def _ask(cfg, system, user_prompt, images, unload_comfy, tag, emit=None):
         """One call through the same path the Local LLM node uses. Returns (text, error).
 
-        `emit`, when given, streams to an `LLM Live Log` node over the same `kinburg.llm` channel
+        `emit`, when given, streams to a `Kinburg Live Log` node over the same `kinburg.llm` channel
         the Local LLM node uses — one labelled block per call, so a four-shot run reads as
         "style bible", "shot 1/4", … instead of two silent minutes."""
         call_cfg = dict(cfg)
@@ -378,9 +414,11 @@ class KinburgMorpheusStoryboard:
             def token_cb(delta):
                 emit({"event": "delta", "delta": delta})
 
+            # the frames this call was actually shown, so the log answers "what did it look at?"
             emit({"event": "start", "label": tag, "max_tokens": int(ctx["max_tokens"]),
                   "n_ctx": int(ctx["req"].get("n_ctx", 0) or 0),
-                  "answer_marker": ctx["answer_marker"] or ""})
+                  "answer_marker": ctx["answer_marker"] or "",
+                  "images": _log_uris(images)})
         out = _generate_and_format(ctx["req"], ctx["load_sig"], ctx["max_tokens"], unload_comfy,
                                    False, ctx["directive"], ctx["strip_think"],
                                    ctx["answer_marker"], ctx["help"], token_cb=token_cb,
@@ -440,7 +478,7 @@ class KinburgMorpheusStoryboard:
             parts.append(f"4. [Camera]: {body['CAMERA'].strip()}")
         # the bed is a FALLBACK, never an append: the shot's own audio is already written to match
         # it, so appending printed the same sentence twice in every single prompt
-        audio = body.get("AUDIO", "").strip() or bible["audio_bed"]
+        audio = dedupe_dialogue(sb, body.get("AUDIO", "")) or bible["audio_bed"]
         if audio:
             parts.append(f"5. [Audio & Voice]: {audio}")
         negative = bible["negative"]

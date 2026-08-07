@@ -1,17 +1,22 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-// LLM Live Log — a UI-only node that shows Local LLM (GGUF) output as it streams. It has no
-// connections; it listens for the `kinburg.llm` websocket events a Local LLM (GGUF) node emits
-// when its `live_preview` toggle is on (start / delta / done) and grows a text block per
-// generation, token by token. One log node shows the stream from EVERY Local LLM (GGUF) node,
-// each block labelled by its source node. (Grammar/JSON runs don't stream — their result lands
-// on 'done'.)
+// Kinburg Live Log — a UI-only node that shows what the pack's LLM nodes are writing, as they
+// write it. It has no connections; it listens on the `kinburg.llm` and `kinburg.chatllm` websocket
+// channels (start / delta / done / frames) and grows a block per generation, token by token. One
+// log shows every source on the canvas, each block labelled by its node and, when the source says
+// so, by the individual call ("Morpheus Storyboard · shot 2/4 (2 keyframes)").
+//
+// Blocks can carry IMAGES: the frames a vision call was actually shown, or a `frames` event on its
+// own (Morpheus sends each shot's last frame after decoding it, which makes the log a live
+// storyboard of the run). Thumbnails have a hover copy-to-clipboard button.
 //
 // Scrolling follows the newest text ONLY while you are already parked at the bottom. Scroll up
 // and the view stays put while generation continues; a "↓ latest" pill takes you back.
 
-const CLASS = "KinburgLLMLog";
+// `KinburgLLMLog` is the older, LLM-only id: the same renderer drives it, so graphs saved against
+// it keep working and gain the images.
+const CLASSES = new Set(["KinburgLiveLog", "KinburgLLMLog"]);
 const MAX_BLOCKS = 25;                 // keep the last N generations; older ones drop off the top
 const STICK_SLACK = 24;                // px from the bottom that still counts as "at the bottom"
 const instances = new Set();           // live log-node instances to fan events out to
@@ -58,8 +63,53 @@ function injectStyle() {
     ".llm-jump.hot{border-color:#7CFC7C99;color:#7CFC7C;}" +
     ".llm-clear{flex:0 0 auto;cursor:pointer;padding:1px 6px;border-radius:3px;border:1px solid #ffffff1f;" +
       "background:transparent;color:#9a9aa2;font-size:9px;text-transform:uppercase;letter-spacing:.04em;}" +
-    ".llm-clear:hover{background:#ffffff14;color:#dcdce4;}";
+    ".llm-clear:hover{background:#ffffff14;color:#dcdce4;}" +
+    ".llm-imgs{display:flex;flex-wrap:wrap;gap:4px;}" +
+    ".llm-imgwrap{position:relative;display:inline-block;line-height:0;}" +
+    ".llm-thumb{max-width:100%;max-height:180px;border-radius:4px;display:block;}" +
+    ".llm-imgcopy{position:absolute;top:3px;right:3px;opacity:0;transition:opacity .12s;cursor:pointer;" +
+      "padding:1px 4px;border-radius:3px;border:1px solid #0008;background:#0009;color:#dcdce4;font-size:10px;" +
+      "line-height:1.2;}" +
+    ".llm-imgwrap:hover .llm-imgcopy{opacity:1;}" +
+    ".llm-imgcopy:hover{background:#000d;}";
   document.head.appendChild(s);
+}
+
+// Copy a data-URI image to the clipboard. The clipboard wants image/png, so the JPEG preview is
+// redrawn onto a canvas and exported as PNG. Needs a secure context + a user gesture (the click).
+async function copyImageToClipboard(dataUri) {
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUri; });
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+  canvas.getContext("2d").drawImage(img, 0, 0);
+  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+  if (!blob) throw new Error("PNG encode failed");
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
+// A thumbnail with a hover-reveal copy button pinned to its corner.
+function makeThumb(src) {
+  const wrap = document.createElement("div");
+  wrap.className = "llm-imgwrap";
+  const img = document.createElement("img");
+  img.className = "llm-thumb";
+  img.src = src;
+  const btn = document.createElement("button");
+  btn.className = "llm-imgcopy";
+  btn.title = "Copy image to clipboard";
+  btn.textContent = "📋";
+  btn.addEventListener("pointerdown", (e) => e.stopPropagation()); // don't start a node/canvas drag
+  btn.onclick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try { await copyImageToClipboard(src); btn.textContent = "✓"; }
+    catch (err) { console.error("[LiveLog] image copy failed", err); btn.textContent = "✕"; }
+    setTimeout(() => { btn.textContent = "📋"; }, 1200);
+  };
+  wrap.append(img, btn);
+  return wrap;
 }
 
 // Split reasoning from the answer exactly the way the backend's _split_reasoning does, so what the
@@ -163,11 +213,31 @@ function buildBlockDom(node, block) {
 
   const body = document.createElement("div");
   body.className = "llm-body";
-  wrap.append(head, bar, body);
+  const imgs = document.createElement("div");
+  imgs.className = "llm-imgs";
+  imgs.style.display = "none";
+  wrap.append(head, bar, body, imgs);
   els.list.appendChild(wrap);
   block._el = wrap; block._head = head; block._htxt = htxt; block._body = body;
   block._bar = bar; block._fill = fill; block._think = null; block._ctx = null;
+  block._imgs = imgs; block._imgCount = 0;
+  renderImages(block);
   updateBlockDom(block);
+}
+
+// Thumbnails are append-only: a block can be handed frames on 'start' and more on 'done'.
+function renderImages(block) {
+  if (!block._imgs) return;
+  const list = block.images || [];
+  for (let i = block._imgCount; i < list.length; i++) block._imgs.appendChild(makeThumb(list[i]));
+  block._imgCount = list.length;
+  block._imgs.style.display = list.length ? "" : "none";
+}
+
+function addImages(block, images) {
+  if (!Array.isArray(images) || !images.length) return;
+  block.images = (block.images || []).concat(images.filter((s) => typeof s === "string" && s));
+  renderImages(block);
 }
 
 // The collapsible reasoning section, inserted above the answer the first time thoughts appear.
@@ -316,6 +386,7 @@ function pushBlock(node, srcId, d) {
     hadDelta: false, tokens: 0, maxTokens: Number(d?.max_tokens) || 0, outTokens: null,
     promptTokens: 0, ctxUsed: 0, nCtx: Number(d?.n_ctx) || 0, t0: 0, tEnd: 0,
     marker: d?.answer_marker || "", thinkOpen: true, thinkTouched: false, thinkStart: 0, thinkEnd: 0,
+    images: [],
   };
   snap.push(block);
   while (snap.length > MAX_BLOCKS) { const rm = snap.shift(); if (rm._el) rm._el.remove(); }
@@ -326,12 +397,24 @@ function pushBlock(node, srcId, d) {
 function handle(node, d) {
   if (!node._llmEls) return;
   const src = String(d.id);
-  if (d.event === "start") {
+  // The Chat node streams bare {id, delta} with no event name — normalise so every LLM source in
+  // the pack lands in the same block model.
+  const ev = d.event || (d.delta != null ? "delta" : null);
+  if (ev === "frames") {
+    // Images with no generation behind them: a finished block that is only pictures.
+    const block = pushBlock(node, src, d);
+    block.done = true;
+    addImages(block, d.images);
+    updateBlockDom(block);
+    setStatus(node, block.title);
+    stick(node);
+  } else if (ev === "start") {
     const block = pushBlock(node, src, d);
     node._llmCur.set(src, block);
+    addImages(block, d.images);   // what this call was actually shown
     setStatus(node, `${block.title} — generating…`);
     stick(node);
-  } else if (d.event === "delta") {
+  } else if (ev === "delta") {
     let block = node._llmCur.get(src);
     if (!block) { block = pushBlock(node, src, d); node._llmCur.set(src, block); }  // delta with no start
     block.text += (d.delta || "");
@@ -341,10 +424,11 @@ function handle(node, d) {
     updateBlockDom(block);
     setStatus(node, `${block.title} — generating… ${fmtTokens(block)}`);
     stick(node);
-  } else if (d.event === "done") {
+  } else if (ev === "done") {
     let block = node._llmCur.get(src);
     if (!block) block = pushBlock(node, src, d);   // grammar/JSON run: no deltas streamed
     if (!block.hadDelta && d.text) block.text = d.text;
+    addImages(block, d.images);
     block.done = true;
     block.tEnd = performance.now();
     block.seconds = d.gen_seconds;
@@ -376,16 +460,18 @@ function restore(node) {
   toBottom(node);
 }
 
-// One shared websocket listener fans out to every live log node on the canvas.
-api.addEventListener("kinburg.llm", (e) => {
-  const d = (e && e.detail) || {};
-  for (const node of instances) handle(node, d);
-});
+// One shared listener per channel fans out to every live log node on the canvas.
+for (const channel of ["kinburg.llm", "kinburg.chatllm"]) {
+  api.addEventListener(channel, (e) => {
+    const d = (e && e.detail) || {};
+    for (const node of instances) handle(node, d);
+  });
+}
 
 app.registerExtension({
-  name: "Kinburg.LLMLog",
+  name: "Kinburg.LiveLog",
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData.name !== CLASS) return;
+    if (!CLASSES.has(nodeData.name)) return;
 
     const onCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
