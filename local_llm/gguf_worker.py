@@ -81,6 +81,9 @@ def _token(s):
 
 
 def _load_sig(req):
+    """What forces the LLM weights to be re-read. Deliberately NOT the vision projector: that is
+    attached per request (see `_vision_sig`), so a chat that alternates between a turn with a
+    picture and a turn without keeps one model resident instead of reloading it every time."""
     return (
         req.get("model_path"),
         int(req.get("n_ctx", 4096)),
@@ -88,11 +91,18 @@ def _load_sig(req):
         int(req.get("n_batch", 512)),
         bool(req.get("flash_attn", False)),
         req.get("kv_cache_type", "f16"),
-        req.get("mmproj_path") or None,
-        (req.get("vision_handler") or "auto") if (req.get("mmproj_path") or "").strip() else None,
         json.dumps(req.get("extra_load_args") or {}, sort_keys=True, default=str),
         req.get("chat_template") or "",
     )
+
+
+def _vision_sig(req):
+    """Which projector this request wants, or None for a text-only one."""
+    mmproj = (req.get("mmproj_path") or "").strip()
+    if not mmproj:
+        return None
+    return (mmproj, (req.get("vision_handler") or "auto").strip().lower(),
+            int(req.get("n_gpu_layers", -1)) != 0)
 
 
 def _merge_extra_load_args(base, extra):
@@ -153,29 +163,52 @@ def _make_chat_handler(req):
     return cls(**kwargs)
 
 
-def _apply_chat_template_override(llm, req, chat_handler):
-    """Replace the model's embedded chat template with the user-supplied one (read by the node
-    from chat_template_path and sent as `chat_template`). TEXT models only: when a vision
-    `chat_handler` is active it does its own multimodal formatting, so we leave it alone.
+def _build_template_handler(llm, req):
+    """A chat handler for the user-supplied chat template (read by the node from
+    chat_template_path and sent as `chat_template`), or None to keep the model's embedded one.
+
+    Returned rather than assigned to `llm.chat_handler`, because that one slot is shared with the
+    vision projector and the main loop picks between them per request. `llm.chat_format` is left
+    alone on purpose: it is the fallback `create_chat_completion` uses whenever `chat_handler` is
+    None, so clearing it would break every plain text turn once the projector detaches.
+    TEXT turns only — a vision handler does its own multimodal formatting and wins when active.
     On any failure we keep the embedded template and just log it — never break generation."""
     ct = req.get("chat_template") or ""
-    if not ct.strip() or chat_handler is not None:
-        return
+    if not ct.strip():
+        return None
     try:
         from llama_cpp.llama_chat_format import Jinja2ChatFormatter
         eos_id, bos_id = llm.token_eos(), llm.token_bos()
         eos = llm._model.token_get_text(eos_id) if eos_id != -1 else ""
         bos = llm._model.token_get_text(bos_id) if bos_id != -1 else ""
-        llm.chat_handler = Jinja2ChatFormatter(
+        handler = Jinja2ChatFormatter(
             template=ct, eos_token=eos, bos_token=bos,
             stop_token_ids=[eos_id] if eos_id != -1 else None,
         ).to_chat_handler()
-        llm.chat_format = None  # create_chat_completion prefers chat_handler when set
         sys.stdout.write("[LocalLLM worker] custom chat template override applied\n")
         sys.stdout.flush()
+        return handler
     except Exception as e:
         sys.stdout.write(f"[LocalLLM worker] chat template override failed ({e}); using embedded\n")
         sys.stdout.flush()
+        return None
+
+
+def _free_handler(handler):
+    """Let a vision projector's clip go, and hand back None so callers can just assign the result.
+
+    The mtmd context is built against one specific llama model handle and registered on the
+    handler's ExitStack, so closing that stack is what actually releases the clip — and its VRAM.
+    Which also means ORDER MATTERS at the call sites: free this before dropping the model it was
+    created against, never after."""
+    if handler is None:
+        return None
+    try:
+        handler._exit_stack.close()
+    except Exception as e:
+        sys.stdout.write(f"[LocalLLM worker] releasing the vision projector failed: {e}\n")
+        sys.stdout.flush()
+    return None
 
 
 def _continue_prompt(llm, req, messages, cont_text):
@@ -248,7 +281,13 @@ def main():
         return
 
     llm = None
-    chat_handler = None
+    # One loaded model, two formatters that take turns in llm.chat_handler: `text_handler` is the
+    # optional chat-template override (built once with the model), `vision_handler` is the mmproj
+    # projector, built on the first request that carries images and released again on the first
+    # one that doesn't. Neither is part of the load signature, so switching costs no reload.
+    text_handler = None
+    vision_handler = None
+    vision_sig = None
     current_sig = None
     # Lightweight vocab-only models kept for the token-counter command, keyed by model path.
     # They load just the tokenizer/vocab (no weights, ~no VRAM), so counting never disturbs a
@@ -347,14 +386,18 @@ def main():
             sig = _load_sig(req)
             if llm is None or sig != current_sig:
                 if llm is not None:
+                    # The projector goes FIRST — its mtmd context was created against the model
+                    # handle we are about to drop, so freeing it afterwards would be a use-after-
+                    # free on llama.cpp's side.
+                    vision_handler = _free_handler(vision_handler)
+                    vision_sig = None
+                    text_handler = None
                     del llm
                     llm = None
-                    chat_handler = None  # drop the projector/clip context too
                     gc.collect()
                 kv = req.get("kv_cache_type", "f16")
                 kv_type = _kv_type(llama_cpp, kv)
                 flash = bool(req.get("flash_attn", False)) or kv != "f16"
-                chat_handler = _make_chat_handler(req)  # None for a text-only model
                 load_kwargs = dict(
                     model_path=req["model_path"],
                     n_ctx=int(req.get("n_ctx", 4096)),
@@ -364,13 +407,31 @@ def main():
                     flash_attn=flash,
                     type_k=kv_type,
                     type_v=kv_type,
-                    chat_handler=chat_handler,
+                    # Attached per request below, never at load time. Left None here so
+                    # Llama.__init__ still derives chat_format from the model's own metadata —
+                    # that is what formats a plain text turn once the projector detaches.
+                    chat_handler=None,
                     verbose=bool(req.get("verbose", False)),
                 )
                 _merge_extra_load_args(load_kwargs, req.get("extra_load_args") or {})
                 llm = Llama(**load_kwargs)
-                _apply_chat_template_override(llm, req, chat_handler)
+                text_handler = _build_template_handler(llm, req)
                 current_sig = sig
+
+            # Pick this request's formatter. create_chat_completion reads llm.chat_handler at call
+            # time, so swapping it is free — and it is the whole reason a picture no longer costs
+            # two model reloads (one to attach the projector, one to drop it again).
+            vsig = _vision_sig(req)
+            if vsig is None:
+                # Text turn: release the clip rather than let it sit on VRAM unused. Rebuilding it
+                # for the next picture is a fraction of a second, against tens for the weights.
+                vision_handler = _free_handler(vision_handler)
+                vision_sig = None
+            elif vsig != vision_sig:
+                vision_handler = _free_handler(vision_handler)
+                vision_handler = _make_chat_handler(req)
+                vision_sig = vsig
+            llm.chat_handler = vision_handler if vision_handler is not None else text_handler
 
             messages = []
             sys_prompt = (req.get("system_prompt") or "").strip()
@@ -408,7 +469,10 @@ def main():
             # text so it writes the REST of that message instead of starting a new one. Needs the
             # raw completion API, so it can't go through the multimodal handlers.
             cont = req.get("continue_text") or ""
-            if cont and (chat_handler is not None or req.get("images")):
+            # Only actual images block a resume. It used to be enough for a projector to be
+            # loaded at all, which meant a chat with vision configured could never continue a
+            # truncated reply; now the projector is detached on text turns, so this is exact.
+            if cont and req.get("images"):
                 raise ValueError("a truncated reply can't be resumed on the vision path — "
                                  "type a message instead")
 

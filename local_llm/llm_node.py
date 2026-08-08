@@ -356,7 +356,11 @@ Needs TWO files: the vision model `.gguf` (**model**) AND its projector `mmproj`
 
 ## Notes
 - Image tokens are counted inside the model and are NOT reflected in the token outputs here.
-- VRAM: the projector loads alongside the model; keep both unload toggles ON to free it.
+- VRAM: the projector is loaded on the first run that actually has an image and released again
+  on the first run without one, so it only occupies VRAM while vision is in use. The model
+  itself stays put through that — a run with a picture and a run without share one loaded
+  model, which is what makes a chat that mixes the two cheap. Keep both unload toggles ON to
+  free the model as well.
 """
 
 # Vision chat-handler dropdown: friendly label -> key sent to the worker (_HANDLER_MAP there).
@@ -464,17 +468,24 @@ def _apply_output_format(output_format, grammar, system_prompt):
 
 def _encode_images(image, max_side):
     """ComfyUI IMAGE [B,H,W,C] float 0..1 -> list of PNG `data:` URIs, downscaled to max_side
-    (0 = no downscale). Encoded here (the node has PIL/torch) so the worker stays llama-only."""
+    (0 = no downscale). Encoded here (the node has PIL/torch) so the worker stays llama-only.
+
+    `image` may also be a LIST of such tensors, which is how the chat node sends a turn's
+    attachments: they come off disk one file at a time and need not share a resolution, so they
+    cannot be stacked into one batch."""
     import io
     import base64
     import numpy as np
     from PIL import Image
 
-    arr = image.detach().cpu().numpy()
-    if arr.ndim == 3:
-        arr = arr[None, ...]
+    frames = []
+    for t in (image if isinstance(image, (list, tuple)) else [image]):
+        arr = t.detach().cpu().numpy() if hasattr(t, "detach") else np.asarray(t)
+        if arr.ndim == 3:
+            arr = arr[None, ...]
+        frames.extend(arr)
     uris = []
-    for im in arr:
+    for im in frames:
         pil = Image.fromarray((np.clip(im, 0.0, 1.0) * 255.0).astype("uint8")).convert("RGB")
         if max_side and max(pil.size) > max_side:
             s = max_side / max(pil.size)
@@ -655,11 +666,14 @@ def build_llm_request(cfg, user_prompt, image=None, history=None,
             return (f"Failed to encode image(s): {e}", None)
 
     # Optional chat-template override: a chat_template.jinja that REPLACES the model's embedded
-    # template. Read here (not in the worker) so a bad path fails with a clean node error. Text
-    # models only — the vision path uses its own mtmd handler, so we skip it there.
+    # template. Read here (not in the worker) so a bad path fails with a clean node error. It only
+    # ever applies to TEXT turns — the vision path uses its own mtmd handler — but it is read
+    # regardless of `use_vision` so that the load signature below is the same either way. Make it
+    # conditional and one config would produce two signatures, which is exactly the reload this
+    # per-request handler swap exists to avoid.
     chat_template = ""
     ct_path = (g("chat_template_path", "") or "").strip().strip('"').strip("'").strip()
-    if ct_path and not use_vision:
+    if ct_path:
         if not os.path.isfile(ct_path):
             return (f"chat_template_path not found: {ct_path}", None)
         try:
@@ -701,9 +715,11 @@ def build_llm_request(cfg, user_prompt, image=None, history=None,
         req["vision_handler"] = handler_key
         req["images"] = images
 
+    # What a change here costs: the whole worker PROCESS is killed and restarted (_ensure_worker).
+    # The projector is deliberately absent — the worker attaches and releases it per request, so a
+    # picture in the middle of a text chat no longer restarts anything. Mirrors _load_sig there.
     load_sig = (resolved, req["n_ctx"], req["n_gpu_layers"], req["n_batch"], req["flash_attn"],
-                req["kv_cache_type"], mmproj_resolved if use_vision else None,
-                handler_key if use_vision else None,
+                req["kv_cache_type"],
                 json.dumps(extra, sort_keys=True, default=str),
                 hashlib.sha1(chat_template.encode("utf-8")).hexdigest() if chat_template else "")
 

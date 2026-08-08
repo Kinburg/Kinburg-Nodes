@@ -1551,6 +1551,62 @@ so one Settings node can drive several.
 - **✅ Approve** runs with the gate open: `run()` **skips generation** and emits the **last reply**
   on the `text` output, so it flows downstream immediately (no re-generation, any seed).
 
+**Sending a picture.** **Ctrl+V**, drop a file on the chat window, or hit the **📎** in the corner
+of the input box. Thumbnails queue in a tray above the input (**✕** takes one off); they go out with
+your next message and stay in its bubble for good — click one to open it full size. Works with an
+empty message: a picture on its own is a perfectly good "look at this".
+
+Two things make this different from the `image` input. First, it is **not a graph link** — the
+picture is uploaded to `input/kinburg_chat/` and referenced by name, so 📨 Send never re-runs an
+image branch to fetch it (an `image` wired in from a sampler would regenerate on *every* message
+unless its seed is fixed). Second, the pixels reach the model on **that turn only**. From the next
+turn the picture is a text marker — `[image]`, or `[image: …]` once something fills the caption —
+so a long conversation with pictures in it costs no more context than a conversation without. The
+chat still shows every one of them; only the model's copy degrades to a line of text.
+
+Needs an `mmproj` on the active persona's Settings node, same as any vision run — and mixing
+picture turns with plain ones is cheap: the projector is attached per request rather than at load
+time, so the model stays put and only the (much smaller) clip is loaded and released around it.
+
+**`Send Image to Chat`** does the same thing for a picture your workflow just generated, so you
+never have to copy one out of a preview by hand. Wire an `IMAGE` in (it passes straight through, so
+the node sits inline), and:
+
+- **`send_as`** — *me (user)* drops it in the chat's tray, exactly as if you had pasted it: pixels
+  go to the model with your next message. A **persona** instead hangs it on that persona's most
+  recent bubble, so it reads as though they sent it. The model is not shown those pixels — llama.cpp
+  only takes images on user turns, and a persona has no need to study a photo it supposedly took —
+  and by default the picture leaves nothing in the context either. That is usually right: the
+  picture came from something the persona had just described, so a marker would say it twice. Turn
+  on **`note_in_context`** (with a `caption`) when you want the conversation to record it.
+- **`when`** — *on button press* saves the picture and waits for the **📌** on the node, so you can
+  look at the result and re-roll before committing. *every run* pushes as soon as the node executes.
+  Either way the filename is a hash of the pixels, so re-running a branch that produced the same
+  picture pushes the same reference and the chat recognises it instead of stacking duplicates.
+  📌 reads `send_as`, `caption`, `shot` and `note_in_context` **when you press it** — deciding who a
+  picture comes from is something you do after looking at it, so changing them post-generation
+  works without re-running anything. Only `megapixels` needs a re-run; it changes the saved file.
+- **`caption`** — one or two sentences of plain prose: this is what the model reads about the
+  picture once the pixels are gone. Not the generation prompt — a paragraph of comma-separated tags
+  sitting in the conversation teaches the persona to write in comma-separated tags. If a "camera"
+  persona writes both, split them: one line for the sampler, one for here.
+- **`megapixels`** downscales the copy that goes to the chat (0 = full size); **`shot`** is an
+  optional keyframe label kept with the picture, so a chat can be read back as a storyboard.
+- **`→ chat`** picks the target chat window; leave it on auto when there is only one.
+
+Like pasting, none of this is a graph link, so it never causes 📨 Send to re-run a sampler.
+
+**Taking one back.** Hover a picture in a bubble for a **✕** — sent by the wrong persona, or by
+accident, and it comes straight back out without touching the reply it was hanging on. A bubble
+that existed only to carry it disappears with it. 🗑 on a whole message, and 🗑 Clear on the whole
+chat, take their pictures too; Clear counts them before asking.
+
+Removing a picture deletes its file, unless another bubble or another chat node in the graph is
+still showing it (a picture in two places is one file, since the name is a hash of its pixels).
+Deletion is limited to `input/kinburg_chat/` — your own `LoadImage` sources in the input folder are
+never touched. And a file removed by mistake comes back by re-running the branch that made it: the
+hash, and therefore the name, is the same.
+
 **Editing the conversation.** Hover any bubble — yours or the model's — for **⧉ copy · ✎ edit ·
 ↻ resend · 🗑 delete**. ✎ swaps the bubble for an inline textarea sized to the message it holds
 (Esc cancels, Ctrl+Enter saves). ↻ replays exactly the turn that produced the message, dropping
@@ -1559,7 +1615,7 @@ no-user-message turn replays just that one reply. All of it is plain surgery on 
 next turn simply sees the conversation you left behind. Everything is disabled while a reply is in
 flight; if a run dies before reaching the node, **✕** on the live bubble unsticks it.
 
-**Personas.** Four inputs — **`persona_1..4`** — each take a *whole* `Local LLM Settings (GGUF)`
+**Personas.** Six inputs — **`persona_1..6`** — each take a *whole* `Local LLM Settings (GGUF)`
 bundle, so a persona brings its own **model, sampling and system prompt**, not just a different
 prompt. **`persona_1` is the node's config**: wire only that one and this is an ordinary chat node
 with no chip row. Wire a second and a chip row appears, one chip per persona. Clicking a chip only
@@ -1570,7 +1626,7 @@ name (`[Order manager]: …`) so it doesn't mistake them for its own past turns.
 with their persona once there's more than one.
 
 The **⚙** chip sets, per persona: the **chip label** (defaults to the title of the wired-in node,
-but only if you renamed it — four stock Settings nodes all read the same), an optional **trigger**
+but only if you renamed it — stock Settings nodes all read the same), an optional **trigger**
 message, and the two context controls below. With nothing else wired the chip row is hidden and the
 node behaves exactly as before.
 
