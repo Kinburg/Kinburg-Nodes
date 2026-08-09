@@ -617,7 +617,7 @@ class KinburgOuroboros:
                 "enhancer_history": ("INT", {"default": 4, "min": 0, "max": 50, "tooltip": "How many of the most recent iterations (prompt + score) are recapped to the enhancer LLM as 'already tried, do not repeat' context. Higher = more memory of what failed (longer prompt, more tokens); 0 = no history (each rewrite sees only the intent, current prompt and the latest critic advice). The latest advice is always sent regardless."}),
                 "trigger_words": ("STRING", {"forceInput": True, "tooltip": "Comma-separated words ALWAYS appended to the enhanced prompt (e.g. LoRA triggers from Lora Unlim Accumulator's 'triggers' output), so the LLM rewrite can't drop them."}),
                 "full_console_log": ("BOOLEAN", {"default": True, "tooltip": "Console/terminal verbosity only (not the Live Log node or 'report'). On: per iteration also prints the enhanced prompt, advice and negative additions. Off: just a one-line score per iteration. The full trace is always in the 'report' output and the Live Log node."}),
-                "log_mode": (LOG_MODES, {"default": "streaming", "tooltip": "How the Ouroboros Live Log node updates: 'streaming' is like 'per step' but the enhancer's prompt types out token by token as it's written (text only — the critic is grammar-constrained and can't stream); 'per step' posts each stage the moment it finishes (enhanced prompt → generated image → critic verdict), each timestamped; 'per iteration' posts one combined entry after the whole iteration (the older behaviour)."}),
+                "log_mode": (LOG_MODES, {"default": "streaming", "tooltip": "How the Ouroboros Live Log node updates: 'streaming' is like 'per step' but the enhancer's prompt types out token by token as it's written (the critic's verdict still arrives whole — it simply isn't wired to the log that way); 'per step' posts each stage the moment it finishes (enhanced prompt → generated image → critic verdict), each timestamped; 'per iteration' posts one combined entry after the whole iteration (the older behaviour)."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -910,7 +910,11 @@ class KinburgOuroboros:
                     crit_cfg["image_max_side"] = min(_cap, crit_max_side) if _cap > 0 else crit_max_side
                 crit_cfg["max_tokens"] = max(int(crit_cfg.get("max_tokens", 512) or 512), 256 + 24 * len(keys))
                 crit_cap = int(crit_cfg.get("n_ctx", 4096) or 4096)  # Settings-node n_ctx = the ceiling
-                if low_vram and peak_crit > 0:  # measured prompt includes the image tokens (grammar → exact usage)
+                # The measured prompt includes the image tokens. It used to come from `usage`, which
+                # only the non-streaming path returns — grammar runs stream now, so it is derived
+                # from the KV fill instead and can be a token or two out. Harmless here: the sizing
+                # carries a margin, and an under-shot is caught by the retry-at-the-ceiling below.
+                if low_vram and peak_crit > 0:
                     crit_cfg["n_ctx"] = _auto_nctx(peak_crit, peak_crit_out, int(crit_cfg["max_tokens"]), crit_cap)
                 cu = _critic_user(rubric, crit, keys, lo, hi, refined, advice_style)
                 cerr, cctx = build_llm_request(crit_cfg, cu, image=image,

@@ -43,8 +43,8 @@ import torch
 import comfy.utils
 
 from . import cache as shot_cache
-from .nodes import (MORPHEUS_SHOT, KinburgMorpheusDream, LINK_MODES, _frames_for, _log_uris,
-                    _require_h3, _seconds, h3)
+from .nodes import (MORPHEUS_SHOT, KinburgMorpheusDream, LINK_MODES, _flatten_shots, _frames_for,
+                    _log_uris, _require_h3, _seconds, h3)
 from ..local_llm.llm_node import (LLM_CONFIG, PLACEHOLDER, UNLOAD_MODES, _generate_and_format,
                                   _resolve_path, _shutdown_worker, build_llm_request,
                                   resolve_unload)
@@ -284,6 +284,17 @@ def _split_overrides(text):
     return [b.strip() for b in re.split(r"(?m)^\s*-{3,}\s*$", text)]
 
 
+def _links(text, n, fallback):
+    """Per-shot link modes, same shape as `durations`: "cut, continue" → per shot, last repeating.
+    Blank falls back to the single `link` widget. Anything unrecognised becomes the fallback rather
+    than an error — a typo should cost you a mode, not a whole storyboard."""
+    vals = [tok for tok in re.split(r"[,;\s]+", (text or "").strip()) if tok]
+    vals = [v if v in LINK_MODES else fallback for v in vals]
+    if not vals:
+        vals = [fallback]
+    return [vals[i] if i < len(vals) else vals[-1] for i in range(max(0, n))]
+
+
 def _durations(text, n):
     """"5.2" → the same for every shot; "5.2, 6, 5.2" → per shot, last value repeating."""
     vals = []
@@ -347,13 +358,19 @@ class KinburgMorpheusStoryboard:
             "hidden": {"unique_id": "UNIQUE_ID"},
             "optional": {
                 "keyframes": ("IMAGE", {"tooltip": "Keyframes in order, as one IMAGE batch — used as SHOT BOUNDARIES left to right: frame 1 starts shot 1, frame 2 ends shot 1 and starts shot 2, and so on. Give as many or as few as you have: none (all text), one (a hard opening then free fantasy), K-1 shots' worth, or all of them."}),
-                "beats": ("STRING", {"multiline": True, "dynamicPrompts": False, "advanced": True,
+                # Also un-advanced: this is the main handle on a text-driven chain and the input
+                # Dream Board feeds, so it has to be visible without unfolding anything.
+                "beats": ("STRING", {"multiline": True, "dynamicPrompts": False,
                                      "tooltip": "Optional direction, ONE LINE PER SHOT ('shot 3: he crashes through a billboard'). Lines are matched to shots by position; blank or missing lines leave that shot to the LLM. This is the main handle on a text-only chain."}),
                 "prompt_overrides": ("STRING", {"multiline": True, "dynamicPrompts": False, "advanced": True,
                                                 "tooltip": "Finished prompts that BYPASS the LLM, separated by a line of three dashes (---), in shot order; an empty block keeps the LLM's version. The 'prompts' output uses the same format, so the loop is: run once, read it, fix the one shot that came out wrong, paste it back."}),
                 "style": ("STRING", {"multiline": True, "dynamicPrompts": False, "advanced": True,
                                      "tooltip": "Skip the style-bible call and use these blocks verbatim: paste back a previous run's 'style' output (or hand-write [STYLE]: / [SCENE]: / [AUDIO BED]: / [NEGATIVE]: blocks). This is how you keep one look across several runs."}),
-                "shots": (MORPHEUS_SHOT, {"tooltip": "An existing chain to append to — hand-build the opening shot with 'Morpheus Dream' and let this node write the rest."}),
+                "shots": (MORPHEUS_SHOT, {"tooltip": "A chain to work on. Shots that already have a prompt pass through untouched — that is the 'hand-build the opening shot with Morpheus Dream and let this node write the rest' case. Shots with an EMPTY prompt are WRITTEN IN PLACE, keeping their own keyframes, length and link: that is what 'Dream Board 🎬' sends, and with it you can leave keyframes / durations / links / shot_count alone. shot_count then means how many extra shots to append after the chain (default none)."}),
+                # NOT advanced: Dream Board drives this one, and an input you have to unfold before
+                # you can drop a wire on it is an input nobody finds.
+                "links": ("STRING", {"default": "",
+                                     "tooltip": "Per-shot override for 'link', same shape as 'durations': 'continue, cut, continue' where the last value repeats. Blank = the single 'link' setting for every shot. Use it to put a hard cut in the middle of an otherwise flowing sequence. Only matters for shots with no start keyframe — a wired frame always wins. NOTE: changing it re-writes every shot, since a shot's link decides whether its prompt may open the story."}),
                 "style_system": ("STRING", {"multiline": True, "dynamicPrompts": False, "forceInput": True,
                                             "tooltip": "Override the built-in system prompt for the style-bible call. Blank = the default, which asks for [STYLE] / [SCENE] / [AUDIO BED] / [NEGATIVE]."}),
                 "shot_system_morph": ("STRING", {"multiline": True, "dynamicPrompts": False, "forceInput": True,
@@ -490,8 +507,9 @@ class KinburgMorpheusStoryboard:
     # -------------------------------------------------------------------------------------- writer
     def write(self, config, brief, shot_count, durations, anchor, link, seed, cache,
               unload_after_run, script="auto", live_preview=True, keyframes=None, beats="",
-              prompt_overrides="", style="", shots=None, style_system="", shot_system_morph="",
-              shot_system_start="", shot_system_text="", script_system="", unique_id=None):
+              prompt_overrides="", style="", shots=None, links="", style_system="",
+              shot_system_morph="", shot_system_start="", shot_system_text="", script_system="",
+              unique_id=None):
         _require_h3()
         t_run = time.time()
         cfg = config if isinstance(config, dict) else {}
@@ -511,25 +529,29 @@ class KinburgMorpheusStoryboard:
                         f"'Vision Settings (GGUF)' or the LLM writes blind (the frames are still "
                         f"used as keyframes by the sampler)")
 
-        n = int(shot_count) or max(1, K - 1)
+        # A chain can arrive already laid out, with empty prompts where the writing goes — that is
+        # what Dream Board 🎬 emits. Those shots are filled IN PLACE and bring their own keyframes,
+        # length, link and direction, so `shot_count` then means "how many MORE to append after
+        # them" and defaults to none. A chain whose shots all have prompts is the old behaviour: an
+        # untouched prefix to append to.
+        incoming = _flatten_shots(shots)
+        pend = [s for s in incoming if not str(s.get("prompt") or "").strip()]
+        n = int(shot_count) if int(shot_count) else (0 if pend else max(1, K - 1))
         if n > MAX_SHOTS:
             n = MAX_SHOTS
             warn.append(f"shot_count clamped to {MAX_SHOTS}")
-        if not shot_count and K < 2:
+        if not shot_count and not pend and K < 2:
             warn.append("with fewer than 2 keyframes there is nothing to derive a shot count from, "
                         "so one shot was written — set shot_count for a longer sequence")
         if K > n + 1:
-            warn.append(f"{K} keyframes but only {n} shots — frames {n + 2}..{K} are unused")
+            warn.append(f"{K} keyframes but only {n} appended shot(s) — frames {n + 2}..{K} are "
+                        f"unused (a shot that came in on the 'shots' chain carries its own)")
 
         durs = _durations(durations, n)
         beat_lines = _beat_lines(beats)
-        if len(beat_lines) > n:
-            warn.append(f"{len(beat_lines)} beat line(s) for {n} shots — lines are matched to shots "
-                        f"by position, so the extra ones were ignored")
         overrides = _split_overrides(prompt_overrides)
-        if len(overrides) > n:
-            warn.append(f"{len(overrides)} prompt override block(s) for {n} shots — blocks are "
-                        f"matched by position (separate them with a line of ---)")
+        # The "too many lines" warnings need the TOTAL shot count, which only exists once the slot
+        # table is built below — see the check right after it.
 
         sys_style = (style_system or "").strip() or STYLE_SYSTEM
         sys_morph = (shot_system_morph or "").strip() or SHOT_SYSTEM_MORPH
@@ -539,18 +561,63 @@ class KinburgMorpheusStoryboard:
         brief = (brief or "").strip()
         if not brief and not beat_lines:
             raise ValueError("Nothing to write from: give a brief, or per-shot beats, or both.")
-        want_script = script == "auto" and not any(beat_lines) and bool(brief) and n > 1
+        want_script = script == "auto" and not any(beat_lines) and bool(brief)
 
         # Deliberately WITHOUT the beat lines: they don't reach the style bible (see the bible call
         # below), which keeps the bible — and therefore shot 1 — cached when a later shot's note is
         # re-worded. The division of labour is: `brief` describes the whole sequence, `beats` direct
         # individual shots.
+        # Per-shot link modes. The cache key deliberately stays the SCALAR string while every shot
+        # agrees with the `link` widget — which is every workflow that never touches `links` — so
+        # adding this feature invalidates nobody's cached prompts, and therefore re-samples nobody's
+        # finished video. Only a genuinely mixed chain gets the longer key.
+        lnks = _links(links, n, link)
+        link_key = link if all(x == link for x in lnks) else ",".join(lnks)
         env = shot_cache.key(_cfg_fingerprint(cfg), brief, sys_style, sys_morph, sys_start,
                              sys_text, sys_script, int(seed), n, anchor,
-                             link, ",".join(f"{d:g}" for d in durs))
+                             link_key, ",".join(f"{d:g}" for d in durs))
+
+        # ONE table for the whole sequence, so the bible, the plan, the loop and the report all
+        # talk about the same shots whether each came in on the chain or is about to be appended.
+        # A chained shot's own frames / length / link / direction win; an appended one takes them
+        # from the widgets, positionally, exactly as before this input learned to be filled in.
+        slots, ai = [], 0
+        for s in incoming:
+            fill = not str(s.get("prompt") or "").strip()
+            slots.append({
+                "shot": s, "fill": fill,
+                "frames": int(s.get("frames") or 0) or _frames_for(durs[0] if durs else 5.17),
+                "link": s.get("link") if s.get("link") in LINK_MODES else link,
+                "start": s.get("start_frame"), "end": s.get("end_frame"),
+                "beat": str(s.get("beat") or ""),
+            })
+        for _ in range(n):
+            slots.append({
+                "shot": None, "fill": True, "frames": _frames_for(durs[ai]), "link": lnks[ai],
+                "start": frames[ai] if ai < K else None,
+                "end": frames[ai + 1] if ai + 1 < K else None, "beat": "",
+            })
+            ai += 1
+        if len(beat_lines) > len(slots):
+            warn.append(f"{len(beat_lines)} beat line(s) for {len(slots)} shots — lines are matched "
+                        f"to shots by position, so the extra ones were ignored")
+        if len(overrides) > len(slots):
+            warn.append(f"{len(overrides)} prompt override block(s) for {len(slots)} shots — blocks "
+                        f"are matched by position (separate them with a line of ---)")
+
+        todo = sum(1 for sl in slots if sl["fill"])
+        # A chained shot brings its own direction, so the planning call is only worth making when
+        # something actually lacks one — and never for a single shot, which needs no dividing up.
+        want_script = want_script and todo > 1 and not any(sl["beat"] for sl in slots)
+        secs = [_seconds(sl["frames"]) for sl in slots]
+        if not todo:
+            raise ValueError("Nothing to write: every shot on the 'shots' chain already has a "
+                             "prompt, and shot_count is 0. Raise shot_count to append new shots, "
+                             "or clear a shot's prompt to have it rewritten.")
+
         use_cache = cache == "disk"
         unload_comfy_once = bool(cfg.get("unload_comfy_models", True))
-        stages = n + 1 + (1 if want_script else 0)
+        stages = todo + 1 + (1 if want_script else 0)
         pbar = comfy.utils.ProgressBar(stages)
         did_call = [False]  # only the FIRST real call should free ComfyUI's VRAM
 
@@ -585,11 +652,13 @@ class KinburgMorpheusStoryboard:
             else:
                 # only the brief and the shape of the sequence — no per-shot beats, so re-directing
                 # one shot later doesn't invalidate the look of the whole thing
+                seen = [sl["start"] for sl in slots if sl["start"] is not None][:2] \
+                    or (frames[:2] if K else [])
                 prompt = (f"Sequence brief:\n{brief}\n\n"
-                          f"It will be told in {n} shot(s) of about "
-                          f"{', '.join(f'{d:.1f}' for d in durs)} seconds."
-                          + ("\n\nThe look must match the images provided." if K and can_see else ""))
-                text, err = ask(sys_style, prompt, frames[:2] if can_see else [], "style bible")
+                          f"It will be told in {len(slots)} shot(s) of about "
+                          f"{', '.join(f'{d:.1f}' for d in secs)} seconds."
+                          + ("\n\nThe look must match the images provided." if seen and can_see else ""))
+                text, err = ask(sys_style, prompt, seen if can_see else [], "style bible")
                 if err:
                     warn.append(f"style bible call failed ({err}) — falling back to the brief")
                     bible, style_src = self._bible(""), "failed"
@@ -610,22 +679,23 @@ class KinburgMorpheusStoryboard:
             if hit and hit.get("lines"):
                 beat_lines, script_src = list(hit["lines"]), "cached"
             else:
-                lens = ", ".join(f"shot {i + 1}: {_seconds(_frames_for(d)):.2f}s"
-                                 for i, d in enumerate(durs))
+                lens = ", ".join(f"shot {i + 1}: {d:.2f}s" for i, d in enumerate(secs))
                 prompt = (f"Sequence brief:\n{brief}\n\n"
-                          f"Break it into {n} shots. Their lengths: {lens}."
+                          f"Break it into {len(slots)} shots. Their lengths: {lens}."
                           + ("\n\nThe images are the sequence's first and last keyframes — the plan "
                              "must arrive there." if K and can_see else ""))
                 # only the two ENDS of the sequence: the plan needs to know where it starts and
                 # where it lands, the boundaries in between are each shot's own business
-                shown = ([frames[0]] + ([frames[-1]] if K > 1 else [])) if (can_see and K) else []
+                ends = [sl["start"] for sl in slots if sl["start"] is not None] \
+                    + [sl["end"] for sl in reversed(slots) if sl["end"] is not None][:1]
+                shown = ([ends[0]] + ([ends[-1]] if len(ends) > 1 else [])) if can_see and ends else []
                 text, err = ask(sys_script, prompt, shown, "script")
                 if err:
                     warn.append(f"the planning call failed ({err}) — shots were written without a "
                                 f"plan, so their pacing is improvised")
                     script_src = "failed"
                 else:
-                    lines = _parse_script(text, n)
+                    lines = _parse_script(text, len(slots))
                     missing = [i + 1 for i, ln in enumerate(lines) if not ln]
                     if missing:
                         warn.append(f"the plan had no line for shot(s) {missing} — those shots were "
@@ -639,23 +709,35 @@ class KinburgMorpheusStoryboard:
                                  for k, v in (("style", bible["style"]), ("subject", bible["subject"]),
                                               ("audio bed", bible["audio_bed"]),
                                               ("negative", bible["negative"])) if v)
-        pbar.update_absolute(stages - n, stages)
+        pbar.update_absolute(stages - todo, stages)
 
         # --- one call per shot -------------------------------------------------------------------
-        chain = shots
+        chain = []
         rows, prompts, end_state, prev = [], [], "", shot_cache.key(env, "bible")
-        for i in range(n):
-            # boundary i opens shot i, boundary i+1 closes it — while the frames last
-            vis_start = frames[i] if i < K else None
-            vis_end = frames[i + 1] if i + 1 < K else None
+        for i, sl in enumerate(slots):
+            # A shot already carrying a prompt passes through untouched — that is a hand-built
+            # Morpheus Dream someone wired in front of this node.
+            if not sl["fill"]:
+                chain.append(sl["shot"])
+                rows.append((i + 1, _seconds(sl["frames"]),
+                             "frame" if sl["start"] is not None else "given",
+                             "frame" if sl["end"] is not None else "open", "wired",
+                             len(str(sl["shot"].get("prompt") or ""))))
+                prompts.append(str(sl["shot"].get("prompt") or ""))
+                continue
+
+            vis_start, vis_end = sl["start"], sl["end"]
             # what the LLM sees is not what the sampler is conditioned on: in 'continuous' the
             # start comes from the previous shot's generated tail, so only the end is wired
             cond_start = vis_start
-            if anchor == "continuous" and i > 0 and link == "continue":
+            lnk = sl["link"]
+            if anchor == "continuous" and i > 0 and lnk == "continue":
                 cond_start = None
-            beat = beat_lines[i] if i < len(beat_lines) else ""
-            dur = durs[i]
-            snapped = _seconds(_frames_for(dur))
+            # A line wired into `beats` overrides the direction a chained shot brought with it —
+            # that is the read-it-in-Show-Text-and-fix-one-line loop, and it must win.
+            beat = (beat_lines[i] if i < len(beat_lines) else "") or sl["beat"]
+            snapped = _seconds(sl["frames"])
+            dur = snapped
 
             key_i = shot_cache.key(prev, i, beat, f"{snapped:.3f}",
                                    shot_cache.tensor_key(vis_start if can_see else None),
@@ -665,7 +747,7 @@ class KinburgMorpheusStoryboard:
             # Is this shot's first frame fixed at all? Either an image is conditioned on, or the
             # previous shot's tail is inherited. Only shot 1 of a chain (or a `cut`) is truly free,
             # and only a free shot may open the story.
-            anchored = cond_start is not None or (i > 0 and link == "continue")
+            anchored = cond_start is not None or (i > 0 and lnk == "continue")
 
             override = overrides[i].strip() if i < len(overrides) else ""
             if override:
@@ -706,7 +788,7 @@ class KinburgMorpheusStoryboard:
                               "arrive exactly there.") if (len(imgs) == 1 and vis_start is None) else "",
                              ]
                     text, err = ask(sys_shot, "\n\n".join(p for p in parts if p), imgs,
-                                    f"shot {i + 1}/{n} ({mode})")
+                                    f"shot {i + 1}/{len(slots)} ({mode})")
                     if err:
                         warn.append(f"shot {i + 1}: LLM call failed ({err}) — used the director's "
                                     f"note or the brief as the prompt")
@@ -739,26 +821,42 @@ class KinburgMorpheusStoryboard:
             else:
                 refine = "off"
 
-            chain, _info = KinburgMorpheusDream().build(
-                prompt=prompt, duration=dur, link=link, seed_offset=0, shots=chain,
-                start_frame=cond_start, end_frame=vis_end, refine=refine)
+            if sl["shot"] is not None:
+                # Filled in place: keep everything the chain decided (its own seed_offset and
+                # keyframe strength included) and only put the writing in.
+                done = dict(sl["shot"])
+                done.update({"prompt": prompt, "link": lnk, "start_frame": cond_start,
+                             "end_frame": vis_end, "refine": refine})
+                done.pop("beat", None)          # the direction was consumed; the sampler has no use
+                chain.append(done)
+            else:
+                chain, _info = KinburgMorpheusDream().build(
+                    prompt=prompt, duration=dur, link=lnk, seed_offset=0, shots=chain,
+                    start_frame=cond_start, end_frame=vis_end, refine=refine)
             prompts.append(prompt)
             rows.append((i + 1, snapped, "frame" if cond_start is not None else
-                         ("inherited" if (i > 0 and link == "continue") else "text"),
+                         ("inherited" if (i > 0 and lnk == "continue") else "text"),
                          "frame" if vis_end is not None else "open", src, len(prompt)))
-            pbar.update_absolute(stages - n + i + 1, stages)
+            pbar.update_absolute(stages - todo + len([r for r in rows if r[4] != "wired"]), stages)
 
         if resolve_unload(unload_after_run, cfg):
             _shutdown_worker()
         if use_cache:
             shot_cache.prune()
 
-        total = sum(_frames_for(d) for d in durs)
+        total = sum(sl["frames"] for sl in slots)
+        kf_used = sum(1 for sl in slots if sl["start"] is not None) \
+            + (1 if slots and slots[-1]["end"] is not None else 0)
+        chained = len(incoming)
         report = ["Morpheus Storyboard — {} shot(s), {} frames = {:.2f} s of video".format(
-                      n, total, _seconds(total)),
-                  f"keyframes: {K} wired → {min(K, n + 1)} boundary/ies used"
-                  + ("" if can_see else " (LLM is blind: no mmproj)"),
-                  f"anchor: {anchor} · open shots: {link}",
+                      len(slots), total, _seconds(total)),
+                  (f"shots: {chained} came in on the chain ({todo - n} of them written here), "
+                   f"{n} appended" if chained else f"shots: {n} written"),
+                  f"keyframes: {kf_used} used"
+                  + (f" of {K} wired" if K else " (from the chain)")
+                  + ("" if can_see else " · LLM is blind: no mmproj"),
+                  f"anchor: {anchor} · open shots: "
+                  + (link if all(x == link for x in lnks) else ", ".join(lnks)),
                   f"style bible: {style_src}",
                   f"script: {script_src}",
                   f"LLM: {os.path.basename(model)} · seed {int(seed)} · cache {cache}",
@@ -771,10 +869,14 @@ class KinburgMorpheusStoryboard:
         if warn:
             report += ["", "warnings:"] + [f"  · {w}" for w in warn]
 
-        logging.info(f"[Morpheus] storyboard written: {n} shot(s) in "
+        logging.info(f"[Morpheus] storyboard written: {todo} shot(s) in "
                      f"{_format_elapsed(time.time() - t_run, 'human')}")
+        # The script output stays in `beats` format, one line per shot of the WHOLE sequence, so
+        # pasting it back lines up with the chain it came from.
+        script_out = [(beat_lines[i] if i < len(beat_lines) else "") or slots[i]["beat"]
+                      for i in range(len(slots))]
         return (chain, "\n\n---\n\n".join(prompts), bible_text, "\n".join(report),
-                "\n".join(beat_lines[:n]))
+                "\n".join(script_out))
 
 
 NODE_CLASS_MAPPINGS = {"KinburgMorpheusStoryboard": KinburgMorpheusStoryboard}

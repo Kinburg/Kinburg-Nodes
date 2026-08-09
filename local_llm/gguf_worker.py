@@ -506,7 +506,18 @@ def main():
                 gen_kwargs["messages"] = messages
                 run = llm.create_chat_completion
 
-            use_stream = "grammar" not in gen_kwargs
+            # Grammar-constrained runs stream too. In llama-cpp `stream` decides only the SHAPE of
+            # what create_completion returns — `stream=False` is literally `next(<the very same
+            # generator>)` (llama.py:1886) — so the token loop, the sampler chain and the grammar
+            # are identical either way, and `json_object` (a grammar under the hood) has always
+            # streamed here. This used to read `"grammar" not in gen_kwargs`, which cost every GBNF
+            # run its live token bar and its live log for no reason at all.
+            #
+            # The only thing the aggregated path offers is `usage`; the exact prompt count is
+            # recovered from n_tokens below regardless, which is what every text run already does.
+            # Left as a variable, and the branch below left standing, so flipping this one line
+            # back is the whole revert if a build ever disagrees.
+            use_stream = True
             gen_kwargs["stream"] = use_stream
 
             parts = []

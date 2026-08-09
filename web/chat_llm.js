@@ -237,7 +237,16 @@ function allAtt(node) {
   return out.filter((a) => a && a.name);
 }
 
-// Delete the files behind `refs` — but only the ones no chat in this graph is still showing.
+// Anything OUTSIDE the chats that also holds attachment references and would be broken by deleting
+// their files. Dream Board is one: it keeps a snapshot of the conversation, so a picture removed
+// from the chat after that snapshot was taken is still named in its shot list. Registered rather
+// than hard-coded, so a chat knows nothing about who else reads its pictures.
+const refHolders = new Set();
+export function registerRefHolder(fn) {
+  if (typeof fn === "function") refHolders.add(fn);
+}
+
+// Delete the files behind `refs` — but only the ones nothing in this graph is still showing.
 // Content-addressed names mean the same picture in two places IS one file, so removing one copy
 // must not blank the other. CALL THIS AFTER the removal: it reads the live state to decide what is
 // still wanted. A copy open in some other workflow is beyond what we can see from here — and
@@ -245,6 +254,9 @@ function allAtt(node) {
 async function discardUnused(refs) {
   const inUse = new Set();
   for (const n of chatNodes()) for (const a of allAtt(n)) inUse.add(a.name);
+  for (const fn of refHolders) {
+    try { for (const nm of (fn() || [])) inUse.add(nm); } catch (e) { /* a holder must never block a delete path */ }
+  }
   const doomed = [];
   const seen = new Set();
   for (const a of refs || []) {
@@ -271,6 +283,27 @@ async function discardUnused(refs) {
 
 export function chatNodes() {
   return (app.graph?._nodes || []).filter((n) => (n.comfyClass || n.type) === CLASS);
+}
+
+// A snapshot of the conversation for Dream Board 🎬, in the compact shape its board_state stores:
+// role, speaker, text, and any pictures as plain file refs. Digests are left out — a brief is not
+// something that happened. `private` names the personas whose whole job is writing image prompts
+// (the "camera" pattern), so the board can leave them out of the story by default.
+export function chatSnapshot(node) {
+  const msgs = getHistory(node).filter((m) => m && (m.role === "user" || m.role === "assistant"))
+    .map((m) => {
+      const o = { r: m.role === "user" ? "u" : "a", p: String(m.persona || ""),
+                  t: String(m.content || "") };
+      const att = (m.att || []).filter((a) => a && a.name).map((a) => {
+        const r = { name: a.name, subfolder: a.subfolder || "", type: a.type || "input" };
+        if (a.caption) r.caption = a.caption;
+        if (a.shot) r.shot = a.shot;
+        return r;                       // `ctx` is the chat's model-visibility flag; irrelevant here
+      });
+      if (att.length) o.img = att;
+      return o;
+    });
+  return { msgs, private: privateSet(node), title: String(node.title || "") };
 }
 
 // Which persona slot a "send_as" value names, or -1. Only a wired one counts.

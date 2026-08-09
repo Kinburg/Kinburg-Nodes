@@ -66,8 +66,8 @@ Pick one option:
 root ::= "photorealistic" | "anime" | "oil painting" | "3d render"
 ```
 The grammar controls the *shape*, not the meaning — still prompt for the right content.
-Note: grammar modes run without streaming, so the live token progress bar stays idle
-until the result is ready.
+Grammar runs stream like any other, so the token progress bar and the live log follow
+them token by token.
 
 ## Ideogram JSON prompt (output_format = ideogram4_json)
 A built-in GBNF grammar **forces** this nested JSON, so the structure is guaranteed on
@@ -752,7 +752,7 @@ class LocalLLMGGUF:
                 "system_override": ("STRING", {"forceInput": True, "tooltip": "Optional: replaces the config's system_prompt for this node (connect-only). Context still applies."}),
                 "grammar_override": ("STRING", {"forceInput": True, "tooltip": "Optional: a GBNF grammar (connect-only) that replaces the config's grammar and forces gbnf_grammar output for this node."}),
                 "unload_after_run": (UNLOAD_MODES, {"default": "config default", "tooltip": "Free the model from VRAM after THIS node runs, without touching the shared config. 'config default' follows the Settings node; 'unload after run' frees VRAM (a different model runs next); 'keep loaded' stays warm (the same model runs next)."}),
-                "live_preview": ("BOOLEAN", {"default": False, "tooltip": "Stream the generated text to a 'Kinburg Live Log' node as it's written, token by token. Text generation only — a grammar/JSON run (e.g. a card via grammar_override) can't stream, so the log shows its result once it finishes."}),
+                "live_preview": ("BOOLEAN", {"default": False, "tooltip": "Stream the generated text to a 'Kinburg Live Log' node as it's written, token by token. Grammar / JSON runs stream too, so a card built via grammar_override types itself out as the model constrains it."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }

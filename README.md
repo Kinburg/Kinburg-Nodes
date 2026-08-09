@@ -263,8 +263,8 @@ entirely. Entries are **timestamped** (`HH:MM:SS`),
 and a **`log_mode`** toggle on Ouroboros controls granularity: **`streaming`** (default) is like
 `per step` but the enhancer's prompt **types out token by token** as it's written, its header
 counting the tokens against the enhancer's `max_tokens` (`142/512 tok`) plus the live `tok/s`
-(text only — the critic is grammar-constrained and can't stream, so its verdict still lands
-whole); **`per step`**
+(the critic's verdict still lands whole — it isn't wired to the log token by token, though nothing
+stops it now that grammar runs stream); **`per step`**
 posts each stage the moment it finishes — enhanced prompt → generated image → critic verdict, as
 three live entries; **`per iteration`** posts one combined entry after the whole iteration. The log **survives
 ComfyUI Desktop tab switches** — it's replayed from an in-memory history when the node is recreated
@@ -632,7 +632,7 @@ new total and re-encode — the model is otherwise being told the song is shorte
 writing on. It can't be read back out of the conditioning, so both nodes print the new length in
 seconds and leave the check to you.
 
-### `morpheus/` — Morpheus (Video Sampler) 🌙, Morpheus Dream 🌙, Morpheus Storyboard 🌙
+### `morpheus/` — Morpheus (Video Sampler) 🌙, Morpheus Dream 🌙, Morpheus Storyboard 🌙, Dream Board 🎬
 
 MiniMax H3 generates **5–15 seconds** per run and ComfyUI ships no extend/continue node for it, so the
 only route to a minute of video is to run it several times and hand **the last frame of each shot to the
@@ -869,6 +869,73 @@ because what runs next is H3 plus a 30B text encoder. `live_preview` is **on** b
 every call to a `Kinburg Live Log` node — one labelled block per call (`style bible`, `shot 2/4`), over the
 same `kinburg.llm` channel the Local LLM node uses, so no new node and no wiring: writing a storyboard is
 otherwise minutes of silence.
+
+**`links`** (advanced) overrides `link` per shot, the same comma-list shape `durations` takes
+(`continue, cut, continue`, last value repeating). Only shots with no start keyframe listen to it — a
+wired frame always wins — so it is how you put one hard cut into an otherwise flowing sequence. Leave
+it blank and every shot follows the single `link` widget; that case keeps the cache key byte-identical
+to before the option existed, so adding it re-wrote nobody's prompts and re-sampled nobody's video.
+
+#### `Dream Board 🎬` — a conversation becomes a storyboard
+
+The bridge from `Local LLM Chat (GGUF)` to Storyboard. You chat with a character, pictures pile up in
+the conversation, and this node turns the part you pick into a storyboard.
+
+**Wire one output: `shots` → Storyboard's `shots`.** Every shot goes across carrying its own
+keyframes, length, link mode and direction, with an **empty prompt** — which is what tells Storyboard
+"this one is yours to write". Leave its `keyframes` / `durations` / `links` / `shot_count` alone.
+
+That is worth more than the four wires it replaces. Parallel lists line up only by position, so
+adding a line to `beats` in a Show Text silently shifts every later shot onto the wrong keyframe. And
+Storyboard's `keyframes` batch is consumed left to right with no gaps, whereas a shot in a chain
+names its own start and end — so a **text-only shot can sit between two keyframed ones**, which the
+batch could never express.
+
+The four separate outputs are still there if you prefer the explicit wiring: **`keyframes`**,
+**`beats`**, **`durations`**, **`links`** and **`shot_count`** (wire that one too in that case —
+Storyboard's own default stops at the keyframes and would skip the text-only shots at the end).
+`beats` is worth taking either way: route it through a `Show Text` to read or hand-edit the
+directions, and feed it into Storyboard's `beats`, which overrides the chain line by line.
+
+**Pictures define the shots, not the other way round.** A Morpheus keyframe physically sits *between*
+shots — frame 2 ends shot 1 and starts shot 2 — so K picked pictures give K−1 bounded shots and the
+messages between two pictures are that shot's direction:
+
+```
+picture 1 ····· messages ····· picture 2 ····· messages ····· picture 3
+          └──────  shot 1  ──────┘        └──────  shot 2  ──────┘
+```
+
+Nothing has to be forbidden or auto-dropped: a shot can't hold three keyframes, because a shot *is*
+the span between two. Messages before the first picture join shot 1 (that's where a scene gets set
+up); messages after the last one become text-only shots, which you split with **+ break** markers.
+The cost — and it is this version's real limit — is that a shot boundary must land on a picture: a
+long stretch of story with no picture in it can't be cut into several shots, because the interior
+boundary would have no keyframe. If a span runs past H3's ~15 s, put another picture in the chat.
+
+**Press ⟳ Update History** to pull the conversation in; **`→ chat`** picks which chat node when there
+is more than one. There is no graph link on purpose — a link would sit below the chat's blocked
+output, so rendering a video would need the chat to run first, and this way the node also works when
+you run it on its own. Each message has a tick (does its text become direction) and each picture has
+one (is it a boundary), and they are **independent**: a persona's bubble is usually text you don't
+want and a picture you do. Re-pulling after more conversation keeps your ticks.
+
+Turns of a **private** persona start unticked — the "camera" pattern, whose whole job is writing
+image prompts rather than story. That goes **by persona, not by role**: your own messages carry
+whichever persona was selected, so "tighter, more bokeh" typed at a camera is dropped along with its
+reply, while your dialogue with the character keeps the character's name and stays. It has to — you
+may well be playing a second character who is in the video, and dropping your half would leave the
+first one talking to itself. (Same reasoning as the chat's own privacy rule, which withholds a
+private reply *and* the instruction that produced it.)
+
+The shot list under the chat is **derived live**, so there is nothing to "create" and no state that
+can contradict itself: tick a picture and a shot appears. Per row you get `duration` (snapped to
+H3's 0.71 s grid when it runs) and, for the text-only shots, `link`.
+
+**`beats` are verbatim for now** — the picked messages, whitespace-collapsed and speaker-labelled.
+Storyboard skips its own planning call when `beats` is filled ("your lines win"), so the shot writer
+reads exactly what you selected. Route `beats` through a `Show Text` node first if you want to read
+or hand-edit it before it is written up.
 
 ### `model_presets/` — Model Capture 📥, Model Select 🎛, Settings Select ⚙, Settings Save 💾
 
@@ -1601,8 +1668,9 @@ accident, and it comes straight back out without touching the reply it was hangi
 that existed only to carry it disappears with it. 🗑 on a whole message, and 🗑 Clear on the whole
 chat, take their pictures too; Clear counts them before asking.
 
-Removing a picture deletes its file, unless another bubble or another chat node in the graph is
-still showing it (a picture in two places is one file, since the name is a hash of its pixels).
+Removing a picture deletes its file, unless something in the graph is still showing it — another
+bubble, another chat node, or a `Dream Board 🎬` whose snapshot still names it (a picture in two
+places is one file, since the name is a hash of its pixels).
 Deletion is limited to `input/kinburg_chat/` — your own `LoadImage` sources in the input folder are
 never touched. And a file removed by mistake comes back by re-running the branch that made it: the
 hash, and therefore the name, is the same.
