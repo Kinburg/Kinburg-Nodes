@@ -698,6 +698,14 @@ exists because six things have to be right that a hand-wired graph gets wrong:
   960×544 — three times the time, silently. So the aspect check stayed and became a **report warning**,
   and the size stayed where everyone expects it.
 
+- **`lora_triggers`** — wire the **`triggers`** output of `Lora Unlim Accumulator` here and the
+  trigger words go into **every** shot's prompt. Not simply appended: a Morpheus prompt is MiniMax's
+  six numbered sections and the last one is `[Negative Prompt/Constraints]`, so text on the end
+  reads as one more thing to *avoid* — they are inserted just before that section instead. They are
+  also re-applied after the in-loop writer has reworked a shot, since a rewrite can drop them, and a
+  trigger already present (case-insensitively) is never repeated. Because they go in *before* each
+  shot's cache key is taken, changing them re-samples rather than replaying latents made without them.
+
 #### The in-loop writer — the forecast, removed
 
 `Morpheus Storyboard` writes every shot before anything is sampled, so a shot whose first frame is
@@ -1853,6 +1861,18 @@ before the run. Category `Kinburg-Nodes/util`.
 
 Each node's parameters are documented in their tooltips. The Local LLM node also exposes a
 `help` output with a quick cheat-sheet — wire it to a "Preview as Text" node to read it.
+
+## Tests
+
+```bash
+python tests/run.py
+```
+
+with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). ~390 checks over `local_llm/`,
+`morpheus/` and three of the `web/*.js` extensions, in a couple of minutes; nothing real is loaded
+(llama.cpp, H3 and the browser are all stubbed), so it is a regression net for the LLM / chat /
+storyboard path and **not** a substitute for trying a change in the app. `tests/README.md` says
+exactly what is and is not covered.
 
 ## License
 

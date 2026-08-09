@@ -49,6 +49,7 @@ combined with keyframes anyway — `comfy/model_base.py` lets `minimax_refs` ove
 `cond_video_latents`, so a shot is either fl2va or ref2va, never both.
 """
 import logging
+import re
 import time
 
 import torch
@@ -87,6 +88,37 @@ def _require_h3():
 
 
 # ------------------------------------------------------------------------------------- chain utils
+def _with_triggers(prompt, triggers):
+    """Put LoRA trigger words into a shot's prompt, once, where they can actually work.
+
+    NOT simply appended: a Morpheus prompt is MiniMax's six numbered sections and the LAST one is
+    `[Negative Prompt/Constraints]`, so text on the end reads as one more thing to AVOID — the exact
+    opposite of a trigger. They go in just before that section instead, on their own line, and only
+    fall back to the end for a prompt that has no negative section at all (a hand-written one).
+
+    Idempotent: a trigger already in the text (case-insensitively) is not repeated, which is what
+    lets this be applied again after the in-loop writer has had a go at the prompt.
+    """
+    triggers = (triggers or "").strip()
+    if not triggers:
+        return prompt or ""
+    text = prompt or ""
+    low = text.lower()
+    add = [t.strip() for t in triggers.split(",") if t.strip() and t.strip().lower() not in low]
+    if not add:
+        return text
+    tail = ", ".join(add)
+    # The section header the assembler writes; matched loosely so a hand-edited prompt still counts.
+    m = None
+    for m in re.finditer(r"(?im)^\s*\d*\s*\.?\s*\[\s*negative[^\]]*\]\s*:", text):
+        pass                                # the LAST one, in case a shot names it more than once
+    if m:
+        head, rest = text[:m.start()].rstrip(), text[m.start():]
+        return head + "\n\n" + tail + "\n\n" + rest
+    base = text.rstrip().rstrip(",")
+    return (base + "\n\n" + tail) if base.strip() else tail
+
+
 def _flatten_shots(shots):
     """A MORPHEUS_SHOT input is one shot dict, an already-built chain, or None → always a flat list."""
     if isinstance(shots, list):
@@ -266,6 +298,7 @@ class KinburgMorpheus:
                 "sigmas": ("SIGMAS", {"tooltip": "Optional explicit schedule (overrides steps/scheduler). Build it from a model that already has the sigma shift applied, or it won't match."}),
                 "sampler": ("SAMPLER", {"tooltip": "Optional explicit sampler (overrides sampler_name)."}),
                 "noise": ("NOISE", {"tooltip": "Optional noise source; its seed becomes the base seed, and each shot still gets its own offset. Leave empty to use the 'seed' widget."}),
+                "lora_triggers": ("STRING", {"forceInput": True, "tooltip": "Comma-separated LoRA trigger words, added to EVERY shot's prompt — wire the 'triggers' output of 'Lora Unlim Accumulator' here. They go in just before the prompt's [Negative] section, never after it, and are re-applied after the in-loop writer runs, so neither the storyboard's layout nor an LLM rewrite can lose them. A trigger already present in the text (case-insensitive) is not repeated."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -346,7 +379,7 @@ class KinburgMorpheus:
                seed, shift_video, shift_audio, seam_trim, audio, seam_fade_ms, cache,
                cache_tag, live_preview=True, llm_keep_loaded=False, shots_range="",
                audio_vae=None, sigmas=None, sampler=None, noise=None, llm_config=None,
-               unique_id=None):
+               lora_triggers="", unique_id=None):
         _require_h3()
         chain = _flatten_shots(shots)
         if not chain:
@@ -479,7 +512,9 @@ class KinburgMorpheus:
             p, t_shot = plan[i], time.time()
             seed_i = (base_seed + i + s["seed_offset"]) & 0xffffffffffffffff
             next_needs = p["next_needs"]
-            prompt, rmode, t_write = s["prompt"], "—", 0.0
+            # Triggers go in HERE, before the cache key is taken from the prompt, so changing them
+            # re-samples the shots instead of replaying latents made without them.
+            prompt, rmode, t_write = _with_triggers(s["prompt"], lora_triggers), "—", 0.0
             if not p["process"]:
                 # still has to advance the causal chain, or every later key would shift
                 prev_key = shot_key(prev_key, i, s, prompt)
@@ -514,7 +549,10 @@ class KinburgMorpheus:
                                     f"sampled with the prompt it arrived with")
                         rmode = f"{scope} failed"
                     elif new_prompt:
-                        prompt, rmode, wrote_any = new_prompt, scope, True
+                        # Re-applied because the writer rewrites whole sections and can drop them.
+                        # A no-op when they survived — _with_triggers won't duplicate.
+                        prompt, rmode, wrote_any = (_with_triggers(new_prompt, lora_triggers),
+                                                    scope, True)
                     if not llm_keep_loaded:
                         # kill the worker before H3 comes back: on 12 GB they cannot coexist
                         try:
@@ -634,7 +672,7 @@ class KinburgMorpheus:
         report = self._report(rows, images, cw, ch, sr, shift_note, sched_note, sampler_name,
                               sampler, base_seed, cache, hits, lo, hi, len(chain), warn,
                               time.time() - t_run, want_audio, seam_fade_ms,
-                              llm_config is not None, wrote_any, seam_trim)
+                              llm_config is not None, wrote_any, seam_trim, lora_triggers)
         logging.info(f"[Morpheus] storyboard done: {images.shape[0]} frames "
                      f"({_seconds(images.shape[0]):.2f} s) in "
                      f"{_format_elapsed(time.time() - t_run, 'human')}")
@@ -645,7 +683,7 @@ class KinburgMorpheus:
     @staticmethod
     def _report(rows, images, cw, ch, sr, shift_note, sched_note, sampler_name, sampler,
                 base_seed, cache, hits, lo, hi, n_shots, warn, elapsed, want_audio, fade_ms,
-                has_llm, wrote_any, trim):
+                has_llm, wrote_any, trim, triggers=""):
         n = images.shape[0]
         out = [f"Morpheus — {n} frames = {_seconds(n):.2f} s @ {h3.FPS} fps · {cw}x{ch}",
                f"shots: {n_shots} in the chain, rendered {lo}-{hi}"
@@ -655,6 +693,8 @@ class KinburgMorpheus:
                f"sampler: {'wired SAMPLER' if sampler is not None else sampler_name}",
                f"seeds: base {base_seed} + shot index + per-shot offset",
                f"seam trim: {trim} frame(s) off each continuing shot",
+               "lora triggers: " + ((triggers or "").strip() + " (in every shot, before [Negative])"
+                                    if (triggers or "").strip() else "none wired"),
                f"audio: {'decoded, one global normalisation, ' + str(fade_ms) + ' ms seam ramps, ' + str(sr) + ' Hz' if want_audio else 'silent'}",
                f"in-loop writer: " + ("wired" + (" — some shots were reworked from their real first "
                                                  "frame" if wrote_any else " — nothing needed reworking")
