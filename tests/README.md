@@ -23,13 +23,14 @@ Non-zero exit on any failure, so this drops into a pre-commit hook as-is.
 | suite | covers |
 |---|---|
 | `test_chat.py` | `LocalLLMChatGGUF.run()` — personas 1..6, the Approve gate, attachment refs and the `[image]` markers that stand in for them, path resolution and its traversal guard |
-| `test_worker.py` | the real `gguf_worker` main loop over a **stubbed `llama_cpp`** — the projector attach/release swap, load-signature stability, chat-template handling, grammar streaming |
+| `test_worker.py` | the real `gguf_worker` main loop over a **stubbed `llama_cpp`** — the projector attach/release swap, load-signature stability, chat-template handling, grammar streaming, and ⏹ stopping a reply mid-stream (the stdin reader thread, the partial text it keeps, no bleed into the next request) |
 | `test_send_image.py` | `Send Image to Chat` — megapixel downscale, the content-hash filename, the payload, and `attachments.discard()` including everything it must refuse to delete |
 | `test_dream_board.py` | `Dream Board` — the whole "pictures define the shots" rule, the outputs, the `MORPHEUS_SHOT` chain |
 | `test_storyboard.py` | `Morpheus Storyboard.write()` over a **faked LLM** — filling a wired chain in place vs appending, per-shot keyframes/durations/links, the beats override |
 | `test_lora_triggers.py` | `_with_triggers` — where trigger words land in a MiniMax prompt, and that they never land in `[Negative]` |
 | `js/build_chat.mjs` | `web/chat_llm.js` + `web/chat_send.js` — the attachment tray, paste/upload, 🗑 Clear and its file cleanup, `sendToChat` |
 | `js/build_dream_board.mjs` | `web/dream_board.js` — the JS shot-derivation port (same fixtures as the Python one), the snapshot pull, ref holding |
+| `js/build_group_control.mjs` | `web/group_control.js` — the **group links** engine: the pure resolver (polarity, one-of, chains, contradictory cycles) and the live side against a hand-built graph — toggling, changes made outside the panel, pause, bulk overrides, and the nested-group snapshot/restore |
 
 A JS suite is *assembled*: `build_*.mjs` concatenates `js/stubs.mjs`, the extension file with its
 `import` lines stripped, and the assertions, then writes `run_*.mjs` and `run.py` executes it. That
@@ -38,7 +39,7 @@ widget callbacks. The generated `run_*.mjs` are build artifacts and are git-igno
 
 ## What is NOT here — read this before trusting a green run
 
-- **Most of the pack.** These suites cover `local_llm/`, `morpheus/` and three `web/*.js` files.
+- **Most of the pack.** These suites cover `local_llm/`, `morpheus/` and four `web/*.js` files.
   Chimera, Siren, Image Compare, Ouroboros, Vision Judge, the presets nodes, `util/`, `loops/` and
   the rest — the majority of the 87 nodes — have no tests at all.
 - **Nothing real is loaded.** No llama.cpp, no H3, no diffusion model, no VAE. `llama_cpp` is a

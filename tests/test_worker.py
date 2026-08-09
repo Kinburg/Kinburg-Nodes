@@ -102,9 +102,7 @@ class FakeLlama:
                        "grammar" if kw.get("grammar") is not None else
                        ("json" if kw.get("response_format") else "text")))
         if kw.get("stream"):
-            return iter([{"choices": [{"delta": {"content": '{"a"'}, "finish_reason": None}]},
-                         {"choices": [{"delta": {"content": ":1}"}, "finish_reason": None}]},
-                         {"choices": [{"delta": {}, "finish_reason": "stop"}]}])
+            return iter(STREAM())
         return {"choices": [{"message": {"content": '{"a":1}'}, "finish_reason": "stop"}],
                 "usage": {"completion_tokens": 1, "prompt_tokens": 9}}
 
@@ -113,6 +111,23 @@ class FakeLlama:
         if kw.get("stream"):
             return iter([{"choices": [{"text": "ok", "finish_reason": "stop"}]}])
         return {"choices": [{"text": "ok", "finish_reason": "stop"}], "usage": {}}
+
+
+# What the fake model "writes". ABORT_AFTER, when set, presses stop from inside the stream — the
+# only way to reproduce a press that lands mid-generation without a second process.
+PIECES = ['{"a"', ":1}"]
+ABORT_AFTER = None
+STREAMED = []
+
+
+def STREAM():
+    STREAMED.clear()
+    for k, piece in enumerate(PIECES):
+        if ABORT_AFTER is not None and k == ABORT_AFTER:
+            gw._ABORT.set()
+        STREAMED.append(piece)
+        yield {"choices": [{"delta": {"content": piece}, "finish_reason": None}]}
+    yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
 
 
 class FakeGrammar:
@@ -273,6 +288,53 @@ check("a GBNF run with stream_text pushes its pieces live",
 check("...and the run without it pushes nothing", len(toks5) == 2, len(toks5))
 check("prompt_tokens still comes back on the streaming path",
       resp5[2]["prompt_tokens"] == 15, resp5[2]["prompt_tokens"])  # n_tokens(17) - 2 generated
+
+# ── ⏹ stop mid-generation ───────────────────────────────────────────────────────────────────
+import queue as _queue  # noqa: E402
+
+check("the abort sentinel is a bare line, not json", gw.ABORT_LINE.startswith("@@"), gw.ABORT_LINE)
+
+# the reader thread must route a sentinel to the flag and everything else to the queue
+gw._ABORT.clear()
+box = _queue.Queue()
+_old_stdin = sys.stdin
+sys.stdin = io.StringIO('{"a": 1}\n' + gw.ABORT_LINE + '\n{"b": 2}\n')
+gw._stdin_reader(box)
+sys.stdin = _old_stdin
+got = [box.get(), box.get(), box.get()]
+check("requests reach the queue, the sentinel does not",
+      got == ['{"a": 1}', '{"b": 2}', None], got)
+check("...and the sentinel set the flag", gw._ABORT.is_set())
+gw._ABORT.clear()
+
+# a press landing mid-stream stops it and KEEPS what was written
+PIECES = ["one ", "two ", "three ", "four"]
+ABORT_AFTER = 2                      # press just before the third piece is yielded
+ev6, resp6, toks6 = drive([rq(stream_text=True)])
+check("the reply is the text written before the stop", resp6[0]["output"] == "one two ",
+      repr(resp6[0]["output"]))
+check("...marked as aborted, not as a normal finish", resp6[0]["finish_reason"] == "aborted",
+      resp6[0]["finish_reason"])
+check("...counting only the tokens really written", resp6[0]["output_tokens"] == 2,
+      resp6[0]["output_tokens"])
+check("...and only those reached the live stream", toks6 == ["one ", "two "], toks6)
+check("the run still answers normally — no exception, no dead worker",
+      resp6[0]["status"] == "success")
+
+# the flag must not bleed into the next request
+ABORT_AFTER = None
+ev7, resp7, toks7 = drive([rq(stream_text=True), rq(stream_text=True)])
+check("a later request is unaffected",
+      [r["output"] for r in resp7] == ["one two three four"] * 2, [r["output"] for r in resp7])
+check("...and finishes normally", resp7[-1]["finish_reason"] == "stop", resp7[-1]["finish_reason"])
+
+# a press that arrives BETWEEN requests is dropped, not applied to the next one
+gw._ABORT.set()
+ev8, resp8, _ = drive([rq()])
+check("a stale press is cleared before the next request runs",
+      resp8[0]["output"] == "one two three four" and resp8[0]["finish_reason"] == "stop",
+      (resp8[0]["output"], resp8[0]["finish_reason"]))
+PIECES = ['{"a"', ":1}"]
 
 print("\n" + ("ALL PASS" if not fails else "FAILED: " + ", ".join(fails)))
 sys.exit(1 if fails else 0)

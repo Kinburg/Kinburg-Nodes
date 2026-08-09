@@ -5,6 +5,8 @@ import json
 import gc
 import glob
 import ctypes
+import queue
+import threading
 import traceback
 import importlib.util
 import importlib.metadata
@@ -12,6 +14,37 @@ import importlib.metadata
 RESP_PREFIX = "@@LLM_RESPONSE@@"
 PROG_PREFIX = "@@LLM_PROGRESS@@"
 TOK_PREFIX = "@@LLM_TOKEN@@"
+# A bare line, not a request: it has to be recognisable by the reader thread without parsing JSON,
+# because it arrives WHILE a generation is running.
+ABORT_LINE = "@@LLM_ABORT@@"
+
+# Set by the reader thread, read between tokens. Cleared before every request, so a press that
+# lands after a generation already finished cannot cut the next one short.
+_ABORT = threading.Event()
+
+
+def _stdin_reader(inbox):
+    """Own stdin in a thread, so a stop can arrive mid-generation.
+
+    The main loop used to read stdin itself, which meant nothing was read while tokens were being
+    pumped — the abort would have sat in the pipe until the reply it was meant to interrupt had
+    already finished. Requests go on the queue; the abort sentinel just sets a flag.
+    """
+    while True:
+        try:
+            line = sys.stdin.readline()
+        except Exception:
+            line = ""
+        if line == "":                      # EOF: the parent closed the pipe
+            inbox.put(None)
+            return
+        line = line.strip()
+        if not line:
+            continue
+        if line == ABORT_LINE:
+            _ABORT.set()
+        else:
+            inbox.put(line)
 
 
 def _prepare_cuda():
@@ -297,13 +330,16 @@ def main():
     # counting via mtmd — clip is loaded, LLM weights are NOT, and no decode is run.
     mtmd_cache = {}
 
+    inbox = queue.Queue()
+    threading.Thread(target=_stdin_reader, args=(inbox,), daemon=True).start()
+
     while True:
-        line = sys.stdin.readline()
-        if line == "":          # EOF: parent closed the pipe
+        line = inbox.get()
+        if line is None:        # EOF: parent closed the pipe
             break
-        line = line.strip()
-        if not line:
-            continue
+        # Whatever happened during the last request is over; only a press that lands from here on
+        # belongs to this one.
+        _ABORT.clear()
 
         try:
             req = json.loads(line)
@@ -527,6 +563,13 @@ def main():
             if use_stream:
                 stream_text = bool(req.get("stream_text"))
                 for chunk in run(**gen_kwargs):
+                    # ⏹ between tokens. Abandoning the generator is enough — llama.cpp simply stops
+                    # being pumped, and the model is left usable for the next request. What has been
+                    # written so far is kept and returned: stopping a reply should hand you the good
+                    # part, not throw the turn away.
+                    if _ABORT.is_set():
+                        finish_reason = "aborted"
+                        break
                     ch = chunk["choices"][0]
                     piece = ch.get("text") if cont else (ch.get("delta") or {}).get("content")
                     if piece:

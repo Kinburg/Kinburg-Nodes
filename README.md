@@ -1683,6 +1683,13 @@ Deletion is limited to `input/kinburg_chat/` — your own `LoadImage` sources in
 never touched. And a file removed by mistake comes back by re-running the branch that made it: the
 hash, and therefore the name, is the same.
 
+**Stopping a reply.** While one is being written its bubble carries **⏹** and **✕**, and they mean
+different things. **⏹** stops the model between tokens and **keeps what it has written**: the
+partial text lands in the history like any other reply, the meter says `⏹ stopped`, and Send with an
+empty box carries on from it — the same continuation a reply cut off by `max_tokens` gets. **✕**
+walks away from the turn and discards it. Stopping does not kill the worker or unload the model, so
+the next turn starts immediately.
+
 **Editing the conversation.** Hover any bubble — yours or the model's — for **⧉ copy · ✎ edit ·
 ↻ resend · 🗑 delete**. ✎ swaps the bubble for an inline textarea sized to the message it holds
 (Esc cancels, Ctrl+Enter saves). ↻ replays exactly the turn that produced the message, dropping
@@ -1820,6 +1827,36 @@ name or colour dot to _focus_ it** — the canvas pans/zooms to that group. A **
 non-matching rows by name (handy with many groups; view-only, never touches the graph), and while
 a filter is active the header **`all on`** / **`all off`** / **`all ✕`** (set to Never) buttons act
 only on the matching groups (otherwise on every group).
+**Link groups so one switch drives another.** Two variants of a branch, three upscalers, a draft
+path and a final path — normally you switch one on and remember to switch the other off. A **link**
+does it for you. The quickest way in is a row's **`⋯` → `🔗 Toggle with…`**: pick a second group and
+the two now take turns — switch either one on and the other goes off. The header **`🔗`** button
+opens the full editor, where a link has a type:
+* **`follow / opposite`** — every member carries a sign: **`+`** means "same state as whichever
+  member you just moved", **`−`** means "the opposite". `A+ B−` is the plain toggle; **`A+ B− C−`**
+  means *switch `A` off and `B` and `C` both come on, switch `A` back on and both go off*; `A+ B+`
+  is a mirror, two groups that are always in the same state.
+* **`only one of`** — a radio: switching any member on switches every other member off. Tick
+  **keep one always on** and switching the last one off brings the next one in instead of leaving
+  the set empty. (Three-way switching can't be written with signs, which is why it's its own type.)
+
+Each link chooses whether its **off** means `BYPASS` or `NEVER`, can be **disabled** without being
+deleted, and links **chain** — if `A` drives `B` and `B` drives `C`, moving `A` carries through to
+`C`. A link fires **however the change arrived**: a click in this panel, `Ctrl+B` on the canvas, or
+ComfyUI's own group menu — the panel notices and follows. Linked rows carry a **`🔗` badge** whose
+tooltip spells out what will happen ("switching this on switches OFF …"). Links are saved on the
+node (in `properties`), so they travel with the workflow. A set that contradicts itself (`A` off
+means `B` on means `C` off means `A` on…) is **resolved, not oscillated**: the group you actually
+moved wins, the rest follow in order, and the badges of the groups it couldn't satisfy are ringed in
+red. The **`all on` / `all off` / `all ✕` buttons and Solo deliberately skip the engine** — a bulk
+switch means exactly what it says — and **right-clicking `🔗` pauses every link** for the session
+when you want to arrange the board by hand.
+**Nested groups keep their arrangement.** Switching a parent group off sets every node inside it —
+including the nested groups' — to the same mode, which would otherwise wipe out how the inside was
+set up. So the nested groups' states are remembered on the way down and put back when the parent
+comes on again: a parent holding an `ESRGAN` / `LDSR` pair comes back with the same one of the two
+selected, not with both on. When a link drives a parent *and* one of its children, the parent is
+applied first, so the child's own rule survives its parent's blanket sweep.
 **Hide the groups you never touch.** A group that just loads the base models, VAE or LoRAs is
 set-and-forget — it only clutters the panel. Pick **`🚫 Hide from this list`** in a row's **`⋯`**
 menu and the row disappears; the header count shows how many are put away (`7 +2🚫`). Nothing is
@@ -1868,7 +1905,7 @@ Each node's parameters are documented in their tooltips. The Local LLM node also
 python tests/run.py
 ```
 
-with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). ~390 checks over `local_llm/`,
+with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). ~470 checks over `local_llm/`,
 `morpheus/` and three of the `web/*.js` extensions, in a couple of minutes; nothing real is loaded
 (llama.cpp, H3 and the browser are all stubbed), so it is a regression net for the LLM / chat /
 storyboard path and **not** a substitute for trying a change in the app. `tests/README.md` says

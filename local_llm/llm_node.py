@@ -215,6 +215,42 @@ def _start_worker(load_sig):
     return proc
 
 
+ABORT_LINE = "@@LLM_ABORT@@"
+
+
+def abort_generation():
+    """Ask the worker to stop the reply it is writing and hand back what it has. True if sent.
+
+    Safe from another thread — and it has to be, because the thread that asked for the generation
+    is blocked reading the worker's stdout until it answers. This writes to a DIFFERENT pipe
+    (stdin), which a reader thread inside the worker is watching for exactly this line; see
+    `_stdin_reader` there. Deliberately NOT killing the process: that would free the VRAM but also
+    throw away the text already written and cost a full model reload on the next turn.
+    """
+    proc = _worker_proc
+    if proc is None or proc.poll() is not None:
+        return False
+    try:
+        proc.stdin.write(ABORT_LINE + "\n")
+        proc.stdin.flush()
+        return True
+    except Exception as e:
+        print(f"[LocalLLM] could not send the stop: {e}")
+        return False
+
+
+try:
+    from server import PromptServer
+    from aiohttp import web
+
+    @PromptServer.instance.routes.post("/kinburg/llm/abort")
+    async def _abort(_request):
+        return web.json_response({"ok": abort_generation()})
+
+except Exception as e:  # pragma: no cover
+    print(f"[LocalLLM] could not register the abort route: {e}")
+
+
 def _ensure_worker(load_sig):
     if (_worker_proc is not None and _worker_proc.poll() is None
             and _worker_sig == load_sig):

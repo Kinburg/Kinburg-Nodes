@@ -19,6 +19,17 @@ Design notes for the frontend side:
   * Clicking a row's name/colour dot focuses that group on the canvas.
   * A name filter box hides non-matching rows (view-only); bulk on/off/never then act on the
     matching set.
+  * Groups can be **linked** so flipping one flips the others (⋯ → "Toggle with…", or the header
+    🔗 button for the editor). A link is a set of group names with a rule: *follow* gives each
+    member a sign — `+` (same state as whichever member you moved) or `−` (the opposite), so
+    `A+ B−` is a toggle and `A+ B− C−` means "switch A off and B and C come on"; *one of* is a
+    radio, where switching one member on switches the rest off. Links live in
+    `properties._kbLinks` and fire on **any** change — this panel, Ctrl+B on the canvas, or
+    ComfyUI's own group menu — because the poll tick diffs the members' states. Propagation is
+    breadth-first with first-assignment-wins, so a contradictory set settles and reports instead
+    of oscillating; the bulk buttons and Solo deliberately bypass the engine.
+  * Switching a **parent** group off would flatten the arrangement of the groups nested in it, so
+    their modes are snapshotted (`properties._kbInner`) and restored when it comes back on.
   * Rows can be **hidden** (⋯ → "Hide from this list") for set-and-forget groups you never toggle.
     Hidden names are saved on the node (`properties._kbHidden`) so they travel with the workflow,
     hidden groups are skipped by the bulk buttons and by Solo (so "all off" can't disable your
@@ -44,6 +55,8 @@ class KinburgGroupControl:
     DESCRIPTION = (
         "Control panel for enabling/bypassing/muting workflow groups by name, and running a "
         "single group on its own (▶ = queue just that group's outputs + their dependencies). "
+        "Groups can be linked so that switching one on switches others off (a toggle, a 'one of' "
+        "radio, or one group driving several). "
         "Groups sharing a name are toggled together; nested groups are supported. The list "
         "grows automatically as groups are added to the workflow. Groups you never toggle "
         "(loaders, VAE, …) can be hidden from the list and brought back with the 👁 button."

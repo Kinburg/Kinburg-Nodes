@@ -858,6 +858,13 @@ function makeStreamingBubble(node, label, seed) {
   // Escape hatch: if a run dies somewhere the error listeners can't see, this unsticks the node.
   const acts = document.createElement("div");
   acts.className = "kb-lc-acts";
+  // ⏹ and ✕ are different things on purpose: stop KEEPS what has been written (the worker returns
+  // the partial text and it lands in the history like any reply — Send with an empty box will
+  // carry on from it), while ✕ walks away from the turn entirely.
+  acts.appendChild(actBtn("⏹", "Stop writing and keep what's there so far", () => {
+    api.fetchApi("/kinburg/llm/abort", { method: "POST" })
+      .catch((e) => console.error("[Kinburg chat] stop request failed", e));
+  }));
   acts.appendChild(actBtn("✕", "Give up on this turn (the reply is discarded)", () => {
     clearPending(node); render(node); renderPersonaBar(node);
   }));
@@ -1035,10 +1042,11 @@ function renderStats(node) {
   txt.title = "KV-cache fill after the last turn — prompt + reply, including the chat template";
   el.append(track, txt);
 
-  if (s.finish_reason === "length") {
+  if (s.finish_reason === "length" || s.finish_reason === "aborted") {
     const cut = document.createElement("span");
     cut.className = "kb-lc-cut";
-    cut.textContent = "⚠ cut off — Send with an empty box to continue it";
+    cut.textContent = (s.finish_reason === "aborted" ? "⏹ stopped" : "⚠ cut off")
+      + " — Send with an empty box to continue it";
     el.appendChild(cut);
   }
   if (plan.count) el.appendChild(archiveBtn(node, plan, pct >= getFold(node).at));

@@ -24,6 +24,7 @@ SUITES = [
     ("lora_triggers", "py", TESTS / "test_lora_triggers.py"),
     ("chat.js", "js", TESTS / "js" / "build_chat.mjs"),
     ("dream_board.js", "js", TESTS / "js" / "build_dream_board.mjs"),
+    ("group_control.js", "js", TESTS / "js" / "build_group_control.mjs"),
 ]
 
 
