@@ -118,6 +118,20 @@ def render(name):
     return render_values(p.get("type"), p.get("values") or {})
 
 
+def voice(name):
+    """A saved character preset's `voice` block, for Siren Cast — ``None`` for NONE / unknown / an
+    entity preset. Goes through the card node too, so a preset saved before the voice fields
+    existed simply comes back with empty tags rather than raising."""
+    if not name or name == NONE:
+        return None
+    p = _load().get(name)
+    if not p or str(p.get("type", "")).lower().startswith("entity"):
+        return None
+    values = {k: v for k, v in (p.get("values") or {}).items() if k != "save_preset_as"}
+    from ..context.character_card import CharacterCard
+    return CharacterCard().run(**values)[1]
+
+
 def full_data():
     presets = _load()
     return {

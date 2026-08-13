@@ -32,9 +32,76 @@ hex ::= [0-9a-fA-F]
 ws ::= [ \t\n]*
 '''
 
+# Siren Cast's `plan` block, one section per line. Not JSON on purpose — the node's parser reads
+# this table, and a table is also what a songwriter can read back and edit by hand.
+#
+# The lengths are constrained to a musical set of BAR counts rather than free numbers: a section is
+# written in bars, `Siren Cast` converts them with the bpm, and "3 bars" is almost always a slip.
+# Labels are constrained to the usual section names so they line up with the `[Verse 1 - ...]`
+# markers in the lyrics. The voice column can only be a name (or several joined by " + "), or "-"
+# for no vocal — the names have to match the `name` on the Character Cards wired into Siren Cast,
+# which is what the roster in the prompt is for.
+#
+# **A name may contain SPACES.** The first version of this rule allowed a single word, which did not
+# make a model skip a two-word member — it made it write "GruBNik" for "Gru BNik", and that then
+# missed the roster and fell through to being used as plain text. A grammar that cannot express the
+# right answer does not produce a refusal; it produces a confident wrong answer.
+#
+# **The row count is bounded and the table ends with a required END line, and both matter.** A
+# grammar with an open-ended `row+` never *forces* the model to finish: it only ever *permits* EOS,
+# and EOS is a low-probability option that top_p / min_p happily prune — after which the only legal
+# continuation left is another row, so the model writes rows until it hits max_tokens. The `{3,16}`
+# bound makes the runaway finite; the END line makes stopping a word the model is glad to write,
+# after which the grammar permits nothing but EOS. `_parse_plan` treats a bare END as end-of-table.
+# Raise 16 if a song genuinely needs more sections.
+SIREN_PLAN = r'''root ::= row{3,16} end
+row ::= label " | " voice " | " bars "\n"
+end ::= "END" "\n"?
+label ::= section (" " [1-9])?
+section ::= "Intro" | "Verse" | "Pre-Chorus" | "Chorus" | "Post-Chorus" | "Bridge" | "Solo" | "Break" | "Outro"
+voice ::= "-" | name (" + " name)*
+name ::= word (" " word)*
+word ::= letter (letter | [0-9'-])*
+letter ::= [A-Za-zА-Яа-яЁёІіЇїЄєҐґ]
+bars ::= ("2" | "4" | "6" | "8" | "12" | "16" | "24" | "32") " bars"
+'''
+
+# The song config that feeds Siren Cast — a caption block, a blank line, then the metas as
+# `key: value`. Companion to SIREN_PLAN: this pass runs BEFORE the lyrics (the plan needs the
+# finished text to size its sections, this needs nothing but the brief).
+#
+# There is deliberately NO vocals line. Per-section voices come from the plan, and describing the
+# timbres again in the caption pulls every section towards their average — which is the whole
+# reason a chorus sung by a woman came out sounding like the verses. Siren Cast appends the cast
+# itself when `cast_in_caption` is on. For an ensemble-level line (legitimately global, since it is
+# true of the whole track) add:
+#     ensemble-section ::= "*Ensemble:* " textline "\n"
+#
+# `keyscale` and `language` are pinned to the exact values Siren Cast's combos accept — a free
+# character class happily emits "C sharp minor" or "ua", neither of which is in the list (Ukrainian
+# is "uk"). `bpm` is held to 60-249 so a stray digit can't produce a 6 bpm song. The genre and
+# instrument lines allow digits and '&', without which "90s alt-rock" and "808" are unwritable.
+SIREN_CONFIG = r'''root ::= genre-section instruments-section bpm-line timesignature-line keyscale-line songname-line language-line
+
+genre-section       ::= "*Genre:* " textline "\n"
+instruments-section ::= "*Instruments:* " textline "\n\n"
+bpm-line            ::= "bpm: " bpm "\n"
+timesignature-line  ::= "timesignature: " ("2" | "3" | "4" | "6") "\n"
+keyscale-line       ::= "keyscale: " keyroot " " ("major" | "minor") "\n"
+songname-line       ::= "songname: " [-a-zA-Z0-9 '’а-яА-ЯёЁіІїЇєЄґҐ]+ "\n"
+language-line       ::= "language: " language "\n"
+
+textline ::= [-a-zA-Z0-9,'& ]+
+bpm      ::= [6-9] [0-9] | "1" [0-9] [0-9] | "2" [0-4] [0-9]
+keyroot  ::= "C#" | "Db" | "D#" | "Eb" | "F#" | "Gb" | "G#" | "Ab" | "A#" | "Bb" | "C" | "D" | "E" | "F" | "G" | "A" | "B"
+language ::= "en" | "ru" | "uk" | "de" | "fr" | "es" | "it" | "pl" | "pt" | "ja" | "ko" | "zh" | "yue" | "tr" | "ar" | "he" | "hi" | "unknown"
+'''
+
 DEFAULTS = {
     "Character Card (JSON)": CHARACTER_CARD,
     "Entity Card (JSON)": ENTITY_CARD,
+    "Siren Song Config (text)": SIREN_CONFIG,
+    "Siren Voice Plan (table)": SIREN_PLAN,
 }
 
 _LOCK = threading.Lock()

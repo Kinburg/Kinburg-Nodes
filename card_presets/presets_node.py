@@ -4,9 +4,13 @@ Build a library once (Card Save from a photo, or a Character/Entity Card's 💾 
 then reuse any of them here without re-describing the same subject each run. The `card` output is
 the same Markdown block the card nodes produce — feed it into Context Collector / an LLM `context`
 input. An optional `filter` dropdown narrows the preset list to a single tag (a frontend
-convenience; the chosen `preset` alone decides what's emitted). Category ``Kinburg-Nodes/LLM``.
+convenience; the chosen `preset` alone decides what's emitted). The `voice` output is the same
+hand-off Character Card gives Siren Cast, so a saved band member can drive the music too (empty
+for an entity preset, or for a character saved before the voice fields existed).
+Category ``Kinburg-Nodes/LLM``.
 """
 from . import store
+from ..context.character_card import VOICE_TYPE
 
 
 class CardPresets:
@@ -26,13 +30,13 @@ class CardPresets:
     def VALIDATE_INPUTS(cls, preset, filter=None):
         return True
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("card",)
+    RETURN_TYPES = ("STRING", VOICE_TYPE)
+    RETURN_NAMES = ("card", "voice")
     FUNCTION = "run"
     CATEGORY = "Kinburg-Nodes/LLM"
 
     def run(self, preset="", filter=None):
-        return (store.render(preset),)
+        return (store.render(preset), store.voice(preset))
 
 
 NODE_CLASS_MAPPINGS = {"CardPresets": CardPresets}

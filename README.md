@@ -114,6 +114,14 @@ a name + a description. Both cards carry a **`save_preset_as`** field (+ optiona
 it captures whatever's filled in, whether **typed or wired in** (e.g. from a photo description);
 reuse it via **Card Presets** (below). To save an LLM's JSON card in one step instead, use **Card
 Save**.
+Character Card also describes a **singing** voice — **`voice_tags`** (a music caption fragment:
+*"male lead vocal, raspy baritone, close-mic"*) and **`voice_notes`** (prose for the LLM: range,
+habits, what they never do). Both go into the Markdown block, and a second **`voice`** output
+carries `voice_tags` alone to **Siren Cast**, which is what makes a band member one card: their
+looks reach the cover-art prompt, their voice reaches the song, and the same card tells the lyrics
+LLM who it's writing for. Only `voice_tags` reaches AceStep — pouring "brown eyes, navy dress" into
+a music caption just dilutes it. **Card Presets** emits the same `voice`, so a saved member drives
+the music too (a character saved before these fields existed simply comes back with empty tags).
 **`Context Collector`** gathers any number of cards / text chunks (auto-growing
 `item_N` inputs, empties skipped) under a `title` and wraps them in a delimited block —
 `<context>…</context>`, a custom tag, a Markdown heading, or none — so the model can tell
@@ -399,7 +407,223 @@ moves the result off the GPU before returning, so it waits for the work to finis
 the **first stage absorbs the model load** when the checkpoint isn't resident yet, because ComfyUI
 loads it inside that first sampling call.
 
-### `siren/` — Siren (Music Sampler) 🧜, Siren Section 🧜, Siren Scope 🧜, Siren Compare 🧜
+### `audio_sr/` — Audio SR (48 kHz Upscale) 🔊
+**`Audio SR`** is bandwidth extension for a finished mix: AudioSR is a latent-diffusion model that
+*invents* the top end rather than filtering it, so a track that dies at 11 kHz comes back with
+plausible 11-24 kHz content. Mono, 48 kHz out. The model is vendored under `audio_sr/vendor/audiosr`
+(MIT; see `vendor/NOTICE.md` for attribution and the three edits made to it) so the node does not depend
+on another pack being installed.
+
+**A stereo mix keeps its image.** AudioSR is a mono model, so the wrapper this replaces summed L and
+R — and measured on a real 3-minute take that took an L/R correlation of **+0.45** and a side/mid RMS
+of **0.61** down to **1.00** and **0.00**. The whole image, for good. `stereo = mid/side` sends only
+the mid channel through the model and carries side through untouched, so only what the model invents
+above the roll-off is centred. (`sum to mono` is still there to A/B against. Never run L and R
+separately: two independent diffusion passes decorrelate and the invented top comes out phasey.)
+
+**`match_level`** puts the output's energy *below 10 kHz* back where the input's was — not an overall
+match, since the model genuinely adds energy up top and matching totals would turn the track down to
+pay for it. Below the roll-off the model measured transparent (-0.4 dB at 8-12 kHz), so drift there is
+drift: on the same take it was -1.2 dB at 0-4 kHz and -1.7 dB at 4-8 kHz, which reads as the mix
+losing body.
+
+What the model actually does, measured on that take (Raw → SR, energy per band):
+`8-12 kHz -0.4 dB` · `12-16 kHz +3.3 dB` · `16-20 kHz **+30.6 dB**` · `20-24 kHz **+55.9 dB**`. So it
+is transparent below about 12 kHz and writes the octave above from nothing — which is the job, since
+AceStep's own output rolls off around 12 kHz however full-band its 48 kHz container is.
+
+Three more things this fixes over the wrapper it grew out of:
+
+- **The progress bar works.** The old one called `model_management.get_progress_state()` and
+  `comfy.model_management.update_progress()` — *neither exists in ComfyUI* — inside a bare
+  `except Exception: pass`, so it silently did nothing and the node looked hung for minutes. The time
+  goes in the DDIM loop, so that is where it is driven from: the vendored `ddim.py` carries one
+  `STEP_HOOK` (`None` by default, i.e. upstream behaviour) and the node fills it in. The bar counts
+  **chunks × steps**, the real unit of work.
+- **Cancel lands inside a chunk**, for the same reason — interruption used to be checked only between
+  chunks, so a stop could sit unhonoured for fifteen seconds of audio.
+- **Chunk geometry.** The plan is computed up front, so every window is a full chunk and the tail one
+  is pulled *back* to end at the last sample instead of being padded with silence the model would
+  denoise at full price. The crossfade uses a **periodic** Hann pair, whose halves sum to exactly 1;
+  upstream's symmetric one dips about 1.2% at each join. `chunk_seconds` defaults to 15.36 = 3 × 5.12
+  because the batch builder pads every chunk up to a multiple of 5.12 s.
+
+**`audiosr/clap/` was cut** — 56 files, 3.25 MB, three quarters of the vendored source. Its only
+construction site was a `self.clap = …` in `ddpm.py` that nothing in the package ever read, a leftover
+of the AudioLDM lineage: super-resolution conditions on `VAEFeatureExtract`, not on CLAP. It was
+costing 0.80 GB of the checkpoint's 6.18 GB and a HuggingFace round-trip *at import time*
+(`BertModel.from_pretrained("bert-base-uncased")` fired while the module was merely being imported).
+Checked rather than assumed: the trimmed `LatentDiffusion` has **0 missing** parameters against both
+real checkpoints and 507 unexpected ones, all `clap.*` — so the model is fully satisfied by the
+weights it gets, and only never-used tensors are now ignored. 1085.8 M params, 4.34 GB fp32, down
+from 5.14.
+
+`checkpoint` lists `ComfyUI/models/AudioSR` and the variant (`basic` for music, `speech` for voice) is
+read from the file name, since the two need different configs. `keep_loaded` holds ~6 GB in VRAM
+between runs. Category `Kinburg-Nodes/audio`.
+
+**On the speechbrain landmine.** `util/imports.py` exists because of a bug that has nothing to do with
+this node but killed it: speechbrain 1.1 puts `LazyModule` objects in `sys.modules`, `inspect.getmodule`
+walks every entry doing `hasattr(m, "__file__")`, and for the ones whose optional dependency is absent
+that raises `ImportError` — so once *any* pack has imported speechbrain, any node calling into
+`inspect` dies with `Lazy import of LazyModule(target=speechbrain.integrations.k2_fsa) failed`.
+speechbrain guards against exactly this, but the guard tests `filename.endswith("/inspect.py")` and on
+Windows the frame reads `…\Lib\inspect.py`, so it never fires. `defuse_lazy_modules()` replaces the
+unimportable entries with stubs — nothing is lost, they could not be imported anyway — and is called
+at the top of the node's `run()`, not at import, because the mine is armed whenever the *other* pack
+loads.
+
+### `siren/` — Siren Cast 🧜, Siren Score 🧜, Siren (Music Sampler) 🧜, Siren Section 🧜, Siren Scope 🧜, Siren Compare 🧜
+
+#### `Siren Cast (Voice Plan) 🧜` — who sings where
+
+Replaces `TextEncodeAceStepAudio1.5`. It exists because of two things that node cannot express.
+
+**Tags have no time axis; the plan does.** With `generate_audio_codes` on, the text encoder runs a
+Qwen LM that emits `ceil(duration) * 5` tokens — one every **200 ms**, a 5 Hz plan of the whole song.
+Each is a single FSQ index (`levels [8,8,8,5,5,5]` = 64000, one quantizer), so the tokens are
+independent; the detokenizer expands each into 5 latent frames with attention running **only inside
+its own 5-frame window**; and the result is concatenated onto the latent **channel-wise, frame for
+frame**. That makes the plan the strongest — and the only *time-aligned* — conditioning in the model.
+`tags` and `lyrics` reach the DiT globally through cross-attention, which is exactly why *"male
+vocal, female vocal"* in the tags reads as a wish about the average track rather than an instruction
+about the second verse.
+
+So Cast builds the plan **section by section**, each with its own voice — not by generating clips and
+gluing them: before decoding section *k*, the codes already written are put back into the prompt as
+the assistant's output so far and decoding **continues**, with that section's caption in front of it
+and the whole song's metas in the `<think>` block. The sampling loop is comfy's own
+(`ace15.sample_manual_loop_no_classes`, handed ready-made `ids`), so nothing about how a token is
+drawn is reimplemented. Total decode cost is one full-length pass; the extra is one prefill per
+section. **One sampling run, no seams, no audio editor** — the in-graph version of the "generate each
+part with a fixed seed and splice it" advice, done in the plan instead of in the waveform.
+
+**`cfg_scale` on the core node barely touches the caption.** Its negative prompt repeats the *same*
+caption and the *same* lyrics — only the `<think>` metas block is emptied. So `cfg_scale 2.0`
+amplifies "with bpm/duration/key" against "without them", and the caption gets no guidance at all.
+The tokenizer already accepts `caption_negative` / `lyrics_negative` / `*_negative` metas; the core
+node just never passes them. Cast does, and **mirrors the metas into the negative** so the two
+prompts differ in the caption alone. `guidance`:
+- **`voice delta`** (default) — the negative is that section's caption **minus its voice line**, so
+  `cfg_scale` amplifies precisely the difference between *"someone sings this"* and *"**she** sings
+  this"*. A section with no voice has no delta and falls back to core behaviour.
+- **`negative tags`** — the negative is the `negative_tags` text. General prompt adherence.
+- **`metas only (core behaviour)`** — what the core node does, for honest A/B.
+
+The `plan` is one section per line, paste-able from whatever wrote it (blank lines, `#` comments, a
+markdown rule and a pasted header are ignored):
+
+```
+Intro    | -           | 8
+Verse 1  | Alex        | 24
+Chorus   | Nina        | 8 bars
+Bridge   | Nina + Alex | 0:12 | drums drop out
+Outro    | -           | 4
+```
+
+Column 2 is a wired **`voice`** name (several joined by `+`), or free text used verbatim, or `-` for
+no vocal; column 3 takes seconds / `24s` / `m:ss` / `N bars`; an optional column 4 is appended to that
+section's caption. Voices come from **Character Card**'s `voice` output (or **Card Presets**), so a
+band member is described once for the lyrics LLM, the cover art and the song. Lengths are rounded to
+whole codes (0.2 s) and add up to the **`seconds`** output — wire that into `Empty Ace Step 1.5 Latent
+Audio` and the plan and the latent can never disagree, which is the classic AceStep mistake. An
+**empty plan** is one caption for the whole song, i.e. the core node plus the guidance fix — start
+there, it is one variable. Also out: `timeline` (m:ss per section, so a section can be typed straight
+into Siren Section for a retake), `report`, and `gen_extra_info` recording who sang what. Each section
+draws from `seed + its index`, so editing one section's voice leaves every earlier one bit-identical.
+`cast_in_caption` appends the distinct voices to the **global** caption, telling the DiT which
+timbres exist at all — the first thing to A/B if sections start bleeding into each other. The LM
+sampling defaults are left exactly at the core node's on purpose (`cfg_scale 2.0 · temperature 0.85 ·
+top_p 0.9 · top_k 0 · min_p 0.0`); the guidance is the one change to judge first. `temperature`
+0.6–0.7 or `min_p` 0.02–0.05 tighten the plan after that — but **never `temperature 0`**: an
+autoregressive audio LM decoded greedily falls into repeating the same bar.
+
+#### `Siren Score (Lyrics → Plan) 🧜`
+
+Writes the plan from the lyrics, with no LLM pass in the way. Everything the plan needs is already in
+the text: the section list and its order are the `[Verse 1 - …]` markers, who sings each one is in the
+marker, and how long a section should be is a function of how many lines it has.
+
+- **Sections** — a bracketed line whose text *starts with* a section word opens one (a prefix test, so
+  `[Chorus - wall of guitars]` is a section and `[wall of guitars, no chorus pad]` is not). Synonyms
+  map onto the canonical labels, including `Bridge/Chaos` → Bridge and `Hook`/`Refrain` → Chorus.
+  Other bracketed lines are annotations of the current section — which is where the voice often hides,
+  under a header that describes only the drums.
+- **Voice**, most certain first: a member's name in the marker (`Keen Burg`, or a duet with `+`); a
+  name buried in its prose; `MALE`/`FEMALE` matched against the wired cards' `voice_tags` and
+  `gender`; failing all that, the marker's own vocal wording used verbatim, which is why this works on
+  lyrics written before any of it existed. An ambiguous gender resolves *and* is flagged.
+- **Two singers at once is the one thing the model cannot do**, structurally: the plan is one audio
+  code per 200 ms and the caption is one description, so two timbres over the same frames come back as
+  their average (measured once as "two female vocals" where a man and a woman were asked for). A
+  bracketed line that **names** a member therefore *splits* the section — one sub-section per voice,
+  so they **alternate**, which the model does well. Sub-sections are floored at 2 bars rather than
+  `min_bars`, because an exchange of single shouted lines is meant to be short. A header duet with
+  nothing to split on becomes the first-named singer plus a short `with male backing harmonies` note,
+  and the report says so and shows what to write instead.
+- **Lengths run backwards from the target, not forwards from a rate.** `pad_to_seconds` says how long
+  the song is; `tail_bars` takes its slice off the end; a section with no sung lines takes
+  `instrumental_bars`; everything left is shared among the sung sections **in proportion to their
+  syllables** (Hamilton's method on 2-bar units, floors applied afterwards so a longer line can never
+  come out shorter than a shorter one). The **singing rate is an output**, printed in the report.
+  That way round is the point: with a rate as the input, the slack between the words and the wanted
+  length hid *inside* the vocal sections — and a section with more room than its words need does not
+  get sung slower, the model FILLS it. That is what turned a 6-second intro into a 40-second one that
+  ate the first verse. With the length as the input, slack can only land where it was asked for.
+  When the resulting rate falls outside 2.5–8 syllables a second the node says so, names the roomiest
+  (or tightest) section, and gives the length this lyric would actually suit. Syllables are vowel
+  groups with English's silent final `e` dropped; a line wholly in round brackets is an annotation, not
+  a lyric — production notes don't get sung, and a backing echo like `(Живий!)` is sung *over* the line
+  above rather than after it, so neither adds duration.
+- **`tail_bars`** is a small explicit choice (0–32) rather than a residual. Measured with
+  `lyrics_in_negative` off: a **short** tail (2–8 bars) buys a last chorus, a proper outro and a clean
+  ending instead of the track stopping dead on the final word, while a **long** one is actively bad —
+  the model repeats the last phrase over and over to fill it and starts eating the ends of held notes.
+  (An earlier measurement had total length as the strongest quality driver; that was taken with
+  `lyrics_in_negative` **on**, before the words were guided. Both are real; this is the one that holds.)
+- **`pad_placement`** decides where those blocks go, and the trade-off is not taste — it is where a
+  lyric can be interrupted. AceStep gets the words with **no timing in them**, matched against the
+  plan, so a gap in the middle asks the model to hold the line until the singing resumes; if it
+  doesn't, everything after shifts. `after the vocals` (default) and `intro + outro` sit entirely
+  outside the lyric and carry none of that risk; the default is the blunter of the two only because it
+  is the one with a take behind it. `between sections` is the most song-shaped — one block opens, the
+  rest go after choruses and bridges, never inside a verse running into its own pre-chorus, and never
+  inside a Bridge exchange — and the only one that can make the lyric drift.
+- **A roughly even split of sung and instrumental bars is a working shape, not a smell.** The take that
+  worked was 44 sung against 42 padded and came back harmonious, with enough instrumental breaks and
+  no dragged words — the model fills that space musically, given a caption that says what the record
+  is. The node only mentions the ratio when padding runs past twice the sung length, and then as an
+  alternative (ask the lyrics pass for more sections) rather than a correction.
+- **The 4th column** carries the marker's arrangement and delivery notes onto that section's caption,
+  trimmed fragment-by-fragment against the card's own tags — so `[Intro - deep hypnotic spoken word -
+  MALE vocal]` keeps "deep hypnotic spoken word" and drops "MALE vocal", which the card already said.
+  Band members' **names never reach a caption** (AceStep's caption is a music description; "Keen Burg"
+  is not one), and the column is capped at 4 clauses with the rest reported: everything there sits
+  inside Siren Cast's cfg delta and is guided as hard as the voice, so a Bridge that accumulated 8
+  contradictory clauses came back sung by one indistinct voice. If a take is muddy, `arrangement_notes`
+  off is the cheapest thing to try.
+
+Both Siren nodes are kept to the inputs you actually touch, with everything settled folded behind
+*Show advanced inputs* — Score shows `lyrics` (input only; nobody types a lyric sheet), `bpm`,
+`timesignature`, `syllables_per_second`, `pad_to_seconds`, and Cast shows `clip`, `tags`, `lyrics`,
+`plan` (all three wired), `seed`, `bpm`, `timesignature`, `language`, `keyscale`.
+
+`plan` is **optional**: unwired, the node encodes one caption for the whole song — the core node's
+behaviour plus the guidance fix, which is where to start and how to A/B the guidance on its own. And
+the plan's decode reports **one** progress bar across all its sections rather than one per section:
+comfy's sampling loop builds its own bar on every call, so a twelve-section plan used to show twelve
+bars each restarting at zero, which reads as a stuck node.
+
+**The values that come from the song-config pass are plain fields, not dropdowns**, because a combo
+input cannot accept the STRING a text parser hands it — which is what stopped the config being wired
+straight in. They are parsed leniently and every correction is reported: `timesignature` takes
+anything with a digit (`4`, `"4/4"`); `language` fixes the slips a model asked for a two-letter code
+actually makes (Ukrainian is `uk` not `ua`, Chinese `zh` not `cn`, Japanese `ja` not `jp`);
+`keyscale` reads `C major`, `c# minor`, `C sharp minor`, `d flat major` and `Am`, keeping whichever
+spelling of a black key was written since AceStep's list carries both. Anything the list cannot
+express falls back with a line in the report rather than quietly poisoning the metas.
+
+#### The sampler and the section window
 
 An AceStep audio latent is a **one-dimensional strip of time**: `[B, 64, T]`, one frame per **40 ms**
 (the 1.5 VAE turns a frame into 1920 samples at 48 kHz — **25 frames per second**). That single fact is
@@ -1095,13 +1319,34 @@ on the same config.
 
 ### `grammar_presets/` — Grammar Presets
 **`Grammar Presets`** is a dropdown of **GBNF grammars** → one `grammar` STRING output. It ships
-with templates that force an LLM's output into a fixed shape — **Character Card (JSON)** and
-**Entity Card (JSON)** — and you can add / edit / delete your own (**➕ Add grammar**, persisted on
-disk). Wire the `grammar` output into a **Local LLM (GGUF)** node's `grammar_override` input, feed
-that node a **photo** + a short prompt ("fill the card from this image"), and the vision model
-returns exactly that structure straight from the picture — no multi-image-context gymnastics.
-Pair it with **Card Save** (below) to drop that generated card straight into your library.
-Category `Kinburg-Nodes/LLM`.
+with templates that force an LLM's output into a fixed shape — **Character Card (JSON)**,
+**Entity Card (JSON)**, **Siren Song Config (text)** and **Siren Voice Plan (table)** — and you can
+add / edit / delete your own (**➕ Add grammar**, persisted on disk). Wire the `grammar` output into
+a **Local LLM (GGUF)** node's `grammar_override` input, feed that node a **photo** + a short prompt
+("fill the card from this image"), and the vision model returns exactly that structure straight from
+the picture — no multi-image-context gymnastics. Pair it with **Card Save** (below) to drop that
+generated card straight into your library.
+
+**Song Config** is the LLM pass that turns a brief into Siren Cast's inputs: a caption block (`*Genre:*` / `*Instruments:*`), a blank
+line, then the metas as `key: value`. `keyscale` / `language` / `timesignature` are pinned to the
+exact values Siren Cast's combos accept — a free character class cheerfully writes `C sharp minor`
+or `ua` (Ukrainian is `uk`), and neither is in the list — and `bpm` is held to 60–249. It has **no
+vocals line on purpose**: per-section voices are the plan's job, and naming the timbres in the
+caption as well drags every section towards their average. **Voice Plan** runs *after* the lyrics,
+because sizing a section needs the finished text; lengths are constrained to musical **bar** counts
+and labels to the usual section names, so they line up with the `[Verse 1 - …]` markers. Give that
+pass the same Context Collector block with the band in it — the names in the table have to match the
+`name` on the Character Cards.
+
+Voice Plan bounds its rows (`row{3,16}`) and **requires a closing `END` line**, and both are there
+for the same reason: a grammar whose repetition is open-ended never *forces* the model to finish, it
+only *permits* EOS — and EOS is a low-probability option that `top_p` / `min_p` / `top_k` prune away,
+after which the sole legal continuation is another row and the model writes rows until `max_tokens`.
+So for a grammar-constrained pass, **turn the truncation samplers off** (`top_p 1.0`, `top_k 0`,
+`min_p 0`) and `repeat_penalty` with them — a table format *mandates* repeated tokens, so penalising
+them fights the grammar. Low `temperature` is enough to keep it disciplined. Putting `END` in the
+node's `stop` field as well makes stopping independent of EOS entirely. `Siren Cast` treats a bare
+`END` line as end-of-table and silently drops anything after it. Category `Kinburg-Nodes/LLM`.
 
 ### `card_presets/` — Card Save, Card Presets
 **`Card Save`** closes the loop Grammar Presets opens: wire an LLM's JSON card output (constrained
