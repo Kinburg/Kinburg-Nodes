@@ -1,11 +1,85 @@
-# Kinburg-Nodes
+# 🎨 Kinburg-Nodes
 
-A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI reads
-the node mappings from the root `__init__.py`, and the sets are split into subpackages.
+A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI reads the node mappings from the root `__init__.py`, and the sets are split into subpackages.
 
-## What's inside
+---
 
-### `local_llm/` — Local LLM (GGUF)
+## 📍 Table of Contents & System Index
+
+Explore the node collections grouped by system module:
+
+<details open>
+<summary><b>🗺️ Quick Navigation Index</b></summary>
+
+<br>
+
+- 🧠 **[LLM & Vision Systems](#-llm--vision-systems)**
+  - [`local_llm/`](#-local_llm--local-llm-gguf--live-logging) — Local LLM (GGUF), Vision Settings, Live Log, Chat, Token Counter, Context Sizer
+  - [`context/`](#-context--character-card-entity-card-context-collector) — Character Card, Entity Card, Context Collector
+  - [`vision_judge/`](#-vision_judge--vision-llm-judge--criteria-builder) — Vision LLM Judge, Criteria Builder
+  - [`card_presets/`](#-card_presets--card-save--card-presets) — Card Save, Card Presets
+  - [`grammar_presets/`](#-grammar_presets--gbnf-grammar-presets) — GBNF Grammar Presets
+  - [`show_text/`](#-show_text--show-text-markdown) — Show Text (Markdown)
+  - [`gguf_convert/`](#-gguf_convert--safetensors--gguf-converters) — Safetensors → GGUF Converters
+
+- 🐍 **[Iterative Samplers & Optimizers](#-iterative-samplers--optimizers)**
+  - [`ouroboros/`](#-ouroboros--ouroboros-self-correcting-sampler-) — Ouroboros Self-Correcting Sampler, Sampler/Critic Settings, Live Log
+  - [`chimera/`](#-chimera--chimera-multi-sampler-) — Chimera Multi-Sampler
+  - [`loops/`](#-loops--flexible-iteration-loops) — For Each, Repeat, While, Get by Index, Delay, List Output
+
+- 🎵 **[Audio & Music Suite](#-audio--music-suite)**
+  - [`siren/`](#-siren--siren-music-suite-) — Siren Cast, Siren Score, Siren Sampler, Siren Scope, Siren Compare
+  - [`audio_sr/`](#-audio_sr--audio-sr-48-khz-upscale-) — Audio SR 48 kHz Upscale
+  - [`save_song/`](#-save_song--save-song) — Save Song
+
+- 🎬 **[Video Generation & Storyboarding](#-video-generation--storyboarding)**
+  - [`morpheus/`](#-morpheus--morpheus-video-sampler--storyboard-) — Morpheus Video Sampler, Morpheus Dream, Morpheus Storyboard, Dream Board
+
+- 🎛️ **[Presets & Asset Management](#-presets--asset-management)**
+  - [`model_presets/`](#-model_presets--model-capture--settings-management) — Model Capture, Model Select, Settings Select, Settings Save
+  - [`prompt_presets/`](#-prompt_presets--prompt-presets) — Prompt Presets
+  - [`prompt_variations/`](#-prompt_variations--prompt-variations) — Prompt Variations
+  - [`lora/`](#-lora--lora-trigger-loader--accumulator) — Lora Trigger Loader, Lora Unlim Accumulator
+
+- 🖼️ **[Image Processing & Visualizers](#-image-processing--visualizers)**
+  - [`image_compare/`](#-image_compare--image-compare-html--color-caption) — Image Compare (HTML), Color Caption
+  - [`image_batch/`](#-image_batch--unlim-image-batch--list) — Unlim Image Batch, Unlim Image List
+  - [`collage/`](#-collage--collage) — Collage Layout Builder
+
+- 🛠️ **[Workflow Control & Utilities](#-workflow-control--utilities)**
+  - [`util/`](#-util--general-workflow-utilities) — Date String, Text Concat, Color Picker, Text Transform, Any Switch, JSON Extract
+  - [`timer/`](#-timer--execution-timer) — Start Timer, Stop Timer
+  - [`gen_info/`](#-gen_info--generation-info--filter) — Generation Info, Generation Info Filter
+  - [`group_control/`](#-group_control--group-control-) — Group Control 🎚️
+  - [`accumulators/`](#-accumulators--name-based-accumulators) — Set / Get Accumulators (images, audio, text, prompts, gen_info)
+  - [`list_ops/`](#-list_ops--list--batch-operations) — Image Batch & List Insert / Remove
+  - [`report/`](#-report--investigation-report-db) — Report DB Investigation
+
+</details>
+
+---
+
+## 🧩 Node Systems & Documentation
+
+
+### 🧠 LLM & Vision Systems
+
+
+<details>
+<summary><b>🤖 <code>local_llm/</code> — Local LLM (GGUF) & Live Logging</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Run GGUF LLMs directly inside ComfyUI with **guaranteed VRAM unloading** via a separate worker process. Features real-time streaming progress, token counts, reasoning/answer splitting (`<think>` tags or custom markers), vision model support (mmproj), structured output (JSON/GBNF/Ideogram), and recursive GGUF scanning.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Local LLM (GGUF)</code></b> — <i>Main GGUF inference & vision node</i></summary>
+
+<br>
+
 > **All the settings below live on the `Local LLM Settings (GGUF)` node** and reach the LLM node
 > through a single **`config`** link. There's now **one** node — **`Local LLM (GGUF)`** — with
 > `config` + `user_prompt`, plus an optional **`image`** input (connect it, with a `Vision Settings`
@@ -104,7 +178,271 @@ troubleshooting. `unload_comfy_models` frees image models first; `ready_path` ov
 health probe. Text only. Node: **`Local LLM (server client, text)`** (category
 `Kinburg-Nodes/LLM`).
 
-### `context/` — Character Card, Entity Card, Context Collector
+</details>
+
+<details>
+<summary>🔹 <b><code>Local LLM (server client, text)</code></b> — <i>Client for llama-server, koboldcpp, or remote OpenAI-compatible servers</i></summary>
+
+<br>
+
+
+
+</details>
+
+<details>
+<summary>🔹 <b><code>Local LLM Chat (GGUF) & Send Image</code></b> — <i>Interactive multi-turn LLM chat interface inside ComfyUI</i></summary>
+
+<br>
+
+**`Local LLM Chat (GGUF)`** (in the `local_llm/` package) is a self-contained multi-turn chat node.
+It's deliberately bare — just the **chat window** (User/LLM bubbles in a fixed-height, scrollable
+box, so the node doesn't grow as the chat fills), the message field, a **context meter**, an
+optional row of **persona chips**, and the **Send / Approve / Clear** buttons. Everything about
+*how* to generate comes through the **`persona_1`** input.
+
+**`Local LLM Settings (GGUF)`** is that config node: it holds the options — model, system prompt,
+sampling, loader (`n_ctx` / `n_gpu_layers` / …), reasoning split, `output_format` / grammar,
+`extra_load_args`, `chat_template_path` (optional chat-template override — see above), unload
+toggles — plus two connect-only inputs: **`context`** (reference material
+appended to the system prompt — e.g. Character Card / Context Collector) and **`vision`** (from a
+**`Vision Settings (GGUF)`** node — `mmproj` / `vision_handler` / `image_max_side`; connect it only
+for vision). It emits everything as one `KINBURG_LLM_CONFIG` bundle. Wire its `config` output into
+any LLM node — the chat node's **`persona_1`** **and** the text/vision nodes take the same bundle,
+so one Settings node can drive several.
+
+- **📨 Send** runs the workflow up to the chat node: `run()` generates a reply from the stored
+  history + your message (+ optional image), **streams it into the bubble live** (over a
+  `kinburg.chatllm` websocket event), and **blocks the downstream branch** (`ExecutionBlocker`) so
+  nothing past the node runs while you chat. Reasoning models: the `<think>…` stream shows in an
+  open **💭 thinking** block during generation, then collapses into a **💭 reasoning** toggle with
+  the answer as the main text (only the answer goes downstream).
+- **✅ Approve** runs with the gate open: `run()` **skips generation** and emits the **last reply**
+  on the `text` output, so it flows downstream immediately (no re-generation, any seed).
+
+**Sending a picture.** **Ctrl+V**, drop a file on the chat window, or hit the **📎** in the corner
+of the input box. Thumbnails queue in a tray above the input (**✕** takes one off); they go out with
+your next message and stay in its bubble for good — click one to open it full size. Works with an
+empty message: a picture on its own is a perfectly good "look at this".
+
+Two things make this different from the `image` input. First, it is **not a graph link** — the
+picture is uploaded to `input/kinburg_chat/` and referenced by name, so 📨 Send never re-runs an
+image branch to fetch it (an `image` wired in from a sampler would regenerate on *every* message
+unless its seed is fixed). Second, the pixels reach the model on **that turn only**. From the next
+turn the picture is a text marker — `[image]`, or `[image: …]` once something fills the caption —
+so a long conversation with pictures in it costs no more context than a conversation without. The
+chat still shows every one of them; only the model's copy degrades to a line of text.
+
+Needs an `mmproj` on the active persona's Settings node, same as any vision run — and mixing
+picture turns with plain ones is cheap: the projector is attached per request rather than at load
+time, so the model stays put and only the (much smaller) clip is loaded and released around it.
+
+**`Send Image to Chat`** does the same thing for a picture your workflow just generated, so you
+never have to copy one out of a preview by hand. Wire an `IMAGE` in (it passes straight through, so
+the node sits inline), and:
+
+- **`send_as`** — *me (user)* drops it in the chat's tray, exactly as if you had pasted it: pixels
+  go to the model with your next message. A **persona** instead hangs it on that persona's most
+  recent bubble, so it reads as though they sent it. The model is not shown those pixels — llama.cpp
+  only takes images on user turns, and a persona has no need to study a photo it supposedly took —
+  and by default the picture leaves nothing in the context either. That is usually right: the
+  picture came from something the persona had just described, so a marker would say it twice. Turn
+  on **`note_in_context`** (with a `caption`) when you want the conversation to record it.
+- **`when`** — *on button press* saves the picture and waits for the **📌** on the node, so you can
+  look at the result and re-roll before committing. *every run* pushes as soon as the node executes.
+  Either way the filename is a hash of the pixels, so re-running a branch that produced the same
+  picture pushes the same reference and the chat recognises it instead of stacking duplicates.
+  📌 reads `send_as`, `caption`, `shot` and `note_in_context` **when you press it** — deciding who a
+  picture comes from is something you do after looking at it, so changing them post-generation
+  works without re-running anything. Only `megapixels` needs a re-run; it changes the saved file.
+- **`caption`** — one or two sentences of plain prose: this is what the model reads about the
+  picture once the pixels are gone. Not the generation prompt — a paragraph of comma-separated tags
+  sitting in the conversation teaches the persona to write in comma-separated tags. If a "camera"
+  persona writes both, split them: one line for the sampler, one for here.
+- **`megapixels`** downscales the copy that goes to the chat (0 = full size); **`shot`** is an
+  optional keyframe label kept with the picture, so a chat can be read back as a storyboard.
+- **`→ chat`** picks the target chat window; leave it on auto when there is only one.
+
+Like pasting, none of this is a graph link, so it never causes 📨 Send to re-run a sampler.
+
+**Taking one back.** Hover a picture in a bubble for a **✕** — sent by the wrong persona, or by
+accident, and it comes straight back out without touching the reply it was hanging on. A bubble
+that existed only to carry it disappears with it. 🗑 on a whole message, and 🗑 Clear on the whole
+chat, take their pictures too; Clear counts them before asking.
+
+Removing a picture deletes its file, unless something in the graph is still showing it — another
+bubble, another chat node, or a `Dream Board 🎬` whose snapshot still names it (a picture in two
+places is one file, since the name is a hash of its pixels).
+Deletion is limited to `input/kinburg_chat/` — your own `LoadImage` sources in the input folder are
+never touched. And a file removed by mistake comes back by re-running the branch that made it: the
+hash, and therefore the name, is the same.
+
+**Stopping a reply.** While one is being written its bubble carries **⏹** and **✕**, and they mean
+different things. **⏹** stops the model between tokens and **keeps what it has written**: the
+partial text lands in the history like any other reply, the meter says `⏹ stopped`, and Send with an
+empty box carries on from it — the same continuation a reply cut off by `max_tokens` gets. **✕**
+walks away from the turn and discards it. Stopping does not kill the worker or unload the model, so
+the next turn starts immediately.
+
+**Editing the conversation.** Hover any bubble — yours or the model's — for **⧉ copy · ✎ edit ·
+↻ resend · 🗑 delete**. ✎ swaps the bubble for an inline textarea sized to the message it holds
+(Esc cancels, Ctrl+Enter saves). ↻ replays exactly the turn that produced the message, dropping
+everything below it — a normal question/answer pair goes back to your question, while a persona's
+no-user-message turn replays just that one reply. All of it is plain surgery on the stored history, so the
+next turn simply sees the conversation you left behind. Everything is disabled while a reply is in
+flight; if a run dies before reaching the node, **✕** on the live bubble unsticks it.
+
+**Personas.** Six inputs — **`persona_1..6`** — each take a *whole* `Local LLM Settings (GGUF)`
+bundle, so a persona brings its own **model, sampling and system prompt**, not just a different
+prompt. **`persona_1` is the node's config**: wire only that one and this is an ordinary chat node
+with no chip row. Wire a second and a chip row appears, one chip per persona. Clicking a chip only
+**selects** it — 📨 Send is the sole trigger — and the active persona's bundle becomes the config
+for that turn. All personas share one history, so a prompt-writer sees the whole discussion (as far
+back as its window reaches); when it speaks, the other personas' replies are prefixed with their
+name (`[Order manager]: …`) so it doesn't mistake them for its own past turns. Bubbles are labelled
+with their persona once there's more than one.
+
+The **⚙** chip sets, per persona: the **chip label** (defaults to the title of the wired-in node,
+but only if you renamed it — stock Settings nodes all read the same), an optional **trigger**
+message, and the two context controls below. With nothing else wired the chip row is hidden and the
+node behaves exactly as before.
+
+**Who sees what.** Two independent per-persona settings decide which turns reach the model. Both
+are worked out per request, never frozen into the history, so changing one takes effect on messages
+that are already there — and the chat dims exactly what the persona you have selected won't see.
+
+- **`Keep in context`** — *how long*. A prompt-writer emits a 300-token draft every press, and after
+  an iteration or two the newer one supersedes it. This is how many of that persona's **own** most
+  recent turns survive: blank = all (the default), `0` = none, `2` = the last two. It counts its own
+  turns, not every turn since — chatting with someone else for twenty messages shouldn't make the
+  writer forget the draft you're revising. A turn is the reply *plus* the instruction that produced
+  it, so nothing is left dangling.
+- **`Private`** — *for whom*. The persona's turns go to nobody but itself. It still reads its own
+  back (that's what makes revising a draft work), while the persona you're brainstorming with never
+  wades through prompt sprawl. Combine them: private + keep 2 = "I see my own last two, nobody else
+  sees any."
+
+Withheld messages stay in the chat, dimmed with 🚫; hover for which rule caught them. A message you
+hide by hand is a third, separate thing and comes back with the **👁** button on its bubble.
+✅ Approve releases the last reply regardless of any of this.
+
+**What 📨 Send does with an empty input box** depends on who spoke last:
+
+| Situation | What happens |
+|---|---|
+| You typed something | A normal turn, as always. |
+| Box empty, **you switched persona** | A turn with **no user message at all** — the persona works from the conversation and its own system prompt, so nothing prods it in a way everyone else would then see in the context. Set a **trigger** in ⚙ if you'd rather send a standing instruction. |
+| Box empty, **the last reply is the active persona's own** | **Continues that reply** from where `max_tokens` cut it off, appending to the same bubble instead of starting a new one. |
+
+Two caveats on those: a no-user-message turn asks the model for a second `assistant` block in a row,
+which a few chat templates (mistral-family) reject outright — the trigger field is the way out. And
+continuing a reply uses a raw prefill, so it needs a chat template and doesn't work on the vision
+path. Both modes also skip `thinking_directive`, since it would have to *become* the user turn.
+
+**Context meter.** A thin row under the chat shows the KV-cache fill after the last turn —
+`ctx 3 412 / 8 192 · 42% · 120 out · 4.2s` — from the same worker numbers `Kinburg Live Log` reports.
+The bar turns amber past 75% and red past 90%. When a reply stops because it hit `max_tokens` the
+row says so, which is the cue to press Send with an empty box and let the persona finish it.
+
+**Archiving (`⤵ Archive N`).** When the conversation starts crowding the window, this folds the
+older turns into a single **🗂 archived summary** and the model reads *that* instead of them. The
+originals stay right where they were, dimmed — nothing is deleted, and **🗑 on the summary puts them
+all back**. The summary is an ordinary bubble, so **✎ edits it** when the model dropped something
+it shouldn't have.
+
+It is one one-shot request with an empty history, so it still works when the chat is *already* over
+budget, and it never touches VRAM: by default the summariser borrows the active persona's
+already-loaded model with a compression prompt swapped in. Pick a dedicated persona in ⚙ if you'd
+rather have a small fast model do it in its own voice. Turns that are already withheld — hidden by
+hand, aged out of a retention window, or belonging to a private persona — are never folded in, so a
+private thread can't leak into a shared brief.
+
+The summary is **cumulative**: each pass rewrites it from the previous one plus the next block, so
+archiving repeatedly never loses the first pass. One press folds at most 30 messages, which keeps
+the summariser's own prompt from overflowing on a very long chat — press again for the next block.
+In ⚙: **`Keep verbatim`** is how many recent messages are never folded (default 8), and **`Nag at`**
+is the fill % at which the button turns amber (default 70). It's manual on purpose — the button
+tells you how many would go, and you decide when.
+
+**VRAM.** Personas that share a model *and* the loader fields (`n_ctx`, `n_gpu_layers`, `n_batch`,
+`flash_attn`, `kv_cache_type`, `extra_load_args`, mmproj) cost **no reload** when you switch —
+the worker's load signature ignores the system prompt and sampling. Differ in any of them and the
+worker process is killed and restarted, which does free the VRAM but costs a full load; a chip is
+marked **⟳** when picking it would reload the model. **`unload_on_approve`** (on by default) frees
+the LLM entirely when you press ✅ Approve, so the image model downstream has room.
+
+The dialogue — plus your pending message, the picked persona and the turn descriptor — lives in a
+single **`chat_state`** JSON input that persists in the workflow (**🗑 Clear** wipes it; personas are
+untouched). It is one input rather than six on purpose: the Vue frontend draws a 24 px row for
+*every* widget a node owns, hidden or not, so six little carriers left 168 px of dead grey space
+under the chat. The frontend doesn't render this one as a widget at all — it removes the
+auto-created widget and lets the chat window itself carry the value — so the node has no invisible
+rows. Workflows saved in the older six-widget format are migrated on load.
+
+**Vision is optional:** the `image` input is on the
+**chat node** (attached to the current turn); set an `mmproj` on the Settings node to enable it —
+connecting an image with no `mmproj` set shows an error in the chat. `unload_llm_after_run` defaults
+**off** so the model stays in VRAM for fast back-and-forth. Chat outputs: `text` (the approved
+reply, gated) and a `help` cheat-sheet. Category `Kinburg-Nodes/LLM`.
+
+</details>
+
+<details>
+<summary>🔹 <b><code>Token Counter (GGUF)</code></b> — <i>Token counting & context estimation utility</i></summary>
+
+<br>
+
+**`Token Counter (GGUF)`** (in the `local_llm/` package) counts how many tokens a text is under a
+model's tokenizer, **without generating** — via the same worker but a **vocab-only** load (just
+the tokenizer, no weights, no VRAM; it also reuses an already-loaded model when the path matches,
+so counting never disturbs generation). Wire a **`config`** (only its model is used) and a
+**`text`**; outputs `token_count`, `char_count`, and an `info` line (e.g. `42 tokens · 180 chars`).
+Handy for budgeting a prompt against a model's `n_ctx`. Category `Kinburg-Nodes/LLM`.
+
+</details>
+
+<details>
+<summary>🔹 <b><code>Context Sizer (GGUF)</code></b> — <i>Context size calculator for GGUF models</i></summary>
+
+<br>
+
+**`Context Sizer (GGUF)`** (in `local_llm/`) measures how many tokens a request actually needs and
+suggests an `n_ctx`. Wire a **`config`**, your prompt text into the auto-growing **`text_*`** inputs,
+and optionally an **`image`** (a batch is fine — it sizes for the largest). Counting is **lean** — no
+full-model load: text via the vocab-only tokenizer, images via `mtmd_tokenize` on the clip/mmproj
+only (no LLM weights, no forward pass), so image tokens — which depend on the model + resolution —
+are counted for real (with a safe fallback to a full-model prefill if a build can't tokenize
+weight-free). Outputs `text_tokens` / `image_tokens` / `total_tokens` / **`suggested_n_ctx`** (=
+input + the config's `max_tokens` + a `margin`, rounded up) / `info`. Sizing `n_ctx` close to what a
+request uses saves VRAM (the KV cache shrinks with it). Category `Kinburg-Nodes/LLM`.
+
+All four LLM nodes above (**Local LLM (GGUF)**, **Vision LLM Judge**, **Token Counter**, **Context
+Sizer**) carry a per-node **`unload_after_run`** selector — *config default* follows the Settings
+node's `unload_llm_after_run`, *unload after run* frees VRAM after just this node (e.g. a different
+model runs next), *keep loaded* stays warm — so one node can free VRAM without touching the others
+on the same config.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>📜 <code>context/</code> — Character Card, Entity Card, Context Collector</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Feed LLM nodes structured reference material (Character & Entity Cards) so they weave named subjects into expanded image prompts, with built-in voice tag integration for music generation.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Character Card, Entity Card & Context Collector</code></b> — <i>Character/Entity card management and reference context collection</i></summary>
+
+<br>
+
 Feed an LLM node reference material so it weaves named subjects into an expanded image prompt.
 **`Character Card`** has fields (name, gender, age, eyes, hair, build, outfit, distinctive
 features, free-form notes…) and outputs one tidy Markdown block, **skipping every empty
@@ -131,7 +469,28 @@ prompt like *"Vasya and Kolya drink tea in a cafe"* comes back expanded with eac
 looks. Note: the diffusion model still has its own limits binding attributes across multiple
 people. Category `Kinburg-Nodes/LLM`.
 
-### `vision_judge/` — Vision LLM Judge
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>👁️ <code>vision_judge/</code> — Vision LLM Judge & Criteria Builder</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Score a batch or list of images using a Vision GGUF against custom rubrics or multi-criteria definitions, returning structured JSON verdicts with guaranteed formatting via GBNF grammars.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Vision LLM Judge & Criteria Builder 📋</code></b> — <i>Automated visual evaluation loop and criteria builder</i></summary>
+
+<br>
+
 **`Vision LLM Judge`** scores a batch (or list) of images with a **vision GGUF** against a rubric
 you write, returning a structured verdict per image — a **GBNF grammar** forces clean
 `{score, tags, comment}` JSON on any model (the same guaranteed-structure trick as the Ideogram
@@ -167,7 +526,229 @@ both **Vision LLM Judge** and **Critic Settings (GGUF)** — right-click their `
 `criteria_presets/catalog.json`; drop a **`catalog.user.json`** next to it (same shape) to add your
 own criteria without editing the shipped file (it survives a git pull). Category `Kinburg-Nodes/LLM`.
 
-### `ouroboros/` — Ouroboros (Self-Correcting Sampler) 🐍
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>🎴 <code>card_presets/</code> — Card Save & Card Presets</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Save and recall Character and Entity card presets dynamically from disk.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Card Save & Card Presets</code></b> — <i>Preset storage and recall for context cards</i></summary>
+
+<br>
+
+**`Card Save`** closes the loop Grammar Presets opens: wire an LLM's JSON card output (constrained
+by a Grammar Presets grammar) into its `json_string` input and the parsed character / entity lands
+in the **Card Presets** library — no JSON Extract → 12-wire dance into a Character Card (the
+grammar's keys already mirror the card fields 1:1). `card_type` is `auto` (detects character vs
+entity from the keys) / `character` / `entity`; **`save_as`** names the preset (empty → uses the
+JSON's own `name`; since a photo often yields an empty name, `save_as` also becomes the card's
+heading); **`tags`** are comma-separated labels for filtering the library. It outputs the rendered
+`card` block (feed Context Collector in the **same** run), `saved_as`, and a `report` line — and
+never breaks the graph on bad / empty JSON.
+
+**`Card Presets`** is the reader: pick a character / entity from a dropdown and its ready Markdown
+block comes out the `card` output (feed it into Context Collector). The optional **`filter`**
+dropdown narrows the list to one tag. Build the library with **Card Save** (photo → card) or the
+**Character Card** / **Entity Card** nodes' `save_preset_as` (+ `tags`) field (see above); presets
+are rendered back through the card nodes' own logic — so the format always matches — and persisted
+on disk. **🗑 Manage** edits tags / deletes entries, **🔄 Refresh** re-reads the list. Build a
+character once (by hand or by photo), then reuse it from the dropdown instead of re-describing the
+same photo every time. Category `Kinburg-Nodes/LLM`.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>📝 <code>grammar_presets/</code> — Grammar Presets</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Pre-built GBNF grammar selection library for forcing structured LLM outputs (JSON, markdown, prompt schemas).
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Grammar Presets</code></b> — <i>Pre-packaged GBNF grammar library</i></summary>
+
+<br>
+
+**`Grammar Presets`** is a dropdown of **GBNF grammars** → one `grammar` STRING output. It ships
+with templates that force an LLM's output into a fixed shape — **Character Card (JSON)**,
+**Entity Card (JSON)**, **Siren Song Config (text)** and **Siren Voice Plan (table)** — and you can
+add / edit / delete your own (**➕ Add grammar**, persisted on disk). Wire the `grammar` output into
+a **Local LLM (GGUF)** node's `grammar_override` input, feed that node a **photo** + a short prompt
+("fill the card from this image"), and the vision model returns exactly that structure straight from
+the picture — no multi-image-context gymnastics. Pair it with **Card Save** (below) to drop that
+generated card straight into your library.
+
+**Song Config** is the LLM pass that turns a brief into Siren Cast's inputs: a caption block (`*Genre:*` / `*Instruments:*`), a blank
+line, then the metas as `key: value`. `keyscale` / `language` / `timesignature` are pinned to the
+exact values Siren Cast's combos accept — a free character class cheerfully writes `C sharp minor`
+or `ua` (Ukrainian is `uk`), and neither is in the list — and `bpm` is held to 60–249. It has **no
+vocals line on purpose**: per-section voices are the plan's job, and naming the timbres in the
+caption as well drags every section towards their average. **Voice Plan** runs *after* the lyrics,
+because sizing a section needs the finished text; lengths are constrained to musical **bar** counts
+and labels to the usual section names, so they line up with the `[Verse 1 - …]` markers. Give that
+pass the same Context Collector block with the band in it — the names in the table have to match the
+`name` on the Character Cards.
+
+Voice Plan bounds its rows (`row{3,16}`) and **requires a closing `END` line**, and both are there
+for the same reason: a grammar whose repetition is open-ended never *forces* the model to finish, it
+only *permits* EOS — and EOS is a low-probability option that `top_p` / `min_p` / `top_k` prune away,
+after which the sole legal continuation is another row and the model writes rows until `max_tokens`.
+So for a grammar-constrained pass, **turn the truncation samplers off** (`top_p 1.0`, `top_k 0`,
+`min_p 0`) and `repeat_penalty` with them — a table format *mandates* repeated tokens, so penalising
+them fights the grammar. Low `temperature` is enough to keep it disciplined. Putting `END` in the
+node's `stop` field as well makes stopping independent of EOS entirely. `Siren Cast` treats a bare
+`END` line as end-of-table and silently drops anything after it. Category `Kinburg-Nodes/LLM`.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>📖 <code>show_text/</code> — Show Text (Markdown)</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Display Markdown and raw text formatted outputs cleanly on ComfyUI node surfaces.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Show Text (Markdown)</code></b> — <i>Markdown text renderer</i></summary>
+
+<br>
+
+**`Show Text (Markdown)`** displays whatever you wire into it as text. Its `value` input is the
+wildcard `*` type, so **anything** connects — a STRING, a number, a COMBO, even a dict/list
+(rendered as pretty JSON) — and the node converts it to text (a whole batch/list is gathered
+into one view). A **markdown** toggle flips between a rendered markdown preview (headings,
+**bold**/*italic*, `code`, code blocks, lists, links, quotes, `---`) and an **editable raw
+textarea** you can tweak before saving — inside a fixed-size scroll box, so toggling never
+resizes the node. HTML in the text is escaped (safe to display).
+
+Unlike the core **Preview Text** node, the shown text is stored **in the workflow** (the node's
+`properties`), so it **survives switching between workflow tabs** in the desktop app instead of
+resetting. **💾 Save .md** writes the current text to disk via a `PromptServer` route
+(`/kinburg/showtext/save`): relative `save_path`s land under ComfyUI's `output` folder, a `.md`
+extension is added automatically, parent folders are created, and `{date}` / `{time}` /
+`{datetime}` placeholders expand to the current date/time. **`autosave`** does the same
+automatically on every run when a path is set. **📋 Copy** copies the text to the clipboard, and
+a small header shows a char/line counter. The converted text is also a **`text` (STRING) output**,
+so the node can sit inline in a wire and pass it downstream.
+
+**Freeze / use the saved text (`use_saved_text`).** By default the node reads its `value` input
+(running its upstream) and the shown text tracks it. Flip **`use_saved_text`** on to output the
+text saved & edited *in the node* instead — and the input is **not evaluated**, so its upstream
+never runs. Typical use: an LLM generates a prompt → Show Text → image generation; you eyeball
+the prompt, tweak it in the node, flip the toggle on, and re-queue — the **edited** prompt goes
+downstream and the **LLM doesn't re-run**. This uses ComfyUI's *lazy evaluation*
+(`check_lazy_status`), not just output caching, so it holds even after a ComfyUI restart or with
+a randomized seed. The edited text rides in a hidden, serialized `saved_text` widget (so it
+reaches the backend and is stored in the workflow); edit it and re-queue to push changes without
+regenerating. Leave the toggle off for the original behavior. Category `Kinburg-Nodes/util`.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>⚙️ <code>gguf_convert/</code> — Safetensors → GGUF Converters</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Convert safetensors model weights directly to GGUF format inside ComfyUI for LLMs and Diffusion models.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Safetensors -> GGUF Converters</code></b> — <i>llama.cpp and city96 diffusion safetensors to GGUF converters</i></summary>
+
+<br>
+
+Turn `.safetensors` weights into `.gguf` from inside ComfyUI. Two nodes (category
+`Kinburg-Nodes/GGUF`), one per model family, each with the same three outputs — **`gguf_path`**
+(the finished file, ready to wire into a loader), a **`log`** tail, and a **`help`**
+cheat-sheet. Conversion runs in ComfyUI's own Python; both stream progress to the console and
+the `log` output, and `force = off` returns an already-built output instead of redoing the work.
+
+**`Safetensors → GGUF (llama.cpp)`** converts a **language / multimodal LLM** with llama.cpp's
+`convert_hf_to_gguf.py`. **`source`** takes a HuggingFace repo id (`Qwen/Qwen2.5-0.5B-Instruct`),
+a `https://huggingface.co/owner/name` URL (downloaded for you via `huggingface_hub` — set
+`hf_token` for gated repos), a **local HF model folder** (`config.json` + tokenizer +
+`*.safetensors`), or a single `*.safetensors` file (its folder is used). `outtype` is the
+precision written (`f16` is the usual base), and an optional `quantize` pass shrinks it to a
+K-/I-quant (`Q4_K_M`, …) with **`llama-quantize`** — a compiled binary you provide (auto-listed
+from `ComfyUI/models/llm`, or set `quantize_binary_path`); `quantize = none` needs no binary at
+all. The llama.cpp scripts themselves are found via `llama_cpp_dir`, or **auto-cloned** into
+`ComfyUI/models/llm/llama.cpp` when `auto_clone` is on. The output drops straight into the Local
+LLM (GGUF) nodes. LLMs only — it can't read diffusion weights.
+
+**`Diffusion Safetensors → GGUF (city96)`** is the diffusion counterpart (Flux, SD3, SDXL, SD1,
+Aura, HiDream, Cosmos, LTXV, HunyuanVideo, Wan, Lumina2). It drives city96's **ComfyUI-GGUF**
+`tools/convert.py`: pick the diffusion checkpoint from `ComfyUI/models/diffusion_models` or
+`/unet` in the **`model`** dropdown, or point `model_path` at a local `.safetensors`, a HF file
+URL (`…/resolve/main/model.safetensors`), or an `owner/name::file.safetensors` spec. Step 1
+always writes an F16/BF16 gguf; an optional `quantize` pass (`Q4_K_S`, `Q8_0`, …) needs the
+**patched** `llama-quantize` from city96's llama.cpp fork (the stock one won't handle diffusion
+tensor shapes — build it per ComfyUI-GGUF/tools/README.md and set `quantize_binary_path`). For
+Wan 2.1 / HunyuanVideo, **`fix_5d_tensors = auto`** reads the model's architecture from the gguf
+and runs the required 5-D-tensor fix pass after quantization. The `tools/convert.py` is located
+via `tool_dir`, or from an installed `custom_nodes/ComfyUI-GGUF` (auto-cloned there when
+`auto_clone` is on — you'll want that node installed anyway, since its **Unet Loader (GGUF)** is
+what loads the result). Diffusion models only — for LLMs use the node above.
+
+</details>
+
+</details>
+
+
+
+
+### 🐍 Iterative Samplers & Optimizers
+
+
+<details>
+<summary><b>🐍 <code>ouroboros/</code> — Ouroboros (Self-Correcting Sampler) 🐍</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> A closed-loop text-to-image optimizer in a single node. An LLM rewrites the prompt, a custom sampler renders an image, a vision critic scores it and returns concrete advice, and the loop auto-adjusts until target scores are reached.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Ouroboros (Self-Correcting Sampler) 🐍</code></b> — <i>Self-correcting iterative sampling engine</i></summary>
+
+<br>
+
 **`Ouroboros (Self-Correcting Sampler) 🐍`** is a **closed-loop text→image optimizer** in one node.
 Each iteration: an LLM **expands/rewrites the prompt** → an image is **sampled** → a vision
 **critic** scores it and returns concrete **advice** (how to change the prompt) plus **negative-prompt
@@ -292,7 +873,28 @@ GPUs/farms, turn `unload_comfy_models` off to keep everything resident (no reloa
 enhancer and critic at the **same model file** further minimizes reloads. Category
 `Kinburg-Nodes/sampling`.
 
-### `chimera/` — Chimera (Multi-Sampler) 🦁
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>🦁 <code>chimera/</code> — Chimera (Multi-Sampler) 🦁</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Multi-stage sampling pipeline node allowing sequential execution of multiple samplers, schedulers, and denoise ranges.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Chimera (Multi-Sampler) 🦁</code></b> — <i>Multi-stage sampler pipeline</i></summary>
+
+<br>
+
 **`Chimera (Multi-Sampler) 🦁`** runs **two (or more) `Sampler Settings` bundles as consecutive stages
 of ONE image**, the way the Ouroboros refine chain does — but with the **step budget under explicit
 control** and a **physically correct handoff** between stages. It reuses the very same
@@ -407,73 +1009,96 @@ moves the result off the GPU before returning, so it waits for the work to finis
 the **first stage absorbs the model load** when the checkpoint isn't resident yet, because ComfyUI
 loads it inside that first sampling call.
 
-### `audio_sr/` — Audio SR (48 kHz Upscale) 🔊
-**`Audio SR`** is bandwidth extension for a finished mix: AudioSR is a latent-diffusion model that
-*invents* the top end rather than filtering it, so a track that dies at 11 kHz comes back with
-plausible 11-24 kHz content. Mono, 48 kHz out. The model is vendored under `audio_sr/vendor/audiosr`
-(MIT; see `vendor/NOTICE.md` for attribution and the three edits made to it) so the node does not depend
-on another pack being installed.
+</details>
 
-**A stereo mix keeps its image.** AudioSR is a mono model, so the wrapper this replaces summed L and
-R — and measured on a real 3-minute take that took an L/R correlation of **+0.45** and a side/mid RMS
-of **0.61** down to **1.00** and **0.00**. The whole image, for good. `stereo = mid/side` sends only
-the mid channel through the model and carries side through untouched, so only what the model invents
-above the roll-off is centred. (`sum to mono` is still there to A/B against. Never run L and R
-separately: two independent diffusion passes decorrelate and the invented top comes out phasey.)
+</details>
 
-**`match_level`** puts the output's energy *below 10 kHz* back where the input's was — not an overall
-match, since the model genuinely adds energy up top and matching totals would turn the track down to
-pay for it. Below the roll-off the model measured transparent (-0.4 dB at 8-12 kHz), so drift there is
-drift: on the same take it was -1.2 dB at 0-4 kHz and -1.7 dB at 4-8 kHz, which reads as the mix
-losing body.
 
-What the model actually does, measured on that take (Raw → SR, energy per band):
-`8-12 kHz -0.4 dB` · `12-16 kHz +3.3 dB` · `16-20 kHz **+30.6 dB**` · `20-24 kHz **+55.9 dB**`. So it
-is transparent below about 12 kHz and writes the octave above from nothing — which is the job, since
-AceStep's own output rolls off around 12 kHz however full-band its 48 kHz container is.
 
-Three more things this fixes over the wrapper it grew out of:
 
-- **The progress bar works.** The old one called `model_management.get_progress_state()` and
-  `comfy.model_management.update_progress()` — *neither exists in ComfyUI* — inside a bare
-  `except Exception: pass`, so it silently did nothing and the node looked hung for minutes. The time
-  goes in the DDIM loop, so that is where it is driven from: the vendored `ddim.py` carries one
-  `STEP_HOOK` (`None` by default, i.e. upstream behaviour) and the node fills it in. The bar counts
-  **chunks × steps**, the real unit of work.
-- **Cancel lands inside a chunk**, for the same reason — interruption used to be checked only between
-  chunks, so a stop could sit unhonoured for fifteen seconds of audio.
-- **Chunk geometry.** The plan is computed up front, so every window is a full chunk and the tail one
-  is pulled *back* to end at the last sample instead of being padded with silence the model would
-  denoise at full price. The crossfade uses a **periodic** Hann pair, whose halves sum to exactly 1;
-  upstream's symmetric one dips about 1.2% at each join. `chunk_seconds` defaults to 15.36 = 3 × 5.12
-  because the batch builder pads every chunk up to a multiple of 5.12 s.
+<details>
+<summary><b>🔄 <code>loops/</code> — Flexible Iteration Loops</b></summary>
 
-**`audiosr/clap/` was cut** — 56 files, 3.25 MB, three quarters of the vendored source. Its only
-construction site was a `self.clap = …` in `ddpm.py` that nothing in the package ever read, a leftover
-of the AudioLDM lineage: super-resolution conditions on `VAEFeatureExtract`, not on CLAP. It was
-costing 0.80 GB of the checkpoint's 6.18 GB and a HuggingFace round-trip *at import time*
-(`BertModel.from_pretrained("bert-base-uncased")` fired while the module was merely being imported).
-Checked rather than assumed: the trimmed `LatentDiffusion` has **0 missing** parameters against both
-real checkpoints and 507 unexpected ones, all `clap.*` — so the model is fully satisfied by the
-weights it gets, and only never-used tensors are now ignored. 1085.8 M params, 4.34 GB fp32, down
-from 5.14.
+<br>
 
-`checkpoint` lists `ComfyUI/models/AudioSR` and the variant (`basic` for music, `speech` for voice) is
-read from the file name, since the two need different configs. `keep_loaded` holds ~6 GB in VRAM
-between runs. Category `Kinburg-Nodes/audio`.
+> **System Purpose & Overview**  
+> Flexible iteration control flow graphs for ComfyUI workflows: For Each, Repeat, and While loops with index retrieval and delay.
 
-**On the speechbrain landmine.** `util/imports.py` exists because of a bug that has nothing to do with
-this node but killed it: speechbrain 1.1 puts `LazyModule` objects in `sys.modules`, `inspect.getmodule`
-walks every entry doing `hasattr(m, "__file__")`, and for the ones whose optional dependency is absent
-that raises `ImportError` — so once *any* pack has imported speechbrain, any node calling into
-`inspect` dies with `Lazy import of LazyModule(target=speechbrain.integrations.k2_fsa) failed`.
-speechbrain guards against exactly this, but the guard tests `filename.endswith("/inspect.py")` and on
-Windows the frame reads `…\Lib\inspect.py`, so it never fires. `defuse_lazy_modules()` replaces the
-unimportable entries with stubs — nothing is lost, they could not be imported anyway — and is called
-at the top of the node's `run()`, not at import, because the mine is armed whenever the *other* pack
-loads.
+#### 🧩 Nodes in this system:
 
-### `siren/` — Siren Cast 🧜, Siren Score 🧜, Siren (Music Sampler) 🧜, Siren Section 🧜, Siren Scope 🧜, Siren Compare 🧜
+<details>
+<summary>🔹 <b><code>Loops (For Each, Repeat, While)</code></b> — <i>Graph iteration control flow nodes</i></summary>
+
+<br>
+
+ComfyUI's execution graph is acyclic, so these cover the two practical loop shapes, both with
+**auto-growing wildcard `*` state slots** (the node shows only the connected slots plus one
+spare; drag in any type, a matching slot appears — on inputs *and* outputs):
+
+**`For Each (Open)` / `For Each (Collect)`** — iterate a batch/list **one element at a time**,
+on the same graph-expansion engine as Repeat. Feed Open any iterables (image/mask batches,
+LATENT batches, lists…); each iteration it emits a single **`element_*`** (the idx-th item of
+each input) plus `index` / `total`, iterating to the **shortest** input. Build your body off
+the `element_*` outputs (e.g. a collage from `element_0` + `element_1`) and wire the result(s)
+into Collect's **`result_*`** inputs; Collect accumulates each iteration's results and, when the
+loop ends, emits each `collected_*` as the gathered Python list. Feeding that into a **`List
+Output`** node turns it into a real per-item ComfyUI list — so different-sized images travel
+separately (a Preview shows N images, one per item; a Save writes each). The **🔗 Add / link
+Close** button on Open wires the whole chain: it creates Collect (linked by `flow`) plus a List
+Output on `collected_0`. (A list output can't be emitted from inside the loop itself — ComfyUI
+flattens list outputs during graph expansion — so the fan-out lives in this node just past it.)
+Category `Kinburg-Nodes/loops`.
+
+**`List Output`** fans a value that holds a Python list into a proper ComfyUI list (one item per
+element). For Each (Collect) pairs with it, but it's a handy standalone converter too.
+
+**`Repeat (Open)` / `Repeat (Close)`** — a real iterative loop with **carried state**, built on
+ComfyUI's graph expansion: each pass, Close clones the loop body wired back into the next
+iteration, all inside one queue run. Wire your starting values into `Open`, read `index` inside
+the body, and feed the updated values into `Close`; after `count` iterations `Close` outputs the
+final state. The **🔗 Add / link Close** button on `Open` spawns the matching Close and wires the
+`flow` (and `index`) links for you, so you never hand-draw the feedback. `count` must stay a
+widget value (it's read when the loop expands). Category `Kinburg-Nodes/loops`.
+
+**`While (Open)` / `While (Close)`** — the same engine, condition-driven instead of counted.
+Close has a `condition` (BOOLEAN) input computed in the loop body: the loop keeps going while
+it's True and stops the moment it's False, with `max_iterations` on Open as a hard safety cap.
+Same wildcard state slots and 🔗 auto-pairing as Repeat. Category `Kinburg-Nodes/loops`.
+
+**`Get by Index`** takes the index-th element of anything indexable — an IMAGE/MASK batch (→ a
+1-frame batch), a LATENT batch (→ one latent, other keys preserved), a list, a string, or any
+other tensor — so inside a loop you can feed a whole batch in and pull out the current frame by
+`index`. Negative indices count from the end; `out_of_range` is `clamp` / `wrap` (cycle) /
+`error`. It also outputs `length` (the container size), handy for driving a loop's `count`.
+
+**`Delay`** passes any value straight through after pausing `seconds` (with an optional console
+`label`). Drop it into a wire inside a loop body to slow iterations down and watch the loop run.
+Category `Kinburg-Nodes/loops`.
+
+</details>
+
+</details>
+
+
+
+
+### 🎵 Audio & Music Suite
+
+
+<details>
+<summary><b>🧜 <code>siren/</code> — Siren Suite 🧜</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Comprehensive music generation suite covering voice allocation (Siren Cast), lyrics structuring (Siren Score), music sampling & section windowing, audio spectrum analysis (Siren Scope), and AB comparison (Siren Compare).
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Siren Suite 🧜</code></b> — <i>Music sampling, voice planning, audio scope, and comparison suite</i></summary>
+
+<br>
 
 #### `Siren Cast (Voice Plan) 🧜` — who sings where
 
@@ -856,7 +1481,150 @@ new total and re-encode — the model is otherwise being told the song is shorte
 writing on. It can't be read back out of the conditioning, so both nodes print the new length in
 seconds and leave the check to you.
 
-### `morpheus/` — Morpheus (Video Sampler) 🌙, Morpheus Dream 🌙, Morpheus Storyboard 🌙, Dream Board 🎬
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>🔊 <code>audio_sr/</code> — Audio SR (48 kHz Upscale) 🔊</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Audio super-resolution and upscaling to pristine 48 kHz output.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Audio SR (48 kHz Upscale) 🔊</code></b> — <i>48 kHz audio upscaling node</i></summary>
+
+<br>
+
+**`Audio SR`** is bandwidth extension for a finished mix: AudioSR is a latent-diffusion model that
+*invents* the top end rather than filtering it, so a track that dies at 11 kHz comes back with
+plausible 11-24 kHz content. Mono, 48 kHz out. The model is vendored under `audio_sr/vendor/audiosr`
+(MIT; see `vendor/NOTICE.md` for attribution and the three edits made to it) so the node does not depend
+on another pack being installed.
+
+**A stereo mix keeps its image.** AudioSR is a mono model, so the wrapper this replaces summed L and
+R — and measured on a real 3-minute take that took an L/R correlation of **+0.45** and a side/mid RMS
+of **0.61** down to **1.00** and **0.00**. The whole image, for good. `stereo = mid/side` sends only
+the mid channel through the model and carries side through untouched, so only what the model invents
+above the roll-off is centred. (`sum to mono` is still there to A/B against. Never run L and R
+separately: two independent diffusion passes decorrelate and the invented top comes out phasey.)
+
+**`match_level`** puts the output's energy *below 10 kHz* back where the input's was — not an overall
+match, since the model genuinely adds energy up top and matching totals would turn the track down to
+pay for it. Below the roll-off the model measured transparent (-0.4 dB at 8-12 kHz), so drift there is
+drift: on the same take it was -1.2 dB at 0-4 kHz and -1.7 dB at 4-8 kHz, which reads as the mix
+losing body.
+
+What the model actually does, measured on that take (Raw → SR, energy per band):
+`8-12 kHz -0.4 dB` · `12-16 kHz +3.3 dB` · `16-20 kHz **+30.6 dB**` · `20-24 kHz **+55.9 dB**`. So it
+is transparent below about 12 kHz and writes the octave above from nothing — which is the job, since
+AceStep's own output rolls off around 12 kHz however full-band its 48 kHz container is.
+
+Three more things this fixes over the wrapper it grew out of:
+
+- **The progress bar works.** The old one called `model_management.get_progress_state()` and
+  `comfy.model_management.update_progress()` — *neither exists in ComfyUI* — inside a bare
+  `except Exception: pass`, so it silently did nothing and the node looked hung for minutes. The time
+  goes in the DDIM loop, so that is where it is driven from: the vendored `ddim.py` carries one
+  `STEP_HOOK` (`None` by default, i.e. upstream behaviour) and the node fills it in. The bar counts
+  **chunks × steps**, the real unit of work.
+- **Cancel lands inside a chunk**, for the same reason — interruption used to be checked only between
+  chunks, so a stop could sit unhonoured for fifteen seconds of audio.
+- **Chunk geometry.** The plan is computed up front, so every window is a full chunk and the tail one
+  is pulled *back* to end at the last sample instead of being padded with silence the model would
+  denoise at full price. The crossfade uses a **periodic** Hann pair, whose halves sum to exactly 1;
+  upstream's symmetric one dips about 1.2% at each join. `chunk_seconds` defaults to 15.36 = 3 × 5.12
+  because the batch builder pads every chunk up to a multiple of 5.12 s.
+
+**`audiosr/clap/` was cut** — 56 files, 3.25 MB, three quarters of the vendored source. Its only
+construction site was a `self.clap = …` in `ddpm.py` that nothing in the package ever read, a leftover
+of the AudioLDM lineage: super-resolution conditions on `VAEFeatureExtract`, not on CLAP. It was
+costing 0.80 GB of the checkpoint's 6.18 GB and a HuggingFace round-trip *at import time*
+(`BertModel.from_pretrained("bert-base-uncased")` fired while the module was merely being imported).
+Checked rather than assumed: the trimmed `LatentDiffusion` has **0 missing** parameters against both
+real checkpoints and 507 unexpected ones, all `clap.*` — so the model is fully satisfied by the
+weights it gets, and only never-used tensors are now ignored. 1085.8 M params, 4.34 GB fp32, down
+from 5.14.
+
+`checkpoint` lists `ComfyUI/models/AudioSR` and the variant (`basic` for music, `speech` for voice) is
+read from the file name, since the two need different configs. `keep_loaded` holds ~6 GB in VRAM
+between runs. Category `Kinburg-Nodes/audio`.
+
+**On the speechbrain landmine.** `util/imports.py` exists because of a bug that has nothing to do with
+this node but killed it: speechbrain 1.1 puts `LazyModule` objects in `sys.modules`, `inspect.getmodule`
+walks every entry doing `hasattr(m, "__file__")`, and for the ones whose optional dependency is absent
+that raises `ImportError` — so once *any* pack has imported speechbrain, any node calling into
+`inspect` dies with `Lazy import of LazyModule(target=speechbrain.integrations.k2_fsa) failed`.
+speechbrain guards against exactly this, but the guard tests `filename.endswith("/inspect.py")` and on
+Windows the frame reads `…\Lib\inspect.py`, so it never fires. `defuse_lazy_modules()` replaces the
+unimportable entries with stubs — nothing is lost, they could not be imported anyway — and is called
+at the top of the node's `run()`, not at import, because the mine is armed whenever the *other* pack
+loads.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>💾 <code>save_song/</code> — Save Song</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Save generated audio tracks with metadata and artwork integration.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Save Song</code></b> — <i>Audio output saver node</i></summary>
+
+<br>
+
+**`Save Song`** saves an **`audio`** clip (required) as a song, with an optional **`image`**
+cover and optional **`lyrics`** text (an input socket — wire a STRING in). The **`quality`** dropdown picks the audio format and
+bitrate — **FLAC** (lossless) or **MP3 / Opus** at a chosen bitrate — encoded with PyAV exactly
+like ComfyUI's own Save Audio (Opus is resampled to a supported rate automatically). The cover is
+written as a **JPEG** (its `image_quality` is adjustable), and the lyrics as a **`.txt`** — all
+three share one counter-based base name under `ComfyUI/output` (e.g. `songs/song_00001.flac`,
+`…_00001.jpg`, `…_00001.txt`). It returns the standard `audio` / `images` UI results, so ComfyUI
+shows a **native `<audio>` player and the cover preview** on the node **and** lists the saved
+files in **Media Assets** (just like the core Save Audio node). Outputs the `audio` passthrough
+plus the saved `path`. Category `Kinburg-Nodes/audio`.
+
+</details>
+
+</details>
+
+
+
+
+### 🎬 Video Generation & Storyboarding
+
+
+<details>
+<summary><b>🌙 <code>morpheus/</code> — Morpheus Suite 🌙</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Video generation sampler, LLM-driven storyboard chain planner, and conversation-driven animation suite.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Morpheus Suite 🌙</code></b> — <i>Morpheus Video Sampler, Dream, Storyboard, and Dream Board</i></summary>
+
+<br>
 
 MiniMax H3 generates **5–15 seconds** per run and ComfyUI ships no extend/continue node for it, so the
 only route to a minute of video is to run it several times and hand **the last frame of each shot to the
@@ -1169,7 +1937,30 @@ Storyboard skips its own planning call when `beats` is filled ("your lines win")
 reads exactly what you selected. Route `beats` through a `Show Text` node first if you want to read
 or hand-edit it before it is written up.
 
-### `model_presets/` — Model Capture 📥, Model Select 🎛, Settings Select ⚙, Settings Save 💾
+</details>
+
+</details>
+
+
+
+
+### 🎛️ Presets & Asset Management
+
+
+<details>
+<summary><b>🎛️ <code>model_presets/</code> — Model Capture & Settings Management</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Snapshot and recall complete model settings, CLIP/VAE configurations, and sampler parameter sets.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Model Presets</code></b> — <i>Model Capture, Select, Settings Select, and Settings Save</i></summary>
+
+<br>
 
 A **model library that lives outside the graph**: pick a model in one dropdown, its known-good
 sampler settings in a second, and the workflow holds a single node where it used to hold a loader
@@ -1292,116 +2083,143 @@ Everything else is managed from the same **🗂 Library** dialog: model families
 defaults, rename (presets follow), delete, and a raw view of the stored recipe. Persisted to
 `model_presets/data/store.json`; routes under `/kinburg/models/…`. Category `Kinburg-Nodes/model`.
 
-### Token Counter (GGUF)
-**`Token Counter (GGUF)`** (in the `local_llm/` package) counts how many tokens a text is under a
-model's tokenizer, **without generating** — via the same worker but a **vocab-only** load (just
-the tokenizer, no weights, no VRAM; it also reuses an already-loaded model when the path matches,
-so counting never disturbs generation). Wire a **`config`** (only its model is used) and a
-**`text`**; outputs `token_count`, `char_count`, and an `info` line (e.g. `42 tokens · 180 chars`).
-Handy for budgeting a prompt against a model's `n_ctx`. Category `Kinburg-Nodes/LLM`.
+</details>
 
-### Context Sizer (GGUF)
-**`Context Sizer (GGUF)`** (in `local_llm/`) measures how many tokens a request actually needs and
-suggests an `n_ctx`. Wire a **`config`**, your prompt text into the auto-growing **`text_*`** inputs,
-and optionally an **`image`** (a batch is fine — it sizes for the largest). Counting is **lean** — no
-full-model load: text via the vocab-only tokenizer, images via `mtmd_tokenize` on the clip/mmproj
-only (no LLM weights, no forward pass), so image tokens — which depend on the model + resolution —
-are counted for real (with a safe fallback to a full-model prefill if a build can't tokenize
-weight-free). Outputs `text_tokens` / `image_tokens` / `total_tokens` / **`suggested_n_ctx`** (=
-input + the config's `max_tokens` + a `margin`, rounded up) / `info`. Sizing `n_ctx` close to what a
-request uses saves VRAM (the KV cache shrinks with it). Category `Kinburg-Nodes/LLM`.
+</details>
 
-All four LLM nodes above (**Local LLM (GGUF)**, **Vision LLM Judge**, **Token Counter**, **Context
-Sizer**) carry a per-node **`unload_after_run`** selector — *config default* follows the Settings
-node's `unload_llm_after_run`, *unload after run* frees VRAM after just this node (e.g. a different
-model runs next), *keep loaded* stays warm — so one node can free VRAM without touching the others
-on the same config.
 
-### `grammar_presets/` — Grammar Presets
-**`Grammar Presets`** is a dropdown of **GBNF grammars** → one `grammar` STRING output. It ships
-with templates that force an LLM's output into a fixed shape — **Character Card (JSON)**,
-**Entity Card (JSON)**, **Siren Song Config (text)** and **Siren Voice Plan (table)** — and you can
-add / edit / delete your own (**➕ Add grammar**, persisted on disk). Wire the `grammar` output into
-a **Local LLM (GGUF)** node's `grammar_override` input, feed that node a **photo** + a short prompt
-("fill the card from this image"), and the vision model returns exactly that structure straight from
-the picture — no multi-image-context gymnastics. Pair it with **Card Save** (below) to drop that
-generated card straight into your library.
 
-**Song Config** is the LLM pass that turns a brief into Siren Cast's inputs: a caption block (`*Genre:*` / `*Instruments:*`), a blank
-line, then the metas as `key: value`. `keyscale` / `language` / `timesignature` are pinned to the
-exact values Siren Cast's combos accept — a free character class cheerfully writes `C sharp minor`
-or `ua` (Ukrainian is `uk`), and neither is in the list — and `bpm` is held to 60–249. It has **no
-vocals line on purpose**: per-section voices are the plan's job, and naming the timbres in the
-caption as well drags every section towards their average. **Voice Plan** runs *after* the lyrics,
-because sizing a section needs the finished text; lengths are constrained to musical **bar** counts
-and labels to the usual section names, so they line up with the `[Verse 1 - …]` markers. Give that
-pass the same Context Collector block with the band in it — the names in the table have to match the
-`name` on the Character Cards.
 
-Voice Plan bounds its rows (`row{3,16}`) and **requires a closing `END` line**, and both are there
-for the same reason: a grammar whose repetition is open-ended never *forces* the model to finish, it
-only *permits* EOS — and EOS is a low-probability option that `top_p` / `min_p` / `top_k` prune away,
-after which the sole legal continuation is another row and the model writes rows until `max_tokens`.
-So for a grammar-constrained pass, **turn the truncation samplers off** (`top_p 1.0`, `top_k 0`,
-`min_p 0`) and `repeat_penalty` with them — a table format *mandates* repeated tokens, so penalising
-them fights the grammar. Low `temperature` is enough to keep it disciplined. Putting `END` in the
-node's `stop` field as well makes stopping independent of EOS entirely. `Siren Cast` treats a bare
-`END` line as end-of-table and silently drops anything after it. Category `Kinburg-Nodes/LLM`.
+<details>
+<summary><b>💬 <code>prompt_presets/</code> — Prompt Presets</b></summary>
 
-### `card_presets/` — Card Save, Card Presets
-**`Card Save`** closes the loop Grammar Presets opens: wire an LLM's JSON card output (constrained
-by a Grammar Presets grammar) into its `json_string` input and the parsed character / entity lands
-in the **Card Presets** library — no JSON Extract → 12-wire dance into a Character Card (the
-grammar's keys already mirror the card fields 1:1). `card_type` is `auto` (detects character vs
-entity from the keys) / `character` / `entity`; **`save_as`** names the preset (empty → uses the
-JSON's own `name`; since a photo often yields an empty name, `save_as` also becomes the card's
-heading); **`tags`** are comma-separated labels for filtering the library. It outputs the rendered
-`card` block (feed Context Collector in the **same** run), `saved_as`, and a `report` line — and
-never breaks the graph on bad / empty JSON.
+<br>
 
-**`Card Presets`** is the reader: pick a character / entity from a dropdown and its ready Markdown
-block comes out the `card` output (feed it into Context Collector). The optional **`filter`**
-dropdown narrows the list to one tag. Build the library with **Card Save** (photo → card) or the
-**Character Card** / **Entity Card** nodes' `save_preset_as` (+ `tags`) field (see above); presets
-are rendered back through the card nodes' own logic — so the format always matches — and persisted
-on disk. **🗑 Manage** edits tags / deletes entries, **🔄 Refresh** re-reads the list. Build a
-character once (by hand or by photo), then reuse it from the dropdown instead of re-describing the
-same photo every time. Category `Kinburg-Nodes/LLM`.
+> **System Purpose & Overview**  
+> Save and manage reusable prompt snippet libraries.
 
-### `gguf_convert/` — Safetensors → GGUF converters
-Turn `.safetensors` weights into `.gguf` from inside ComfyUI. Two nodes (category
-`Kinburg-Nodes/GGUF`), one per model family, each with the same three outputs — **`gguf_path`**
-(the finished file, ready to wire into a loader), a **`log`** tail, and a **`help`**
-cheat-sheet. Conversion runs in ComfyUI's own Python; both stream progress to the console and
-the `log` output, and `force = off` returns an already-built output instead of redoing the work.
+#### 🧩 Nodes in this system:
 
-**`Safetensors → GGUF (llama.cpp)`** converts a **language / multimodal LLM** with llama.cpp's
-`convert_hf_to_gguf.py`. **`source`** takes a HuggingFace repo id (`Qwen/Qwen2.5-0.5B-Instruct`),
-a `https://huggingface.co/owner/name` URL (downloaded for you via `huggingface_hub` — set
-`hf_token` for gated repos), a **local HF model folder** (`config.json` + tokenizer +
-`*.safetensors`), or a single `*.safetensors` file (its folder is used). `outtype` is the
-precision written (`f16` is the usual base), and an optional `quantize` pass shrinks it to a
-K-/I-quant (`Q4_K_M`, …) with **`llama-quantize`** — a compiled binary you provide (auto-listed
-from `ComfyUI/models/llm`, or set `quantize_binary_path`); `quantize = none` needs no binary at
-all. The llama.cpp scripts themselves are found via `llama_cpp_dir`, or **auto-cloned** into
-`ComfyUI/models/llm/llama.cpp` when `auto_clone` is on. The output drops straight into the Local
-LLM (GGUF) nodes. LLMs only — it can't read diffusion weights.
+<details>
+<summary>🔹 <b><code>Prompt Presets</code></b> — <i>Prompt preset management</i></summary>
 
-**`Diffusion Safetensors → GGUF (city96)`** is the diffusion counterpart (Flux, SD3, SDXL, SD1,
-Aura, HiDream, Cosmos, LTXV, HunyuanVideo, Wan, Lumina2). It drives city96's **ComfyUI-GGUF**
-`tools/convert.py`: pick the diffusion checkpoint from `ComfyUI/models/diffusion_models` or
-`/unet` in the **`model`** dropdown, or point `model_path` at a local `.safetensors`, a HF file
-URL (`…/resolve/main/model.safetensors`), or an `owner/name::file.safetensors` spec. Step 1
-always writes an F16/BF16 gguf; an optional `quantize` pass (`Q4_K_S`, `Q8_0`, …) needs the
-**patched** `llama-quantize` from city96's llama.cpp fork (the stock one won't handle diffusion
-tensor shapes — build it per ComfyUI-GGUF/tools/README.md and set `quantize_binary_path`). For
-Wan 2.1 / HunyuanVideo, **`fix_5d_tensors = auto`** reads the model's architecture from the gguf
-and runs the required 5-D-tensor fix pass after quantization. The `tools/convert.py` is located
-via `tool_dir`, or from an installed `custom_nodes/ComfyUI-GGUF` (auto-cloned there when
-`auto_clone` is on — you'll want that node installed anyway, since its **Unet Loader (GGUF)** is
-what loads the result). Diffusion models only — for LLMs use the node above.
+<br>
 
-### `image_compare/` — Image Compare (HTML)
+**`Prompt Presets`** is five **flexible preset slots**, each emitting a `STRING` prompt fragment
+(five outputs). Each slot has **two dropdowns** — a **category** selector and a **preset**
+selector (the presets of the chosen category) — so any slot can draw from any category. Out of
+the box the five slots default to the classic **Camera / Aesthetics / Light / Medium /
+Background** categories (and the output label follows each slot's chosen category), but you can
+point any slot at any other category, including your own. Every category ships with curated
+built-in presets (e.g. *Camera → Cinematic Anamorphic*, *Light → Rembrandt*, *Aesthetics →
+Cyberpunk*) plus a `🚫 None` option that resolves to an empty string. Selecting a preset resolves
+to its fragment at run time; wire the outputs into your prompt builder / text concat.
+
+You can **add your own presets** (**➕ Add preset** — pick a category, name it, type the fragment;
+re-using an existing name edits it) and **manage categories** (**🗂 Categories** — add / rename /
+delete your own categories; the five built-in categories are protected). **Save the current
+slots as a setup** (**💾 Save setup** — names the whole combination of all five slots'
+category+preset); the **⚙ setup** selector at the top re-applies any saved setup in one click,
+and **🗑 Manage** lists your setups and custom presets for deletion (built-ins can't be removed).
+Custom presets, categories and setups are persisted on disk (`prompt_presets/data/store.json`,
+git-ignored) via `PromptServer` routes under `/kinburg/presets`, so they survive restarts and
+appear across all `Prompt Presets` nodes without an object-info reload. Category
+`Kinburg-Nodes/prompt`.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>🔀 <code>prompt_variations/</code> — Prompt Variations</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Generate combinatorial and matrix variations of prompt text strings.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Prompt Variations</code></b> — <i>Prompt variation generator</i></summary>
+
+<br>
+
+**`Prompt Variations`** expands one template into many prompts (a per-item `STRING` **list**).
+Write choices with `{a|b|c}` (nesting allowed, e.g. `{a {x|y}|b}`) and optional `__wildcard__`
+refs (one option per line from `<wildcards_dir>/name.txt`, default `ComfyUI/wildcards`), and the
+node emits the **cartesian product** — empty options like `{, dramatic|}` mean "nothing" (dangling
+commas are cleaned up). `mode` = `all` (every combination, capped by `limit`) or `random`
+(`limit` random combinations, reproducible via `seed`); `dedupe` drops duplicates. Outputs
+**`prompts`** (a list — feed it into **For Each (Open)**), **`count`**, and a **`preview`**. It's
+the input generator for a prompt-space sweep: Prompt Variations → For Each → your sampler → a
+Set/Get Accumulator → **Image Compare**, to render and compare every variant at once. Category
+`Kinburg-Nodes/prompt`.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>⚡ <code>lora/</code> — Lora Trigger Loader & Accumulator</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> LoRA trigger phrase auto-loading and dynamic unlimited LoRA accumulator.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Lora Trigger Loader & Lora Unlim Accumulator</code></b> — <i>LoRA trigger extraction and accumulator</i></summary>
+
+<br>
+
+Stack any number of LoRAs (with their trigger words) onto a model in one node. **`Lora Trigger
+Loader`** is pure config: a searchable LoRA dropdown, `strength_model` + `strength_clip`, and an
+optional `trigger` word; its single `lora` output (type `KINBURG_LORA`) carries that spec —
+nothing is loaded yet. **`Lora Unlim Accumulator`** takes a `model` (+ optional `clip`) and a
+`prompt` (input only — wire it in), plus an auto-growing list of `lora_*` inputs fed by the
+loaders (the `clip` input sits above the first LoRA). It loads and applies each LoRA in slot
+order — to the model with `strength_model`, and to CLIP with `strength_clip` when a CLIP is
+connected (otherwise model-only) — appends the non-empty trigger words to the prompt (in their
+own paragraph after a blank line, comma-separated among themselves), and outputs the patched
+`model` / `clip` / `prompt` plus a **`triggers`** output (just the comma-separated trigger words,
+no prompt — wire it into **Ouroboros**'s `trigger_words` so the triggers survive the LLM prompt
+rewrite). A LoRA with no effective strength (off) is skipped entirely — neither applied nor does
+its trigger word get added. Loaded files are cached per run. Category `Kinburg-Nodes/lora`.
+
+</details>
+
+</details>
+
+
+
+
+### 🖼️ Image Processing & Visualizers
+
+
+<details>
+<summary><b>⚖️ <code>image_compare/</code> — Image Compare (HTML) & Color Caption</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Side-by-side interactive HTML image comparison viewer with zoom, slider, and vision judge ratings section.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Image Compare (HTML) & Color Caption</code></b> — <i>Interactive HTML comparison viewer and color captioning</i></summary>
+
+<br>
+
 Takes a batch **or an image list** (different sizes are fine — e.g. from Get Accumulator (images
 list)) + short labels (`captions`) + full generation prompts (`prompts`)
 and produces an interactive HTML comparison page — grid (columns + max row height),
@@ -1515,7 +2333,28 @@ classic look. The `captions` input still accepts plain text lines exactly as bef
 line is treated independently, so you can mix plain and styled captions. Category
 `Kinburg-Nodes/image/compare`.
 
-### `image_batch/` — Unlim Image Batch
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>🖼️ <code>image_batch/</code> — Unlim Image Batch & List</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Dynamic unlimited image batching and list creation utilities.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Unlim Image Batch & List</code></b> — <i>Unlimited dynamic image batching</i></summary>
+
+<br>
+
 **`Unlim Image Batch`** concatenates an unlimited number of IMAGE inputs into a single
 batch. The input list grows on its own (like Unlim Text Concat): `image_1` (required) +
 `image_2`, and a new empty slot appears whenever you connect the last one. A single batch
@@ -1537,7 +2376,28 @@ nodes (read the length, take an item by index, process it inside the loop). Note
 downstream nodes then run once per item rather than on a single batch. Category
 `Kinburg-Nodes/image`.
 
-### `collage/` — Collage
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>🎨 <code>collage/</code> — Collage Layout Builder</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Custom grid layout collage builder for images.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Collage</code></b> — <i>Image collage layout builder</i></summary>
+
+<br>
+
 **`Collage`** arranges images into a grid on a single output canvas (e.g. an A4-ish
 2480×3508). Source is the wired `input_images` batch, or — if nothing is connected —
 every image in `folder_path` (natural-sorted, so `img2` < `img10`). `cols` sets the column
@@ -1548,52 +2408,31 @@ image's own top-left pixel color so it blends in. The background is `background_
 (HEX), or a connected `background_image` (stretched to the output size, first frame).
 Category `Kinburg-Nodes/image`.
 
-### `loops/` — flexible iteration
-ComfyUI's execution graph is acyclic, so these cover the two practical loop shapes, both with
-**auto-growing wildcard `*` state slots** (the node shows only the connected slots plus one
-spare; drag in any type, a matching slot appears — on inputs *and* outputs):
+</details>
 
-**`For Each (Open)` / `For Each (Collect)`** — iterate a batch/list **one element at a time**,
-on the same graph-expansion engine as Repeat. Feed Open any iterables (image/mask batches,
-LATENT batches, lists…); each iteration it emits a single **`element_*`** (the idx-th item of
-each input) plus `index` / `total`, iterating to the **shortest** input. Build your body off
-the `element_*` outputs (e.g. a collage from `element_0` + `element_1`) and wire the result(s)
-into Collect's **`result_*`** inputs; Collect accumulates each iteration's results and, when the
-loop ends, emits each `collected_*` as the gathered Python list. Feeding that into a **`List
-Output`** node turns it into a real per-item ComfyUI list — so different-sized images travel
-separately (a Preview shows N images, one per item; a Save writes each). The **🔗 Add / link
-Close** button on Open wires the whole chain: it creates Collect (linked by `flow`) plus a List
-Output on `collected_0`. (A list output can't be emitted from inside the loop itself — ComfyUI
-flattens list outputs during graph expansion — so the fan-out lives in this node just past it.)
-Category `Kinburg-Nodes/loops`.
+</details>
 
-**`List Output`** fans a value that holds a Python list into a proper ComfyUI list (one item per
-element). For Each (Collect) pairs with it, but it's a handy standalone converter too.
 
-**`Repeat (Open)` / `Repeat (Close)`** — a real iterative loop with **carried state**, built on
-ComfyUI's graph expansion: each pass, Close clones the loop body wired back into the next
-iteration, all inside one queue run. Wire your starting values into `Open`, read `index` inside
-the body, and feed the updated values into `Close`; after `count` iterations `Close` outputs the
-final state. The **🔗 Add / link Close** button on `Open` spawns the matching Close and wires the
-`flow` (and `index`) links for you, so you never hand-draw the feedback. `count` must stay a
-widget value (it's read when the loop expands). Category `Kinburg-Nodes/loops`.
 
-**`While (Open)` / `While (Close)`** — the same engine, condition-driven instead of counted.
-Close has a `condition` (BOOLEAN) input computed in the loop body: the loop keeps going while
-it's True and stops the moment it's False, with `max_iterations` on Open as a hard safety cap.
-Same wildcard state slots and 🔗 auto-pairing as Repeat. Category `Kinburg-Nodes/loops`.
 
-**`Get by Index`** takes the index-th element of anything indexable — an IMAGE/MASK batch (→ a
-1-frame batch), a LATENT batch (→ one latent, other keys preserved), a list, a string, or any
-other tensor — so inside a loop you can feed a whole batch in and pull out the current frame by
-`index`. Negative indices count from the end; `out_of_range` is `clamp` / `wrap` (cycle) /
-`error`. It also outputs `length` (the container size), handy for driving a loop's `count`.
+### 🛠️ Workflow Control & Utilities
 
-**`Delay`** passes any value straight through after pausing `seconds` (with an optional console
-`label`). Drop it into a wire inside a loop body to slow iterations down and watch the loop run.
-Category `Kinburg-Nodes/loops`.
 
-### `util/` — Date String, Unlim Text Concat, Color Picker, Any/Combo to String, Text Transform, Any Switch, JSON Extract
+<details>
+<summary><b>🛠️ <code>util/</code> — General Workflow Utilities</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Essential general-purpose utility nodes: Date string, dynamic string concat, color picker, type converters, text transform, routing switches, and JSON extraction.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Util Nodes</code></b> — <i>Date String, Text Concat, Color Picker, Text Transform, Any Switch, JSON Extract</i></summary>
+
+<br>
+
 **`Date String`** appends the current **date** (and optionally **time**) to a string, with
 selectable formats. Handy for building save paths: e.g. `project/2026-06-20` (a folder per
 day) or `.../2026-06-20/17-05` (per minute). The `/` separator creates subfolders; `_`/`-`
@@ -1649,7 +2488,28 @@ tolerated (the first `{…}`/`[…]` is parsed). Missing paths return `default`.
 outputs (extras are noted in `report`). Pairs with the structured-output LLM nodes (e.g.
 `ideogram4_json`) to route sub-fields into different prompt inputs. Category `Kinburg-Nodes/util`.
 
-### `timer/` — Start Timer, Stop Timer
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>⏱️ <code>timer/</code> — Execution Timer</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Execution timing profile nodes for workflow benchmarking.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Start Timer & Stop Timer</code></b> — <i>Execution profiling timer nodes</i></summary>
+
+<br>
+
 **`Start Timer`** / **`Stop Timer`** measure the wall-clock time of a slice of a workflow.
 Any value (MODEL, LATENT, IMAGE, …) passes through unchanged — wire Start at the beginning of
 the slice and Stop at the end, and that data dependency forces ComfyUI to run Start → slice →
@@ -1663,7 +2523,28 @@ wire `elapsed` to any text preview to see it. Both nodes always re-execute (so t
 real), which means the wrapped slice is recomputed every run while the timers are active —
 mute/bypass them when you're not measuring. Category `Kinburg-Nodes/util`.
 
-### `gen_info/` — Generation Info, Generation Info Filter
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>ℹ️ <code>gen_info/</code> — Generation Info & Filter</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Generation metadata extraction and metadata filtering nodes.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Generation Info & Filter</code></b> — <i>Metadata extraction and filtering</i></summary>
+
+<br>
+
 **`Generation Info`** lists the settings of the branch that produced an output. Pass your
 **`LATENT`** through its `passthrough` slot (tap it downstream of where your branches
 converge — e.g. the sampler's latent output — so the upstream walk reaches them all);
@@ -1697,358 +2578,28 @@ the compare node's **`settings_data`** input, which both renders the settings un
 report for filtering/sorting. A plain-text `settings` output is also provided for standalone
 use (saving to a file, feeding a text node, etc.). Category `Kinburg-Nodes/util`.
 
-### `report/` — investigate report DB (work in progress)
-The Image Compare node carries a `report_db` input (default `<output>/kinburg/reports.db`,
-editable on the page) and saves clean per-image PNGs to a run-scoped folder. The served
-comparison page has a **"Save run to report"** button that POSTs the run — images, caption,
-prompt, settings, and your per-result verdict/rating/comment — to a local **SQLite** DB
-(`/kinburg/report/save`). Settings are stored both as text and expanded into a key/value
-table so the report browser can filter/sort by any setting field, including ones that didn't
-exist before. Re-saving the same run updates it in place (no duplicates). A **📊 Report**
-button (also at `/kinburg/report`) opens a browser page over the whole DB — a
-sortable/filterable table (thumbnail, run, caption, status, ★ rating, tags, settings, prompt,
-comment) with free-text search and a by-setting-field filter; rows link back to their
-comparison. You can **edit in place** (toggle status, set rating, add/remove tags, edit the
-comment — saved straight to the DB), **export** the filtered view to CSV / Markdown / HTML,
-and **delete a run** (removing its rows and image files).
+</details>
 
-### `lora/` — Lora Trigger Loader, Lora Unlim Accumulator
-Stack any number of LoRAs (with their trigger words) onto a model in one node. **`Lora Trigger
-Loader`** is pure config: a searchable LoRA dropdown, `strength_model` + `strength_clip`, and an
-optional `trigger` word; its single `lora` output (type `KINBURG_LORA`) carries that spec —
-nothing is loaded yet. **`Lora Unlim Accumulator`** takes a `model` (+ optional `clip`) and a
-`prompt` (input only — wire it in), plus an auto-growing list of `lora_*` inputs fed by the
-loaders (the `clip` input sits above the first LoRA). It loads and applies each LoRA in slot
-order — to the model with `strength_model`, and to CLIP with `strength_clip` when a CLIP is
-connected (otherwise model-only) — appends the non-empty trigger words to the prompt (in their
-own paragraph after a blank line, comma-separated among themselves), and outputs the patched
-`model` / `clip` / `prompt` plus a **`triggers`** output (just the comma-separated trigger words,
-no prompt — wire it into **Ouroboros**'s `trigger_words` so the triggers survive the LLM prompt
-rewrite). A LoRA with no effective strength (off) is skipped entirely — neither applied nor does
-its trigger word get added. Loaded files are cached per run. Category `Kinburg-Nodes/lora`.
+</details>
 
-### `accumulators/` — Set / Get Results (name-based accumulators)
-For collecting parallel branches without manual batch wiring. **`Set Results (image)`** is a
-labelled pass-through: connect a flow's final image and give it an accumulator `name` (e.g.
-`IMG_RESULTS`); copying the flow auto-increments its `index`. **`Get Results (image)`** has a
-**dropdown** of the defined accumulator names — pick one (it auto-collects) — plus a
-**Collect** button that physically wires every matching Set's output into it (real links, in
-`index` order) and batches them (reusing Unlim Image Batch: `mode` /
-`pad_color` / `skip_empty`). Plug `Get Results` where an image batch used to go (e.g. Image
-Compare). A sibling **`Get Accumulator (images list)`** collects from the *same* Set nodes but
-returns a **list** instead of a batch, so accumulated images of different sizes coexist (feed it
-straight into Image Compare, which now takes a batch or a list). Press Collect again after adding/removing Set nodes — it rebuilds the links from
-scratch and **only wires active Sets** (a Set in Bypass or Mute is skipped, so it drops out on
-re-collect). A **text pair** —
-**`Set Results (text)`** / **`Get Results (text)`** — works the same way and joins the
-collected texts with a `separator` (reusing Unlim Text Concat) in index order. Two
-compare-tuned twins of the text pair drop the separator field entirely and hardcode the
-separator Image Compare expects, so the two ends can't mismatch: **`Set/Get Accumulator
-(prompts)`** joins blocks with a `---` line (feed `Get` into the compare node's `prompts`),
-and **`Set/Get Accumulator (captions)`** joins with a newline, one caption per line (feed into
-`captions`). A **gen-info pair** — **`Set Accumulator (gen info)`** / **`Get Accumulator (gen info)`** — works the same
-way for the `data` (GEN_INFO) of **Generation Info** nodes: Get collects every matching Set's
-dump (in index order) and outputs a single `data` bundle (`GEN_INFO_LIST`) — wire that one
-output straight into **Generation Info Filter**, so its settings no longer need wiring branch
-by branch. The wiring is plain links, so execution and caching are completely standard.
 
-**Collect All lives on `Image Compare (HTML)`** — collecting only ever serves a comparison, so the
-button sits on the node that consumes the accumulators rather than on a helper node of its own. Its
-**🔌 Collect All** button (re)wires *every* Get Accumulator in the graph at once (the label then shows
-how many were wired), so you don't have to visit each one after scaling the workflow. Like the
-per-node Collect it rebuilds links from scratch and wires only **active** Sets — bypass or mute a Set
-and re-collect to drop it from every accumulator. The compare node's **`auto_collect`** toggle (on by
-default) does it automatically right before the workflow is queued, so a run always reflects the
-current, non-bypassed Sets; turn it off to collect only on the button press. *(This replaces the old
-standalone `Collect All Accumulators` node — delete it from older workflows, where it will show up as
-missing.)*
 
-### `prompt_presets/` — Prompt Presets
-**`Prompt Presets`** is five **flexible preset slots**, each emitting a `STRING` prompt fragment
-(five outputs). Each slot has **two dropdowns** — a **category** selector and a **preset**
-selector (the presets of the chosen category) — so any slot can draw from any category. Out of
-the box the five slots default to the classic **Camera / Aesthetics / Light / Medium /
-Background** categories (and the output label follows each slot's chosen category), but you can
-point any slot at any other category, including your own. Every category ships with curated
-built-in presets (e.g. *Camera → Cinematic Anamorphic*, *Light → Rembrandt*, *Aesthetics →
-Cyberpunk*) plus a `🚫 None` option that resolves to an empty string. Selecting a preset resolves
-to its fragment at run time; wire the outputs into your prompt builder / text concat.
 
-You can **add your own presets** (**➕ Add preset** — pick a category, name it, type the fragment;
-re-using an existing name edits it) and **manage categories** (**🗂 Categories** — add / rename /
-delete your own categories; the five built-in categories are protected). **Save the current
-slots as a setup** (**💾 Save setup** — names the whole combination of all five slots'
-category+preset); the **⚙ setup** selector at the top re-applies any saved setup in one click,
-and **🗑 Manage** lists your setups and custom presets for deletion (built-ins can't be removed).
-Custom presets, categories and setups are persisted on disk (`prompt_presets/data/store.json`,
-git-ignored) via `PromptServer` routes under `/kinburg/presets`, so they survive restarts and
-appear across all `Prompt Presets` nodes without an object-info reload. Category
-`Kinburg-Nodes/prompt`.
+<details>
+<summary><b>🎚️ <code>group_control/</code> — Group Control 🎚️</b></summary>
 
-### `prompt_variations/` — Prompt Variations
-**`Prompt Variations`** expands one template into many prompts (a per-item `STRING` **list**).
-Write choices with `{a|b|c}` (nesting allowed, e.g. `{a {x|y}|b}`) and optional `__wildcard__`
-refs (one option per line from `<wildcards_dir>/name.txt`, default `ComfyUI/wildcards`), and the
-node emits the **cartesian product** — empty options like `{, dramatic|}` mean "nothing" (dangling
-commas are cleaned up). `mode` = `all` (every combination, capped by `limit`) or `random`
-(`limit` random combinations, reproducible via `seed`); `dedupe` drops duplicates. Outputs
-**`prompts`** (a list — feed it into **For Each (Open)**), **`count`**, and a **`preview`**. It's
-the input generator for a prompt-space sweep: Prompt Variations → For Each → your sampler → a
-Set/Get Accumulator → **Image Compare**, to render and compare every variant at once. Category
-`Kinburg-Nodes/prompt`.
+<br>
 
-### `list_ops/` — Insert / Remove for batches and lists
-Edit collections by position without rewiring. Two families:
+> **System Purpose & Overview**  
+> Fast bulk bypass and mute controller for ComfyUI node groups.
 
-**Image batch** (a single `[B,H,W,C]` IMAGE tensor, frame-wise): **`Image Batch Insert`** puts an
-`image` (itself possibly a batch) into `batch` at a chosen spot — `position` = *at start / at end
-/ at index / after index* with a 0-based `index` (negative counts from the end, `-1` = last).
-Frames of a different size are reconciled losslessly like Unlim Image Batch (`mode` /
-`pad_color`). **`Image Batch Remove`** drops `count` frame(s) starting at `index` and returns both
-the `batch` remainder and the `removed` frames (`index` may be negative). Category
-`Kinburg-Nodes/image`.
+#### 🧩 Nodes in this system:
 
-**Generic list** (a ComfyUI list of ANY type — images, strings, latents, ints…): **`List
-Insert`** inserts the `item` input into `list` at the chosen `position` / `index` (feed `item` a
-multi-item list to insert several at once); **`List Remove`** drops `count` item(s) at `index`
-and returns the `list` remainder plus the `removed` items. An item is one list element (a single
-value counts as a one-item list). Use these when items aren't same-size images — for frame-level
-edits of a same-size IMAGE batch, use the Image Batch nodes above. Category `Kinburg-Nodes/list`.
+<details>
+<summary>🔹 <b><code>Group Control 🎚️</code></b> — <i>Bulk node group bypass & mute controller</i></summary>
 
-### `show_text/` — Show Text (Markdown)
-**`Show Text (Markdown)`** displays whatever you wire into it as text. Its `value` input is the
-wildcard `*` type, so **anything** connects — a STRING, a number, a COMBO, even a dict/list
-(rendered as pretty JSON) — and the node converts it to text (a whole batch/list is gathered
-into one view). A **markdown** toggle flips between a rendered markdown preview (headings,
-**bold**/*italic*, `code`, code blocks, lists, links, quotes, `---`) and an **editable raw
-textarea** you can tweak before saving — inside a fixed-size scroll box, so toggling never
-resizes the node. HTML in the text is escaped (safe to display).
+<br>
 
-Unlike the core **Preview Text** node, the shown text is stored **in the workflow** (the node's
-`properties`), so it **survives switching between workflow tabs** in the desktop app instead of
-resetting. **💾 Save .md** writes the current text to disk via a `PromptServer` route
-(`/kinburg/showtext/save`): relative `save_path`s land under ComfyUI's `output` folder, a `.md`
-extension is added automatically, parent folders are created, and `{date}` / `{time}` /
-`{datetime}` placeholders expand to the current date/time. **`autosave`** does the same
-automatically on every run when a path is set. **📋 Copy** copies the text to the clipboard, and
-a small header shows a char/line counter. The converted text is also a **`text` (STRING) output**,
-so the node can sit inline in a wire and pass it downstream.
-
-**Freeze / use the saved text (`use_saved_text`).** By default the node reads its `value` input
-(running its upstream) and the shown text tracks it. Flip **`use_saved_text`** on to output the
-text saved & edited *in the node* instead — and the input is **not evaluated**, so its upstream
-never runs. Typical use: an LLM generates a prompt → Show Text → image generation; you eyeball
-the prompt, tweak it in the node, flip the toggle on, and re-queue — the **edited** prompt goes
-downstream and the **LLM doesn't re-run**. This uses ComfyUI's *lazy evaluation*
-(`check_lazy_status`), not just output caching, so it holds even after a ComfyUI restart or with
-a randomized seed. The edited text rides in a hidden, serialized `saved_text` widget (so it
-reaches the backend and is stored in the workflow); edit it and re-queue to push changes without
-regenerating. Leave the toggle off for the original behavior. Category `Kinburg-Nodes/util`.
-
-### Chat — `Local LLM Chat (GGUF)` + `Local LLM Settings (GGUF)`
-**`Local LLM Chat (GGUF)`** (in the `local_llm/` package) is a self-contained multi-turn chat node.
-It's deliberately bare — just the **chat window** (User/LLM bubbles in a fixed-height, scrollable
-box, so the node doesn't grow as the chat fills), the message field, a **context meter**, an
-optional row of **persona chips**, and the **Send / Approve / Clear** buttons. Everything about
-*how* to generate comes through the **`persona_1`** input.
-
-**`Local LLM Settings (GGUF)`** is that config node: it holds the options — model, system prompt,
-sampling, loader (`n_ctx` / `n_gpu_layers` / …), reasoning split, `output_format` / grammar,
-`extra_load_args`, `chat_template_path` (optional chat-template override — see above), unload
-toggles — plus two connect-only inputs: **`context`** (reference material
-appended to the system prompt — e.g. Character Card / Context Collector) and **`vision`** (from a
-**`Vision Settings (GGUF)`** node — `mmproj` / `vision_handler` / `image_max_side`; connect it only
-for vision). It emits everything as one `KINBURG_LLM_CONFIG` bundle. Wire its `config` output into
-any LLM node — the chat node's **`persona_1`** **and** the text/vision nodes take the same bundle,
-so one Settings node can drive several.
-
-- **📨 Send** runs the workflow up to the chat node: `run()` generates a reply from the stored
-  history + your message (+ optional image), **streams it into the bubble live** (over a
-  `kinburg.chatllm` websocket event), and **blocks the downstream branch** (`ExecutionBlocker`) so
-  nothing past the node runs while you chat. Reasoning models: the `<think>…` stream shows in an
-  open **💭 thinking** block during generation, then collapses into a **💭 reasoning** toggle with
-  the answer as the main text (only the answer goes downstream).
-- **✅ Approve** runs with the gate open: `run()` **skips generation** and emits the **last reply**
-  on the `text` output, so it flows downstream immediately (no re-generation, any seed).
-
-**Sending a picture.** **Ctrl+V**, drop a file on the chat window, or hit the **📎** in the corner
-of the input box. Thumbnails queue in a tray above the input (**✕** takes one off); they go out with
-your next message and stay in its bubble for good — click one to open it full size. Works with an
-empty message: a picture on its own is a perfectly good "look at this".
-
-Two things make this different from the `image` input. First, it is **not a graph link** — the
-picture is uploaded to `input/kinburg_chat/` and referenced by name, so 📨 Send never re-runs an
-image branch to fetch it (an `image` wired in from a sampler would regenerate on *every* message
-unless its seed is fixed). Second, the pixels reach the model on **that turn only**. From the next
-turn the picture is a text marker — `[image]`, or `[image: …]` once something fills the caption —
-so a long conversation with pictures in it costs no more context than a conversation without. The
-chat still shows every one of them; only the model's copy degrades to a line of text.
-
-Needs an `mmproj` on the active persona's Settings node, same as any vision run — and mixing
-picture turns with plain ones is cheap: the projector is attached per request rather than at load
-time, so the model stays put and only the (much smaller) clip is loaded and released around it.
-
-**`Send Image to Chat`** does the same thing for a picture your workflow just generated, so you
-never have to copy one out of a preview by hand. Wire an `IMAGE` in (it passes straight through, so
-the node sits inline), and:
-
-- **`send_as`** — *me (user)* drops it in the chat's tray, exactly as if you had pasted it: pixels
-  go to the model with your next message. A **persona** instead hangs it on that persona's most
-  recent bubble, so it reads as though they sent it. The model is not shown those pixels — llama.cpp
-  only takes images on user turns, and a persona has no need to study a photo it supposedly took —
-  and by default the picture leaves nothing in the context either. That is usually right: the
-  picture came from something the persona had just described, so a marker would say it twice. Turn
-  on **`note_in_context`** (with a `caption`) when you want the conversation to record it.
-- **`when`** — *on button press* saves the picture and waits for the **📌** on the node, so you can
-  look at the result and re-roll before committing. *every run* pushes as soon as the node executes.
-  Either way the filename is a hash of the pixels, so re-running a branch that produced the same
-  picture pushes the same reference and the chat recognises it instead of stacking duplicates.
-  📌 reads `send_as`, `caption`, `shot` and `note_in_context` **when you press it** — deciding who a
-  picture comes from is something you do after looking at it, so changing them post-generation
-  works without re-running anything. Only `megapixels` needs a re-run; it changes the saved file.
-- **`caption`** — one or two sentences of plain prose: this is what the model reads about the
-  picture once the pixels are gone. Not the generation prompt — a paragraph of comma-separated tags
-  sitting in the conversation teaches the persona to write in comma-separated tags. If a "camera"
-  persona writes both, split them: one line for the sampler, one for here.
-- **`megapixels`** downscales the copy that goes to the chat (0 = full size); **`shot`** is an
-  optional keyframe label kept with the picture, so a chat can be read back as a storyboard.
-- **`→ chat`** picks the target chat window; leave it on auto when there is only one.
-
-Like pasting, none of this is a graph link, so it never causes 📨 Send to re-run a sampler.
-
-**Taking one back.** Hover a picture in a bubble for a **✕** — sent by the wrong persona, or by
-accident, and it comes straight back out without touching the reply it was hanging on. A bubble
-that existed only to carry it disappears with it. 🗑 on a whole message, and 🗑 Clear on the whole
-chat, take their pictures too; Clear counts them before asking.
-
-Removing a picture deletes its file, unless something in the graph is still showing it — another
-bubble, another chat node, or a `Dream Board 🎬` whose snapshot still names it (a picture in two
-places is one file, since the name is a hash of its pixels).
-Deletion is limited to `input/kinburg_chat/` — your own `LoadImage` sources in the input folder are
-never touched. And a file removed by mistake comes back by re-running the branch that made it: the
-hash, and therefore the name, is the same.
-
-**Stopping a reply.** While one is being written its bubble carries **⏹** and **✕**, and they mean
-different things. **⏹** stops the model between tokens and **keeps what it has written**: the
-partial text lands in the history like any other reply, the meter says `⏹ stopped`, and Send with an
-empty box carries on from it — the same continuation a reply cut off by `max_tokens` gets. **✕**
-walks away from the turn and discards it. Stopping does not kill the worker or unload the model, so
-the next turn starts immediately.
-
-**Editing the conversation.** Hover any bubble — yours or the model's — for **⧉ copy · ✎ edit ·
-↻ resend · 🗑 delete**. ✎ swaps the bubble for an inline textarea sized to the message it holds
-(Esc cancels, Ctrl+Enter saves). ↻ replays exactly the turn that produced the message, dropping
-everything below it — a normal question/answer pair goes back to your question, while a persona's
-no-user-message turn replays just that one reply. All of it is plain surgery on the stored history, so the
-next turn simply sees the conversation you left behind. Everything is disabled while a reply is in
-flight; if a run dies before reaching the node, **✕** on the live bubble unsticks it.
-
-**Personas.** Six inputs — **`persona_1..6`** — each take a *whole* `Local LLM Settings (GGUF)`
-bundle, so a persona brings its own **model, sampling and system prompt**, not just a different
-prompt. **`persona_1` is the node's config**: wire only that one and this is an ordinary chat node
-with no chip row. Wire a second and a chip row appears, one chip per persona. Clicking a chip only
-**selects** it — 📨 Send is the sole trigger — and the active persona's bundle becomes the config
-for that turn. All personas share one history, so a prompt-writer sees the whole discussion (as far
-back as its window reaches); when it speaks, the other personas' replies are prefixed with their
-name (`[Order manager]: …`) so it doesn't mistake them for its own past turns. Bubbles are labelled
-with their persona once there's more than one.
-
-The **⚙** chip sets, per persona: the **chip label** (defaults to the title of the wired-in node,
-but only if you renamed it — stock Settings nodes all read the same), an optional **trigger**
-message, and the two context controls below. With nothing else wired the chip row is hidden and the
-node behaves exactly as before.
-
-**Who sees what.** Two independent per-persona settings decide which turns reach the model. Both
-are worked out per request, never frozen into the history, so changing one takes effect on messages
-that are already there — and the chat dims exactly what the persona you have selected won't see.
-
-- **`Keep in context`** — *how long*. A prompt-writer emits a 300-token draft every press, and after
-  an iteration or two the newer one supersedes it. This is how many of that persona's **own** most
-  recent turns survive: blank = all (the default), `0` = none, `2` = the last two. It counts its own
-  turns, not every turn since — chatting with someone else for twenty messages shouldn't make the
-  writer forget the draft you're revising. A turn is the reply *plus* the instruction that produced
-  it, so nothing is left dangling.
-- **`Private`** — *for whom*. The persona's turns go to nobody but itself. It still reads its own
-  back (that's what makes revising a draft work), while the persona you're brainstorming with never
-  wades through prompt sprawl. Combine them: private + keep 2 = "I see my own last two, nobody else
-  sees any."
-
-Withheld messages stay in the chat, dimmed with 🚫; hover for which rule caught them. A message you
-hide by hand is a third, separate thing and comes back with the **👁** button on its bubble.
-✅ Approve releases the last reply regardless of any of this.
-
-**What 📨 Send does with an empty input box** depends on who spoke last:
-
-| Situation | What happens |
-|---|---|
-| You typed something | A normal turn, as always. |
-| Box empty, **you switched persona** | A turn with **no user message at all** — the persona works from the conversation and its own system prompt, so nothing prods it in a way everyone else would then see in the context. Set a **trigger** in ⚙ if you'd rather send a standing instruction. |
-| Box empty, **the last reply is the active persona's own** | **Continues that reply** from where `max_tokens` cut it off, appending to the same bubble instead of starting a new one. |
-
-Two caveats on those: a no-user-message turn asks the model for a second `assistant` block in a row,
-which a few chat templates (mistral-family) reject outright — the trigger field is the way out. And
-continuing a reply uses a raw prefill, so it needs a chat template and doesn't work on the vision
-path. Both modes also skip `thinking_directive`, since it would have to *become* the user turn.
-
-**Context meter.** A thin row under the chat shows the KV-cache fill after the last turn —
-`ctx 3 412 / 8 192 · 42% · 120 out · 4.2s` — from the same worker numbers `Kinburg Live Log` reports.
-The bar turns amber past 75% and red past 90%. When a reply stops because it hit `max_tokens` the
-row says so, which is the cue to press Send with an empty box and let the persona finish it.
-
-**Archiving (`⤵ Archive N`).** When the conversation starts crowding the window, this folds the
-older turns into a single **🗂 archived summary** and the model reads *that* instead of them. The
-originals stay right where they were, dimmed — nothing is deleted, and **🗑 on the summary puts them
-all back**. The summary is an ordinary bubble, so **✎ edits it** when the model dropped something
-it shouldn't have.
-
-It is one one-shot request with an empty history, so it still works when the chat is *already* over
-budget, and it never touches VRAM: by default the summariser borrows the active persona's
-already-loaded model with a compression prompt swapped in. Pick a dedicated persona in ⚙ if you'd
-rather have a small fast model do it in its own voice. Turns that are already withheld — hidden by
-hand, aged out of a retention window, or belonging to a private persona — are never folded in, so a
-private thread can't leak into a shared brief.
-
-The summary is **cumulative**: each pass rewrites it from the previous one plus the next block, so
-archiving repeatedly never loses the first pass. One press folds at most 30 messages, which keeps
-the summariser's own prompt from overflowing on a very long chat — press again for the next block.
-In ⚙: **`Keep verbatim`** is how many recent messages are never folded (default 8), and **`Nag at`**
-is the fill % at which the button turns amber (default 70). It's manual on purpose — the button
-tells you how many would go, and you decide when.
-
-**VRAM.** Personas that share a model *and* the loader fields (`n_ctx`, `n_gpu_layers`, `n_batch`,
-`flash_attn`, `kv_cache_type`, `extra_load_args`, mmproj) cost **no reload** when you switch —
-the worker's load signature ignores the system prompt and sampling. Differ in any of them and the
-worker process is killed and restarted, which does free the VRAM but costs a full load; a chip is
-marked **⟳** when picking it would reload the model. **`unload_on_approve`** (on by default) frees
-the LLM entirely when you press ✅ Approve, so the image model downstream has room.
-
-The dialogue — plus your pending message, the picked persona and the turn descriptor — lives in a
-single **`chat_state`** JSON input that persists in the workflow (**🗑 Clear** wipes it; personas are
-untouched). It is one input rather than six on purpose: the Vue frontend draws a 24 px row for
-*every* widget a node owns, hidden or not, so six little carriers left 168 px of dead grey space
-under the chat. The frontend doesn't render this one as a widget at all — it removes the
-auto-created widget and lets the chat window itself carry the value — so the node has no invisible
-rows. Workflows saved in the older six-widget format are migrated on load.
-
-**Vision is optional:** the `image` input is on the
-**chat node** (attached to the current turn); set an `mmproj` on the Settings node to enable it —
-connecting an image with no `mmproj` set shows an error in the chat. `unload_llm_after_run` defaults
-**off** so the model stays in VRAM for fast back-and-forth. Chat outputs: `text` (the approved
-reply, gated) and a `help` cheat-sheet. Category `Kinburg-Nodes/LLM`.
-
-### `save_song/` — Save Song
-**`Save Song`** saves an **`audio`** clip (required) as a song, with an optional **`image`**
-cover and optional **`lyrics`** text (an input socket — wire a STRING in). The **`quality`** dropdown picks the audio format and
-bitrate — **FLAC** (lossless) or **MP3 / Opus** at a chosen bitrate — encoded with PyAV exactly
-like ComfyUI's own Save Audio (Opus is resampled to a supported rate automatically). The cover is
-written as a **JPEG** (its `image_quality` is adjustable), and the lyrics as a **`.txt`** — all
-three share one counter-based base name under `ComfyUI/output` (e.g. `songs/song_00001.flac`,
-`…_00001.jpg`, `…_00001.txt`). It returns the standard `audio` / `images` UI results, so ComfyUI
-shows a **native `<audio>` player and the cover preview** on the node **and** lists the saved
-files in **Media Assets** (just like the core Save Audio node). Outputs the `audio` passthrough
-plus the saved `path`. Category `Kinburg-Nodes/audio`.
-
-### `group_control/` — Group Control
 **`Group Control 🎚️`** is a client-side control panel for enabling/bypassing workflow **groups by
 name**. It lists every *unique* group title in the graph, one row each, with a switch that flips
 all groups carrying that name between **`ALWAYS`** (active) and **`BYPASS`** (skipped) at once —
@@ -2123,7 +2674,148 @@ group nesting, which is defined by the groups' positions on the canvas). The nod
 the backend — it's excluded from the prompt and only manipulates other nodes' modes on the client
 before the run. Category `Kinburg-Nodes/util`.
 
-## Installation
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>🗄️ <code>accumulators/</code> — Name-Based Accumulators</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Named global accumulators across node executions for images, audio, texts, prompts, captions, and generation info.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Set / Get Accumulators</code></b> — <i>Named global result accumulators</i></summary>
+
+<br>
+
+For collecting parallel branches without manual batch wiring. **`Set Results (image)`** is a
+labelled pass-through: connect a flow's final image and give it an accumulator `name` (e.g.
+`IMG_RESULTS`); copying the flow auto-increments its `index`. **`Get Results (image)`** has a
+**dropdown** of the defined accumulator names — pick one (it auto-collects) — plus a
+**Collect** button that physically wires every matching Set's output into it (real links, in
+`index` order) and batches them (reusing Unlim Image Batch: `mode` /
+`pad_color` / `skip_empty`). Plug `Get Results` where an image batch used to go (e.g. Image
+Compare). A sibling **`Get Accumulator (images list)`** collects from the *same* Set nodes but
+returns a **list** instead of a batch, so accumulated images of different sizes coexist (feed it
+straight into Image Compare, which now takes a batch or a list). Press Collect again after adding/removing Set nodes — it rebuilds the links from
+scratch and **only wires active Sets** (a Set in Bypass or Mute is skipped, so it drops out on
+re-collect). A **text pair** —
+**`Set Results (text)`** / **`Get Results (text)`** — works the same way and joins the
+collected texts with a `separator` (reusing Unlim Text Concat) in index order. Two
+compare-tuned twins of the text pair drop the separator field entirely and hardcode the
+separator Image Compare expects, so the two ends can't mismatch: **`Set/Get Accumulator
+(prompts)`** joins blocks with a `---` line (feed `Get` into the compare node's `prompts`),
+and **`Set/Get Accumulator (captions)`** joins with a newline, one caption per line (feed into
+`captions`). A **gen-info pair** — **`Set Accumulator (gen info)`** / **`Get Accumulator (gen info)`** — works the same
+way for the `data` (GEN_INFO) of **Generation Info** nodes: Get collects every matching Set's
+dump (in index order) and outputs a single `data` bundle (`GEN_INFO_LIST`) — wire that one
+output straight into **Generation Info Filter**, so its settings no longer need wiring branch
+by branch. The wiring is plain links, so execution and caching are completely standard.
+
+**Collect All lives on `Image Compare (HTML)`** — collecting only ever serves a comparison, so the
+button sits on the node that consumes the accumulators rather than on a helper node of its own. Its
+**🔌 Collect All** button (re)wires *every* Get Accumulator in the graph at once (the label then shows
+how many were wired), so you don't have to visit each one after scaling the workflow. Like the
+per-node Collect it rebuilds links from scratch and wires only **active** Sets — bypass or mute a Set
+and re-collect to drop it from every accumulator. The compare node's **`auto_collect`** toggle (on by
+default) does it automatically right before the workflow is queued, so a run always reflects the
+current, non-bypassed Sets; turn it off to collect only on the button press. *(This replaces the old
+standalone `Collect All Accumulators` node — delete it from older workflows, where it will show up as
+missing.)*
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>📑 <code>list_ops/</code> — List & Batch Operations</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Element insertion and removal operations for image batches and lists.
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Image Batch & List Operations</code></b> — <i>Insert/Remove operations for batches and lists</i></summary>
+
+<br>
+
+Edit collections by position without rewiring. Two families:
+
+**Image batch** (a single `[B,H,W,C]` IMAGE tensor, frame-wise): **`Image Batch Insert`** puts an
+`image` (itself possibly a batch) into `batch` at a chosen spot — `position` = *at start / at end
+/ at index / after index* with a 0-based `index` (negative counts from the end, `-1` = last).
+Frames of a different size are reconciled losslessly like Unlim Image Batch (`mode` /
+`pad_color`). **`Image Batch Remove`** drops `count` frame(s) starting at `index` and returns both
+the `batch` remainder and the `removed` frames (`index` may be negative). Category
+`Kinburg-Nodes/image`.
+
+**Generic list** (a ComfyUI list of ANY type — images, strings, latents, ints…): **`List
+Insert`** inserts the `item` input into `list` at the chosen `position` / `index` (feed `item` a
+multi-item list to insert several at once); **`List Remove`** drops `count` item(s) at `index`
+and returns the `list` remainder plus the `removed` items. An item is one list element (a single
+value counts as a one-item list). Use these when items aren't same-size images — for frame-level
+edits of a same-size IMAGE batch, use the Image Batch nodes above. Category `Kinburg-Nodes/list`.
+
+</details>
+
+</details>
+
+
+
+
+<details>
+<summary><b>📊 <code>report/</code> — Investigation Report DB</b></summary>
+
+<br>
+
+> **System Purpose & Overview**  
+> Investigation report database logging node (work in progress).
+
+#### 🧩 Nodes in this system:
+
+<details>
+<summary>🔹 <b><code>Report DB</code></b> — <i>Investigation report DB node</i></summary>
+
+<br>
+
+The Image Compare node carries a `report_db` input (default `<output>/kinburg/reports.db`,
+editable on the page) and saves clean per-image PNGs to a run-scoped folder. The served
+comparison page has a **"Save run to report"** button that POSTs the run — images, caption,
+prompt, settings, and your per-result verdict/rating/comment — to a local **SQLite** DB
+(`/kinburg/report/save`). Settings are stored both as text and expanded into a key/value
+table so the report browser can filter/sort by any setting field, including ones that didn't
+exist before. Re-saving the same run updates it in place (no duplicates). A **📊 Report**
+button (also at `/kinburg/report`) opens a browser page over the whole DB — a
+sortable/filterable table (thumbnail, run, caption, status, ★ rating, tags, settings, prompt,
+comment) with free-text search and a by-setting-field filter; rows link back to their
+comparison. You can **edit in place** (toggle status, set rating, add/remove tags, edit the
+comment — saved straight to the DB), **export** the filtered view to CSV / Markdown / HTML,
+and **delete a run** (removing its rows and image files).
+
+</details>
+
+</details>
+
+
+
+
+---
+
+## 📦 Installation
 
 1. Clone this repository into `ComfyUI/custom_nodes` (or install it through
    **ComfyUI-Manager**).
@@ -2144,7 +2836,9 @@ before the run. Category `Kinburg-Nodes/util`.
 Each node's parameters are documented in their tooltips. The Local LLM node also exposes a
 `help` output with a quick cheat-sheet — wire it to a "Preview as Text" node to read it.
 
-## Tests
+---
+
+## 🧪 Tests
 
 ```bash
 python tests/run.py
@@ -2156,6 +2850,8 @@ with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). ~470 checks over `l
 storyboard path and **not** a substitute for trying a change in the app. `tests/README.md` says
 exactly what is and is not covered.
 
-## License
+
+
+## 📄 License
 
 MIT — see [LICENSE](LICENSE).
