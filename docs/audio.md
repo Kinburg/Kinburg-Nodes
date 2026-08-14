@@ -1,5 +1,7 @@
 # 🎵 Audio & Music Suite
 
+<!-- index-order: 3 -->
+
 [← back to the node index](../README.md#-node-index)
 
 ---

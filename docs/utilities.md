@@ -1,5 +1,7 @@
 # 🛠️ Workflow Control & Utilities
 
+<!-- index-order: 7 -->
+
 [← back to the node index](../README.md#-node-index)
 
 ---

@@ -1,5 +1,7 @@
 # 🎛️ Presets & Asset Management
 
+<!-- index-order: 5 -->
+
 [← back to the node index](../README.md#-node-index)
 
 ---

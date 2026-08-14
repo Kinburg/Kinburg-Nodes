@@ -1,5 +1,7 @@
 # 🖼️ Image Processing & Visualizers
 
+<!-- index-order: 6 -->
+
 [← back to the node index](../README.md#-node-index)
 
 ---

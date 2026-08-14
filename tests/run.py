@@ -26,6 +26,7 @@ SUITES = [
     ("siren_score", "py", TESTS / "test_siren_score.py"),
     ("lazy_guard", "py", TESTS / "test_lazy_guard.py"),
     ("audio_sr", "py", TESTS / "test_audio_sr.py"),
+    ("docs", "py", TESTS / "test_docs.py"),
     ("chat.js", "js", TESTS / "js" / "build_chat.mjs"),
     ("dream_board.js", "js", TESTS / "js" / "build_dream_board.mjs"),
     ("group_control.js", "js", TESTS / "js" / "build_group_control.mjs"),

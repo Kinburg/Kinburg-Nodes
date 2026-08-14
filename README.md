@@ -1,16 +1,19 @@
 # 🎨 Kinburg-Nodes
 
+<!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.1.0-blue.svg)](pyproject.toml)
 [![nodes](https://img.shields.io/badge/nodes-90-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-807%20checks-brightgreen.svg)](#-tests)
+[![tests](https://img.shields.io/badge/tests-814%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
+<!-- END GENERATED badges -->
 
 A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI reads the node mappings from the root `__init__.py`, and the sets are split into subpackages.
 
 ---
 
+<!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
 All **90** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
@@ -192,6 +195,7 @@ All **90** nodes, grouped by the package they live in. Every package links to it
 | While (Open) | `KinburgWhileOpen` | `Kinburg-Nodes/loops` |
 
 </details>
+<!-- END GENERATED index -->
 
 ---
 
@@ -224,12 +228,35 @@ Each node's parameters are documented in their tooltips. The Local LLM node also
 python tests/run.py
 ```
 
-with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). **807 checks in 13 suites, about a
+with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). **814 checks in 14 suites, about a
 minute** — over `local_llm/` (chat, worker, send-image, lazy guard), `morpheus/` (storyboard, dream
-board), `siren/` (cast, score), `audio_sr/`, `lora/`, and three of the `web/*.js` extensions (chat,
-dream board, group control). Nothing real is loaded (llama.cpp, H3 and the browser are all stubbed),
-so it is a regression net for those paths and **not** a substitute for trying a change in the app.
-`tests/README.md` says exactly what is and is not covered.
+board), `siren/` (cast, score), `audio_sr/`, `lora/`, three of the `web/*.js` extensions (chat,
+dream board, group control), and the docs audit below. Nothing real is loaded (llama.cpp, H3 and the
+browser are all stubbed), so it is a regression net for those paths and **not** a substitute for
+trying a change in the app. `tests/README.md` says exactly what is and is not covered.
+
+### 📑 Keeping the docs honest
+
+The node index in this README is **generated**, so it cannot drift from the nodes the pack
+registers:
+
+```bash
+python tools/gen_readme_index.py
+```
+
+It rewrites only the regions between the `<!-- BEGIN/END GENERATED -->` markers — every other line
+here is hand-written. `--check` verifies instead of writing (that is the `docs` test suite, so a
+stale index fails the tests), and `--run-tests` also refreshes the tests badge from a real run.
+
+Adding a node needs no edit there at all: it appears in the index on the next run. Adding a
+**package** needs only its `##` heading in the right `docs/*.md` file — the tool reads the folder
+name out of the heading, and fails with `undocumented: <folder>` if a node's folder has no section
+to live in. A group's position comes from its own `<!-- index-order: N -->` line.
+
+Alongside the index it audits the prose: every node must be mentioned, every local link and anchor
+must resolve, and every backticked `snake_case` term must be a real node input or output — anything
+else has to be listed in `tools/known_terms.txt` (sampler names, enum values, comfy internals).
+That last check is the one that catches a renamed input still being documented under its old name.
 
 
 

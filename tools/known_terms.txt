@@ -1,0 +1,59 @@
+# `snake_case` terms the docs may mention that are NOT inputs or outputs of a node in this pack.
+#
+# tools/gen_readme_index.py flags every backticked snake_case term in the docs that no node
+# declares, so renaming an input surfaces the README lines still using the old name. Terms that
+# were never node inputs to begin with belong here.
+#
+# Add a term only once you have checked it is one of these kinds — if it is supposed to be a real
+# input, fix the docs instead. One term per line; `#` starts a comment.
+
+# --- k-diffusion sampler names and solver_type values, quoted as values ---
+dpmpp_2m
+dpmpp_2m_sde
+exp_heun_2_x0
+exp_heun_2_x0_sde
+phi_1
+phi_2
+res_2s
+res_multistep
+sa_solver
+seeds_2
+
+# --- enum values of our own widgets (modes, formats), not inputs themselves ---
+collapse_whitespace
+gbnf_grammar
+ideogram4_json
+regex_extract
+regex_findall
+regex_replace
+
+# --- inputs of CORE ComfyUI nodes we compare ourselves against ---
+add_noise
+end_at_step
+start_at_step
+
+# --- ComfyUI / llama.cpp / HF internals named while explaining how something works ---
+check_lazy_status
+cond_video_latents
+huggingface_hub
+inverse_noise_scaling
+minimax_refs
+mtmd_tokenize
+noise_mask
+noise_scaling
+reshape_mask
+sample_custom
+
+# --- our own internal helpers, named where the docs explain the plumbing ---
+build_llm_request
+
+# --- AceStep tokenizer fields the core node never passes (Siren does) ---
+caption_negative
+lyrics_negative
+
+# --- example criterion names and model file names ---
+prompt_adherence
+z_image_turbo
+
+# --- the README's own description of this very check ---
+snake_case

@@ -1,5 +1,7 @@
 # 🐍 Iterative Samplers & Optimizers
 
+<!-- index-order: 2 -->
+
 [← back to the node index](../README.md#-node-index)
 
 ---

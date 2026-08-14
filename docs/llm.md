@@ -1,5 +1,7 @@
 # 🧠 LLM & Vision Systems
 
+<!-- index-order: 1 -->
+
 [← back to the node index](../README.md#-node-index)
 
 ---
@@ -375,6 +377,8 @@ people. Category `Kinburg-Nodes/LLM`.
 ---
 
 ## 👁️ `vision_judge/` — Vision LLM Judge & Criteria Builder
+
+<!-- packages: vision_judge, criteria_presets -->
 
 > **System Purpose & Overview**  
 > Score a batch or list of images using a Vision GGUF against custom rubrics or multi-criteria definitions, returning structured JSON verdicts with guaranteed formatting via GBNF grammars.

@@ -1,5 +1,7 @@
 # 🎬 Video Generation & Storyboarding
 
+<!-- index-order: 4 -->
+
 [← back to the node index](../README.md#-node-index)
 
 ---
