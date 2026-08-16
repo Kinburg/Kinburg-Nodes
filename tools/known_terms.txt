@@ -33,6 +33,7 @@ end_at_step
 start_at_step
 
 # --- ComfyUI / llama.cpp / HF internals named while explaining how something works ---
+attached_pic
 check_lazy_status
 cond_video_latents
 huggingface_hub

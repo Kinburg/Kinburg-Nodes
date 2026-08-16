@@ -2,7 +2,7 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.1.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-90-orange.svg)](#-node-index)
+[![nodes](https://img.shields.io/badge/nodes-91-orange.svg)](#-node-index)
 [![tests](https://img.shields.io/badge/tests-814%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -16,7 +16,7 @@ A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **90** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **91** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -51,7 +51,7 @@ All **90** nodes, grouped by the package they live in. Every package links to it
 |---|---|
 | [`siren/` — Siren Suite 🧜](docs/audio.md#-siren--siren-suite-) | `Siren (Music Sampler) 🧜`, `Siren Cast (Voice Plan) 🧜`, `Siren Compare (Audio) 🧜`, `Siren Scope (Audio → Image) 🧜`, `Siren Score (Lyrics → Plan) 🧜`, `Siren Section (Audio Window) 🧜` |
 | [`audio_sr/` — Audio SR (48 kHz Upscale) 🔊](docs/audio.md#-audio_sr--audio-sr-48-khz-upscale-) | `Audio SR (48 kHz Upscale) 🔊` |
-| [`save_song/` — Save Song](docs/audio.md#-save_song--save-song) | `Save Song` |
+| [`save_song/` — Save Song & Song Tags](docs/audio.md#-save_song--save-song--song-tags) | `Save Song`, `Song Tags` |
 
 ### 🎬 Video Generation & Storyboarding
 
@@ -182,6 +182,7 @@ All **90** nodes, grouped by the package they live in. Every package links to it
 | Siren Scope (Audio → Image) 🧜 | `KinburgSirenScope` | `Kinburg-Nodes/audio` |
 | Siren Score (Lyrics → Plan) 🧜 | `KinburgSirenScore` | `Kinburg-Nodes/sampling` |
 | Siren Section (Audio Window) 🧜 | `KinburgSirenSection` | `Kinburg-Nodes/sampling` |
+| Song Tags | `KinburgSongTags` | `Kinburg-Nodes/audio` |
 | Start Timer | `StartTimer` | `Kinburg-Nodes/util` |
 | Stop Timer | `StopTimer` | `Kinburg-Nodes/util` |
 | Text Transform | `KinburgTextTransform` | `Kinburg-Nodes/util` |

@@ -475,7 +475,7 @@ loads.
 
 ---
 
-## 💾 `save_song/` — Save Song
+## 💾 `save_song/` — Save Song & Song Tags
 
 > **System Purpose & Overview**  
 > Save generated audio tracks with metadata and artwork integration.
@@ -490,6 +490,38 @@ three share one counter-based base name under `ComfyUI/output` (e.g. `songs/song
 shows a **native `<audio>` player and the cover preview** on the node **and** lists the saved
 files in **Media Assets** (just like the core Save Audio node). Outputs the `audio` passthrough
 plus the saved `path`. Category `Kinburg-Nodes/audio`.
+
+**The cover and the lyrics also go *inside* the audio file**, because the `.jpg` and `.txt` beside
+it are gone the moment the song is copied onto a phone, and every player on earth reads its title,
+artwork and lyrics out of the file itself. MP3 gets a real **ID3v2.4** tag (`TIT2`/`TPE1`/…, the
+lyrics as **USLT**, the cover as **APIC**); FLAC and Opus get **Vorbis comments** with the cover as a
+`METADATA_BLOCK_PICTURE`. The **title is always filled** — from the file's own name when nothing
+else supplies one, so a player never shows a blank where the song should be.
+
+**`Song Tags`** carries the rest: `title`, `artist`, `album`, `album_artist`, `track`, `year`,
+`genre`, `comment`, and an `extra` field taking one `name: value` per line. It is a separate node
+because it is filled in *once* while Save Song is the one you keep re-running — and because eight
+more widgets on Save Song would be eight more rows of a node you look at constantly. Wire its
+`tags` output into Save Song's `tags` input; empty fields are simply not written.
+
+In `extra`, names a player actually understands (`bpm`, `composer`, `publisher`, `copyright`,
+`isrc`, `disc`, `language`, `mood`, `key`) land in the real field, and anything else becomes a
+custom tag — `TXXX` in MP3, a named comment in FLAC/Opus — which is where `seed: 998877` belongs.
+The optional `settings` input takes **Generation Info Filter**'s `settings_data`, so every setting
+it selected rides along inside the song and the file remembers how it was made. Only the *first*
+dump is used: this node describes one song, not a batch.
+
+**No new dependency for any of it.** PyAV is already here — it is what ComfyUI's own Save Audio
+encodes with — and it carries text metadata for all three formats. It cannot carry the cover: that
+needs an `attached_pic` stream, which in PyAV 17 fails both ways (setting `stream.disposition`
+raises, and muxing one tries to open an *mjpeg encoder* and errors out). So the two picture
+containers are written as plain bytes in `tagging.py` instead of reaching for `mutagen`: an ID3 tag
+is a header, a synchsafe length and a run of frames, and a Vorbis picture is a base64 block. Both
+were verified by writing files and reading them back with ffmpeg — cover byte-identical, UTF-8 text
+(Cyrillic included) intact, duration untouched.
+
+One trap that is invisible until the tags go missing: **FLAC keeps its comments on the container,
+Opus on the stream**. Set Opus's on the container and they vanish with no error at all.
 
 ---
 
