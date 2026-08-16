@@ -22,6 +22,7 @@ import json
 
 import torch
 import torch.nn.functional as F
+from ..categories import CAT_SIREN
 
 MODES = ["mel spectrogram", "linear spectrogram", "waveform", "mel + waveform"]
 COLORMAPS = ["magma", "viridis", "gray"]
@@ -437,7 +438,7 @@ class KinburgSirenScope:
     RETURN_TYPES = ("IMAGE", "STRING", "GEN_INFO")
     RETURN_NAMES = ("image", "report", "gen_extra_info")
     FUNCTION = "render"
-    CATEGORY = "Kinburg-Nodes/audio"
+    CATEGORY = CAT_SIREN
     DESCRIPTION = ("Render audio as an image built for A/B comparison: an absolute dB scale that is "
                    "never auto-fitted, a fixed pixel grid so two takes line up when flipped between, "
                    "and an optional bar/beat grid that lands exactly where Siren Section would cut. "

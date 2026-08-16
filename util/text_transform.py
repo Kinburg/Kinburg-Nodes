@@ -17,6 +17,7 @@ Operations:
 The `ignorecase` / `multiline` / `dotall` toggles apply to the regex_* operations.
 """
 import re
+from ..categories import CAT_UTIL
 
 _OPERATIONS = [
     "replace", "regex_replace", "regex_extract", "regex_findall",
@@ -56,7 +57,7 @@ class TextTransform:
     RETURN_TYPES = ("STRING", "INT", "STRING")
     RETURN_NAMES = ("text", "count", "error")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, text="", operation="replace", pattern="", replacement="",
             ignorecase=False, multiline=False, dotall=False, join_with="\n"):

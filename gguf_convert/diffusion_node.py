@@ -24,6 +24,7 @@ import re
 import sys
 import shutil
 from collections import deque
+from ..categories import CAT_LLM_GGUF
 
 # Reuse the generic helpers from the LLM converter. Fall back to local copies when this file is
 # loaded directly (registry scan) rather than as part of the package.
@@ -270,7 +271,7 @@ class SafetensorsToGGUFDiffusion:
     RETURN_TYPES = ("STRING", "STRING", "STRING")
     RETURN_NAMES = ("gguf_path", "log", "help")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/GGUF"
+    CATEGORY = CAT_LLM_GGUF
     OUTPUT_NODE = True
 
     def run(self, model, model_path, output_dir, output_name, quantize, quantize_binary,

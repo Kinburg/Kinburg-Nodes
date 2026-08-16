@@ -8,6 +8,7 @@ image's own top-left pixel color so it blends into a matching background. `cols`
 """
 import os
 import re
+from ..categories import CAT_IMAGE
 
 # Heavy / ComfyUI-only imports are guarded so the package still imports (and the Registry
 # can enumerate nodes) without ComfyUI present. At runtime these are always available.
@@ -86,7 +87,7 @@ class CollageNode:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "create_collage"
-    CATEGORY = "Kinburg-Nodes/image"
+    CATEGORY = CAT_IMAGE
 
     def create_collage(self, output_width, output_height, cols, gap, margin,
                         background_color, input_images=None, background_image=None, folder_path=""):

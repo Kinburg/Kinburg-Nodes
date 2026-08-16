@@ -167,7 +167,7 @@ that existed only to carry it disappears with it. 🗑 on a whole message, and �
 chat, take their pictures too; Clear counts them before asking.
 
 Removing a picture deletes its file, unless something in the graph is still showing it — another
-bubble, another chat node, or a `Dream Board 🎬` whose snapshot still names it (a picture in two
+bubble, another chat node, or a `Morpheus Dream Board 🌙` whose snapshot still names it (a picture in two
 places is one file, since the name is a hash of its pixels).
 Deletion is limited to `input/kinburg_chat/` — your own `LoadImage` sources in the input folder are
 never touched. And a file removed by mistake comes back by re-running the branch that made it: the
@@ -372,7 +372,7 @@ reference data from the instruction. Wire its `context` output into an LLM node'
 **`context`** input (present on all three LLM nodes; it's appended to the system prompt). Then a
 prompt like *"Vasya and Kolya drink tea in a cafe"* comes back expanded with each character's
 looks. Note: the diffusion model still has its own limits binding attributes across multiple
-people. Category `Kinburg-Nodes/LLM`.
+people. Category `Kinburg-Nodes/LLM/context`.
 
 ---
 
@@ -413,10 +413,10 @@ face, composition, lighting, color, sharpness, background, camera, realism, text
 each; toggled-on ones are emitted as `name: description` lines. An **`extra`** box appends custom
 lines, and an optional **`criteria_in`** input merges an upstream string first (chain builders, or
 start from an existing set), with duplicates removed by name. The single **`criteria`** output feeds
-both **Vision LLM Judge** and **Critic Settings (GGUF)** — right-click their `criteria` field →
+both **Vision LLM Judge** and **Ouroboros Critic Settings 🐍** — right-click their `criteria` field →
 **Convert widget to input** and wire it in (empty output = single overall score). The catalog is
 `criteria_presets/catalog.json`; drop a **`catalog.user.json`** next to it (same shape) to add your
-own criteria without editing the shipped file (it survives a git pull). Category `Kinburg-Nodes/LLM`.
+own criteria without editing the shipped file (it survives a git pull). Category `Kinburg-Nodes/LLM/presets`.
 
 ---
 
@@ -442,7 +442,7 @@ dropdown narrows the list to one tag. Build the library with **Card Save** (phot
 are rendered back through the card nodes' own logic — so the format always matches — and persisted
 on disk. **🗑 Manage** edits tags / deletes entries, **🔄 Refresh** re-reads the list. Build a
 character once (by hand or by photo), then reuse it from the dropdown instead of re-describing the
-same photo every time. Category `Kinburg-Nodes/LLM`.
+same photo every time. Category `Kinburg-Nodes/LLM/presets`.
 
 ---
 
@@ -479,7 +479,7 @@ So for a grammar-constrained pass, **turn the truncation samplers off** (`top_p 
 `min_p 0`) and `repeat_penalty` with them — a table format *mandates* repeated tokens, so penalising
 them fights the grammar. Low `temperature` is enough to keep it disciplined. Putting `END` in the
 node's `stop` field as well makes stopping independent of EOS entirely. `Siren Cast` treats a bare
-`END` line as end-of-table and silently drops anything after it. Category `Kinburg-Nodes/LLM`.
+`END` line as end-of-table and silently drops anything after it. Category `Kinburg-Nodes/LLM/presets`.
 
 ---
 
@@ -525,7 +525,7 @@ regenerating. Leave the toggle off for the original behavior. Category `Kinburg-
 > Convert safetensors model weights directly to GGUF format inside ComfyUI for LLMs and Diffusion models.
 
 Turn `.safetensors` weights into `.gguf` from inside ComfyUI. Two nodes (category
-`Kinburg-Nodes/GGUF`), one per model family, each with the same three outputs — **`gguf_path`**
+`Kinburg-Nodes/LLM/GGUF`), one per model family, each with the same three outputs — **`gguf_path`**
 (the finished file, ready to wire into a loader), a **`log`** tail, and a **`help`**
 cheat-sheet. Conversion runs in ComfyUI's own Python; both stream progress to the console and
 the `log` output, and `force = off` returns an already-built output instead of redoing the work.

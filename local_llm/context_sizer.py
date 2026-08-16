@@ -25,6 +25,7 @@ from .llm_node import (
     LLM_CONFIG, count_tokens, count_image_tokens, count_prompt,
     _shutdown_worker, UNLOAD_MODES, resolve_unload,
 )
+from ..categories import CAT_LLM
 
 _IDX_RE = re.compile(r"^text_(\d+)$")
 
@@ -65,7 +66,7 @@ class ContextSizer:
     RETURN_TYPES = ("INT", "INT", "INT", "INT", "STRING")
     RETURN_NAMES = ("text_tokens", "image_tokens", "total_tokens", "suggested_n_ctx", "info")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     @staticmethod
     def _idx(key):

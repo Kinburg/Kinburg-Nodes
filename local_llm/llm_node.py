@@ -7,6 +7,7 @@ import hashlib
 import atexit
 import threading
 import subprocess
+from ..categories import CAT_LLM
 
 NODE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKER = os.path.join(NODE_DIR, "gguf_worker.py")
@@ -796,7 +797,7 @@ class LocalLLMGGUF:
     RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "STRING", "INT", "INT")
     RETURN_NAMES = ("text", "thoughts", "finish_reason", "sys_tokens", "user_tokens", "output_tokens", "gen_seconds", "help", "thoughts_tokens", "answer_tokens")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def run(self, config, user_prompt, image=None, system_override=None, grammar_override=None,
             unload_after_run="config default", live_preview=False, unique_id=None):

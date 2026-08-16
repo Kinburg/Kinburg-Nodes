@@ -44,6 +44,7 @@ from .cast import (
     _bar_seconds, _beats, _mmss, _num, _resolve_voice, _roster, _voices_in_order,
 )
 from ..context.character_card import VOICE_TYPE
+from ..categories import CAT_SIREN
 
 # Every bar count the Voice Plan grammar can write. Sections are snapped to these so a table built
 # here and a table written by the LLM are the same kind of object.
@@ -562,7 +563,7 @@ class KinburgSirenScore:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("plan", "report")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_SIREN
     DESCRIPTION = ("Builds Siren Cast's plan from the lyrics instead of asking an LLM for it: the "
                    "section list and order come from the '[Verse 1 - ...]' markers, the voice from "
                    "the name in the marker (or MALE/FEMALE matched against the wired Character "

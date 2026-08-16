@@ -21,6 +21,7 @@ import json
 from ..ouroboros.nodes import SAMPLER_CFG
 from . import store
 from .select_node import ModelSelect, _seeded, _stage_line, _stage_warnings
+from ..categories import CAT_MODEL
 
 
 class SettingsSelect:
@@ -63,7 +64,7 @@ class SettingsSelect:
     RETURN_TYPES = (SAMPLER_CFG, "INT", "INT", "STRING", "STRING", "GEN_INFO")
     RETURN_NAMES = ("sampler_settings", "width", "height", "label", "info", "gen_extra_info")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/model"
+    CATEGORY = CAT_MODEL
     DESCRIPTION = ("Emit a saved sampler preset without loading a model — for running one model at "
                    "several settings / seeds in the same graph. Wire Model Select's 'model_id' in "
                    "and the preset list follows its pick. 'label' is a ready-made caption for "

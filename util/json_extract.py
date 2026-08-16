@@ -29,6 +29,7 @@ parsed instead (LLMs sometimes add prose around the JSON).
 """
 import re
 import json
+from ..categories import CAT_UTIL
 
 _MAX_SLOTS = 12
 _BRACKET_RE = re.compile(r"\[(-?\d+|\*)\]")
@@ -182,7 +183,7 @@ class JSONExtract:
     RETURN_TYPES = ("BOOLEAN", "STRING") + ("STRING",) * _MAX_SLOTS
     RETURN_NAMES = ("found", "report") + tuple(f"value_{i}" for i in range(1, _MAX_SLOTS + 1))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, json_string="", paths="", default="", array_join=", ", **_):
         entries = parse_paths(paths)

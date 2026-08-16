@@ -11,6 +11,7 @@ meant to be gathered by Context Collector and fed into an LLM node's `context` i
 the description under a named heading lets the model latch onto that name: mention "Cafe" in
 the request and it weaves the pitchers into the expanded prompt. Category `Kinburg-Nodes/LLM`.
 """
+from ..categories import CAT_LLM_CONTEXT
 
 
 class EntityCard:
@@ -28,7 +29,7 @@ class EntityCard:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("card",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM_CONTEXT
 
     def run(self, name="", description="", save_preset_as="", tags=""):
         name = (name or "").strip()

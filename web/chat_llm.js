@@ -285,7 +285,7 @@ export function chatNodes() {
   return (app.graph?._nodes || []).filter((n) => (n.comfyClass || n.type) === CLASS);
 }
 
-// A snapshot of the conversation for Dream Board 🎬, in the compact shape its board_state stores:
+// A snapshot of the conversation for Morpheus Dream Board 🌙, in the compact shape its board_state stores:
 // role, speaker, text, and any pictures as plain file refs. Digests are left out — a brief is not
 // something that happened. `private` names the personas whose whole job is writing image prompts
 // (the "camera" pattern), so the board can leave them out of the story by default.

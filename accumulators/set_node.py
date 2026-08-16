@@ -9,6 +9,7 @@ batch used to go (e.g. Image Compare).
 The wiring is plain real links created on the frontend (web/accumulators.js), so execution and
 caching are completely standard — no runtime globals, no prompt magic.
 """
+from ..categories import CAT_FLOW_ACCUMULATORS
 
 
 class SetAccumImages:
@@ -25,7 +26,7 @@ class SetAccumImages:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, image, name="", index=0):
         return (image,)
@@ -45,7 +46,7 @@ class SetAccumAudio:
     RETURN_TYPES = ("AUDIO",)
     RETURN_NAMES = ("audio",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, audio, name="", index=0):
         return (audio,)
@@ -65,7 +66,7 @@ class SetAccumTexts:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, text, name="", index=0):
         return (text,)
@@ -85,7 +86,7 @@ class SetAccumPrompts:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, text, name="", index=0):
         return (text,)
@@ -105,7 +106,7 @@ class SetAccumCaptions:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, text, name="", index=0):
         return (text,)
@@ -125,7 +126,7 @@ class SetAccumGenInfo:
     RETURN_TYPES = ("GEN_INFO",)
     RETURN_NAMES = ("data",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, data, name="", index=0):
         return (data,)

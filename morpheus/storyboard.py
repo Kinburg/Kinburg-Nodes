@@ -49,6 +49,7 @@ from ..local_llm.llm_node import (LLM_CONFIG, PLACEHOLDER, UNLOAD_MODES, _genera
                                   _resolve_path, _shutdown_worker, build_llm_request,
                                   resolve_unload)
 from ..timer.timer_nodes import _format_elapsed
+from ..categories import CAT_MORPHEUS
 
 ANCHOR_MODES = ["continuous", "plan"]
 CACHE_MODES = ["disk", "off"]
@@ -366,7 +367,7 @@ class KinburgMorpheusStoryboard:
                                                 "tooltip": "Finished prompts that BYPASS the LLM, separated by a line of three dashes (---), in shot order; an empty block keeps the LLM's version. The 'prompts' output uses the same format, so the loop is: run once, read it, fix the one shot that came out wrong, paste it back."}),
                 "style": ("STRING", {"multiline": True, "dynamicPrompts": False, "advanced": True,
                                      "tooltip": "Skip the style-bible call and use these blocks verbatim: paste back a previous run's 'style' output (or hand-write [STYLE]: / [SCENE]: / [AUDIO BED]: / [NEGATIVE]: blocks). This is how you keep one look across several runs."}),
-                "shots": (MORPHEUS_SHOT, {"tooltip": "A chain to work on. Shots that already have a prompt pass through untouched — that is the 'hand-build the opening shot with Morpheus Dream and let this node write the rest' case. Shots with an EMPTY prompt are WRITTEN IN PLACE, keeping their own keyframes, length and link: that is what 'Dream Board 🎬' sends, and with it you can leave keyframes / durations / links / shot_count alone. shot_count then means how many extra shots to append after the chain (default none)."}),
+                "shots": (MORPHEUS_SHOT, {"tooltip": "A chain to work on. Shots that already have a prompt pass through untouched — that is the 'hand-build the opening shot with Morpheus Dream and let this node write the rest' case. Shots with an EMPTY prompt are WRITTEN IN PLACE, keeping their own keyframes, length and link: that is what 'Morpheus Dream Board 🌙' sends, and with it you can leave keyframes / durations / links / shot_count alone. shot_count then means how many extra shots to append after the chain (default none)."}),
                 # NOT advanced: Dream Board drives this one, and an input you have to unfold before
                 # you can drop a wire on it is an input nobody finds.
                 "links": ("STRING", {"default": "",
@@ -392,7 +393,7 @@ class KinburgMorpheusStoryboard:
                        "Per-shot table: duration, which keyframes were used, where the text came from.",
                        "The plan: one direction per shot, one line each — exactly the format 'beats' takes. Edit a line and paste it back and only that shot onwards is rewritten; paste it back unchanged and nothing is.")
     FUNCTION = "write"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_MORPHEUS
     DESCRIPTION = ("Writes a whole Morpheus storyboard with a local LLM: one MiniMax-format prompt "
                    "per shot, keyframes consumed as shot boundaries, continuity carried between "
                    "shots by an end-state line. Outputs the chain the video sampler takes.")
@@ -530,7 +531,7 @@ class KinburgMorpheusStoryboard:
                         f"used as keyframes by the sampler)")
 
         # A chain can arrive already laid out, with empty prompts where the writing goes — that is
-        # what Dream Board 🎬 emits. Those shots are filled IN PLACE and bring their own keyframes,
+        # what Morpheus Dream Board 🌙 emits. Those shots are filled IN PLACE and bring their own keyframes,
         # length, link and direction, so `shot_count` then means "how many MORE to append after
         # them" and defaults to none. A chain whose shots all have prompts is the old behaviour: an
         # untouched prefix to append to.

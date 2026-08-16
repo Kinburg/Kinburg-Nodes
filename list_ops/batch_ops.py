@@ -17,6 +17,7 @@ except Exception:
     torch = None
 
 from ..image_batch.batch_node import UnlimImageBatch, _MODES
+from ..categories import CAT_IMAGE
 
 _POS = ["at end", "at start", "at index", "after index"]
 
@@ -44,7 +45,7 @@ class ImageBatchInsert:
     RETURN_TYPES = ("IMAGE", "INT")
     RETURN_NAMES = ("batch", "count")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/image"
+    CATEGORY = CAT_IMAGE
 
     def run(self, position="at end", index=0, mode="pad to largest", pad_color="#000000", batch=None, image=None):
         B = _len(batch)
@@ -89,7 +90,7 @@ class ImageBatchRemove:
     RETURN_TYPES = ("IMAGE", "IMAGE", "INT")
     RETURN_NAMES = ("batch", "removed", "count")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/image"
+    CATEGORY = CAT_IMAGE
 
     def run(self, index=0, count=1, batch=None):
         B = _len(batch)

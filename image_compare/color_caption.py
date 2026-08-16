@@ -7,6 +7,7 @@ useful anywhere a string is expected.
 """
 import json
 import re
+from ..categories import CAT_IMAGE_COMPARE
 
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
 
@@ -38,7 +39,7 @@ class ColorCaption:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("caption_json",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/image/compare"
+    CATEGORY = CAT_IMAGE_COMPARE
 
     def run(self, caption, color, band_color):
         return (json.dumps(self._payload(caption, color, band_color), ensure_ascii=False),)

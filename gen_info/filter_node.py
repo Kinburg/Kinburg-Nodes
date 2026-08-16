@@ -26,6 +26,7 @@ import re
 from collections import OrderedDict
 
 from ..util.separators import BLOCK_JOINER
+from ..categories import CAT_UTIL
 
 _SELECTOR_RE = re.compile(r"^\s*([^\[\].]+?)\s*(?:\[\s*(\d+)\s*\])?\s*(?:\.\s*(.+?))?\s*$")
 _ABSENT = "\x00absent"
@@ -137,7 +138,7 @@ class GenerationInfoFilter:
     RETURN_TYPES = ("STRING", "GEN_SETTINGS", "STRING")
     RETURN_NAMES = ("settings", "settings_data", "help")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, data=None, mode="differences", custom_fields="", skip_empty=True):
         maps = []

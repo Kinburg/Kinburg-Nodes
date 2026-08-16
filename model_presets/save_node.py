@@ -18,6 +18,7 @@ recipe serves every model that declares a matching family (see store.presets_for
 """
 from ..ouroboros.nodes import SAMPLER_CFG
 from . import store
+from ..categories import CAT_MODEL
 
 
 def _flatten(cfg):
@@ -69,7 +70,7 @@ class SettingsSave:
     RETURN_TYPES = (SAMPLER_CFG, "STRING")
     RETURN_NAMES = ("sampler_settings", "report")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/model"
+    CATEGORY = CAT_MODEL
     DESCRIPTION = ("Save a Sampler Settings chain into a model's preset library — with its measured "
                    "score and time, so Model Select can show and sort by what actually worked. "
                    "Pass-through: wire it between Sampler Settings and Chimera / Ouroboros. Saves "

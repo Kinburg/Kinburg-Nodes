@@ -16,6 +16,7 @@ Inputs with fewer channels (RGB vs RGBA) are padded with opaque alpha so they ca
 Each input may itself already be a batch — all of them are concatenated.
 """
 import re
+from ..categories import CAT_IMAGE
 
 # Heavy / ComfyUI-only imports are guarded so the package still imports (and the Registry
 # can enumerate nodes) without ComfyUI present. At runtime torch is always available.
@@ -59,7 +60,7 @@ class UnlimImageBatch:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("images",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/image"
+    CATEGORY = CAT_IMAGE
 
     @staticmethod
     def _index(key):

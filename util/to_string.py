@@ -10,6 +10,7 @@ It returns `str(value)`, giving you a real STRING to route wherever you like.
 
 
 from .anytype import ANY
+from ..categories import CAT_UTIL
 
 
 class AnyToString:
@@ -24,7 +25,7 @@ class AnyToString:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("string",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, value):
         # INPUT_IS_LIST isn't set, so `value` is a single item; guard the odd list case anyway.

@@ -8,6 +8,7 @@ the Settings node the same way ``context`` does; connect it only when you want v
 from .llm_node import (
     LLM_CONFIG, VISION_CONFIG, _base_config_widgets, _list_mmproj, _VISION_HANDLER_LABELS,
 )
+from ..categories import CAT_LLM
 
 
 class LocalLLMSettingsGGUF:
@@ -24,7 +25,7 @@ class LocalLLMSettingsGGUF:
     RETURN_TYPES = (LLM_CONFIG,)
     RETURN_NAMES = ("config",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def run(self, vision=None, **kw):
         cfg = dict(kw)  # model, model_path, system_prompt, sampling, loader, reasoning, output, context
@@ -48,7 +49,7 @@ class LocalLLMVisionSettingsGGUF:
     RETURN_TYPES = (VISION_CONFIG,)
     RETURN_NAMES = ("vision",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def run(self, mmproj, mmproj_path, vision_handler, image_max_side):
         return ({"mmproj": mmproj, "mmproj_path": mmproj_path,

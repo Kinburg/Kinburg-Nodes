@@ -1,6 +1,6 @@
 """Criteria Builder — pick evaluation criteria with toggles and emit them as a `criteria` STRING.
 
-Feeds the `criteria` field of **Critic Settings (GGUF)** (Ouroboros) and **Vision LLM Judge** —
+Feeds the `criteria` field of **Ouroboros Critic Settings 🐍** (Ouroboros) and **Vision LLM Judge** —
 both parse the same `name: description` per-line format. Instead of typing that by hand, tick the
 criteria you want; the node assembles the string (each toggled criterion contributes a curated,
 model-guiding description). Wire the output into either node's `criteria` field via right-click →
@@ -13,6 +13,7 @@ The catalog of criteria lives in `catalog.json` (shipped) and, if present, `cata
 import json
 import os
 import re
+from ..categories import CAT_LLM_PRESETS
 
 NODE_DIR = os.path.dirname(os.path.abspath(__file__))
 CATALOG = os.path.join(NODE_DIR, "catalog.json")
@@ -113,7 +114,7 @@ class CriteriaBuilder:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("criteria",)
     FUNCTION = "build"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM_PRESETS
     DESCRIPTION = ("Build the Critic / Vision Judge 'criteria' string by ticking criteria instead of "
                    "typing them. Convert the target node's 'criteria' widget to an input and wire this "
                    "output in. Empty output = single overall score. Catalog: catalog.json (+ catalog.user.json).")

@@ -30,6 +30,7 @@ import torch
 
 from ..timer.timer_nodes import _format_elapsed
 from ..util.imports import defuse_lazy_modules
+from ..categories import CAT_AUDIO
 
 SR = 48000                 # what AudioSR outputs, always
 FOLDER = "AudioSR"         # ComfyUI/models/AudioSR
@@ -277,7 +278,7 @@ class KinburgAudioSR:
     RETURN_TYPES = ("AUDIO", "STRING")
     RETURN_NAMES = ("audio", "report")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/audio"
+    CATEGORY = CAT_AUDIO
     DESCRIPTION = ("AudioSR bandwidth extension: takes a mix that dies early and writes plausible "
                    "high end back in, at 48 kHz. A stereo mix keeps its image: only the MID "
                    "channel goes through the model and side is carried through, because summing to "

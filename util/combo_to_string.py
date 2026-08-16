@@ -11,6 +11,7 @@ a placeholder — the real value is pushed in by the connected Primitive).
 """
 
 _PLACEHOLDER = "(connect a combo / Primitive)"
+from ..categories import CAT_UTIL
 
 
 class ComboToString:
@@ -31,7 +32,7 @@ class ComboToString:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("string",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, value):
         if isinstance(value, list):

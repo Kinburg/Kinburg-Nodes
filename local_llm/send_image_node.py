@@ -37,6 +37,7 @@ import json
 import os
 
 from .attachments import ATT_DIR, att_base
+from ..categories import CAT_LLM
 
 SEND_AS = ["the active persona", "me (user)",
            "persona 1", "persona 2", "persona 3", "persona 4", "persona 5", "persona 6"]
@@ -107,7 +108,7 @@ class LocalLLMChatSendImage:
     RETURN_NAMES = ("image",)
     FUNCTION = "run"
     OUTPUT_NODE = True          # so the file reference reaches the frontend in the ui payload
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def run(self, image, send_as, when, megapixels, caption="", shot="",
             note_in_context=False, unique_id=None):

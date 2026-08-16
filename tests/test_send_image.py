@@ -1,5 +1,4 @@
 """Send Image to Chat — backend."""
-import importlib.util
 import json
 import tempfile
 import types
@@ -19,14 +18,10 @@ fp.get_temp_directory = lambda: str(IN / "temp")
 fp.get_output_directory = lambda: str(IN / "out")
 sys.modules["folder_paths"] = fp
 
-pkg = types.ModuleType("kn")
-pkg.__path__ = [str(PACK / "local_llm")]
-sys.modules["kn"] = pkg
-spec = importlib.util.spec_from_file_location("kn.send_image_node",
-                                              str(PACK / "local_llm" / "send_image_node.py"))
-sn = importlib.util.module_from_spec(spec)
-sys.modules["kn.send_image_node"] = sn
-spec.loader.exec_module(sn)
+# Two levels, not one: the node modules reach up to `..categories` for their menu path, and a
+# single fake parent would put that import beyond the top-level package.
+fake_package("kn", "local_llm")
+sn = load_module("kn.local_llm.send_image_node", "local_llm/send_image_node.py")
 
 import torch
 from PIL import Image
@@ -129,11 +124,7 @@ check("send_as offers user + 6 personas + active", len(opt["required"]["send_as"
       opt["required"]["send_as"][0])
 
 # ── discard(): what 🗑 Clear calls ───────────────────────────────────────────────────────────
-att = importlib.util.module_from_spec(
-    importlib.util.spec_from_file_location("kn.attachments",
-                                           str(PACK / "local_llm" / "attachments.py")))
-sys.modules["kn.attachments"] = att
-att.__loader__.exec_module(att)
+att = load_module("kn.local_llm.attachments", "local_llm/attachments.py")
 
 mine = sn._save_frames(torch.rand(1, 16, 16, 3), 0)[0]
 check("the file exists before", (DIR / mine["name"]).is_file())

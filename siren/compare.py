@@ -29,6 +29,7 @@ from ..image_compare.compare_node import (
     _first, _register_dir, _register_html, _server_port, _time_to_seconds, _unique_html_path,
 )
 from .scope import _metrics, db_matrix_png
+from ..categories import CAT_SIREN
 
 NODE_DIR = os.path.dirname(os.path.abspath(__file__))
 PLAYER_TEMPLATE = os.path.join(NODE_DIR, "player.html")
@@ -141,7 +142,7 @@ class KinburgSirenCompare:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("html_path", "url")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/audio"
+    CATEGORY = CAT_SIREN
     OUTPUT_NODE = True
     DESCRIPTION = ("A page for comparing takes BY EAR. Every track is decoded into one Web Audio "
                    "clock, so they play in perfect sync and soloing between them mid-phrase is "

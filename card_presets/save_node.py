@@ -14,6 +14,7 @@ the library). Outputs the rendered ``card`` block (feed Context Collector in the
 bad / empty JSON yields an empty card and an explanatory report. Category ``Kinburg-Nodes/LLM``.
 """
 from . import store
+from ..categories import CAT_LLM_PRESETS
 
 # Character grammar has these attribute keys; entity has just name + description. Used to
 # auto-detect the card type when card_type == "auto".
@@ -62,7 +63,7 @@ class CardSave:
     RETURN_TYPES = ("STRING", "STRING", "STRING")
     RETURN_NAMES = ("card", "saved_as", "report")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM_PRESETS
 
     def run(self, json_string="", card_type=_AUTO, save_as="", tags=""):
         values, err = _parse(json_string)

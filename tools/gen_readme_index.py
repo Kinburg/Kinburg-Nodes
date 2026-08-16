@@ -26,7 +26,11 @@ Beyond the index it audits the prose, because that is what actually goes stale:
 * every local link and anchor must resolve, with no duplicate anchors;
 * every `backticked_snake_case` term must be a real node input or output — anything else has to
   be listed in ``tools/known_terms.txt`` (sampler names, llama.cpp flags, comfy internals …).
-  Rename an input and this is what notices the README still uses the old name.
+  Rename an input and this is what notices the README still uses the old name;
+* every ``CATEGORY`` must be one of the paths declared in ``categories.py``, no suite may be split
+  across two menu folders (nor let a stranger move into its folder), and every ``Kinburg-Nodes/…``
+  path quoted in the docs must be a path that exists. Re-file a node and this is what notices the
+  docs still send people to the old folder.
 """
 import argparse
 import importlib.util
@@ -243,6 +247,34 @@ def audit(groups, classes, names, by_folder, check):
     check('every `snake_case` term is a real input/output or a known term', not stale,
           ('unknown: ' + ', '.join(stale) + '  → fix the docs, or add it to '
            'tools/known_terms.txt') if stale else '')
+
+    # 5. the menu tree matches categories.py, and no suite has leaked out of its own folder
+    cats = importlib.import_module('kinburg_nodes.categories')
+    used = {getattr(cls, 'CATEGORY', '?') for cls in classes.values()}
+    undeclared = sorted(used - set(cats.ALL))
+    check('every CATEGORY is declared in categories.py', not undeclared,
+          ('undeclared: ' + ', '.join(undeclared) + '  → use a constant, or add one') if undeclared
+          else '')
+
+    owner_of = {home: folder for folder, home in cats.SUITES.items()}
+    strays = []
+    for nid, cls in sorted(classes.items()):
+        folder, cat = cls.__module__.split('.')[1], getattr(cls, 'CATEGORY', '?')
+        home = cats.SUITES.get(folder)
+        # a suite's nodes belong in its own folder, or on the shared shelf at the bestiary root
+        if home and cat not in (home, cats.CAT_BESTIARY):
+            strays.append('%s lives in %s/ but shows up under %s' % (nid, folder, cat))
+        # and nothing else may move in with them
+        if cat in owner_of and owner_of[cat] != folder:
+            strays.append('%s lives in %s/ but shows up in the %s suite'
+                          % (nid, folder, owner_of[cat]))
+    check('no suite is split across categories', not strays, '; '.join(strays))
+
+    # 6. the docs quote category paths in prose — those must be paths that exist
+    quoted = set(re.findall(r'`(Kinburg-Nodes/[A-Za-z/]*)`', prose))
+    wrong = sorted(quoted - set(cats.ALL))
+    check('every category path quoted in the docs is real', not wrong,
+          ('stale: ' + ', '.join(wrong)) if wrong else '')
     return sorted(tokens - real - {''})
 
 

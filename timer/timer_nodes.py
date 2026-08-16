@@ -16,6 +16,7 @@ from datetime import datetime
 
 
 from ..util.anytype import ANY
+from ..categories import CAT_UTIL
 
 
 def _hms(sec):
@@ -70,7 +71,7 @@ class StartTimer:
     RETURN_TYPES = (ANY, "FLOAT", "STRING")
     RETURN_NAMES = ("passthrough", "start_seconds", "start_time")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, time_format="%Y-%m-%d %H:%M:%S", **kwargs):
         now = time.time()
@@ -100,7 +101,7 @@ class StopTimer:
     RETURN_NAMES = ("passthrough", "elapsed", "seconds")
     FUNCTION = "run"
     OUTPUT_NODE = True
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, passthrough, start_seconds=0.0, format="auto"):
         elapsed = max(0.0, time.time() - float(start_seconds))

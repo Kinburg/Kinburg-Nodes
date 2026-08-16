@@ -64,6 +64,7 @@ from comfy_extras.nodes_custom_sampler import Guider_Basic, Noise_RandomNoise
 from . import cache as shot_cache
 from ..local_llm.llm_node import LLM_CONFIG, _shutdown_worker as _shutdown_llm
 from ..timer.timer_nodes import _format_elapsed
+from ..categories import CAT_MORPHEUS
 
 try:  # ComfyUI without MiniMax H3 support: fail with a readable message, not on import
     from comfy_extras import nodes_minimax_h3 as h3
@@ -219,7 +220,7 @@ class KinburgMorpheusDream:
     RETURN_TYPES = (MORPHEUS_SHOT, "STRING")
     RETURN_NAMES = ("shots", "info")
     FUNCTION = "build"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_MORPHEUS
     DESCRIPTION = ("One dream of a Morpheus storyboard. Chain several (optional 'shots' input) and "
                    "feed the chain to 'Morpheus (Video Sampler)'. Keyframes are optional: with "
                    "link = continue a shot starts from the previous shot's last generated frame.")
@@ -312,7 +313,7 @@ class KinburgMorpheus:
                        "Per-shot table: frames, seam trim, seed, write/sample times, cache hits, warnings.",
                        "The prompts that were ACTUALLY sampled, ---separated — after any in-loop rework, so this is the text that made this video. Same format 'prompt_overrides' takes on the Storyboard node.")
     FUNCTION = "render"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_MORPHEUS
     DESCRIPTION = ("Samples a chain of 'Morpheus Dream' nodes into one long video with sound: each "
                    "shot's last frame becomes the next shot's first keyframe. Handles the 24 fps "
                    "frame grid, the seam frame, one global audio normalisation, and a disk cache of "

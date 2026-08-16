@@ -21,6 +21,7 @@ import sys
 import shutil
 import subprocess
 from collections import deque
+from ..categories import CAT_LLM_GGUF
 
 # Reuse the Local LLM helper that locates ComfyUI/models/llm; fall back to None on a bare
 # registry scan (no ComfyUI on the path).
@@ -337,7 +338,7 @@ class SafetensorsToGGUF:
     RETURN_TYPES = ("STRING", "STRING", "STRING")
     RETURN_NAMES = ("gguf_path", "log", "help")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/GGUF"
+    CATEGORY = CAT_LLM_GGUF
     OUTPUT_NODE = True
 
     def run(self, source, output_dir, output_name, outtype, quantize, quantize_binary,

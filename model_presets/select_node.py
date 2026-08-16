@@ -20,6 +20,7 @@ import json
 
 from ..ouroboros.nodes import SAMPLER_CFG
 from . import replay, store
+from ..categories import CAT_MODEL
 
 
 def _seeded(stages, seed_override):
@@ -120,7 +121,7 @@ class ModelSelect:
     RETURN_NAMES = ("model", "model_negative", "clip", "vae", "sampler_settings", "width", "height",
                     "info", "gen_extra_info", "model_id")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/model"
+    CATEGORY = CAT_MODEL
     DESCRIPTION = ("Pick a model and one of its saved sampler presets from two dropdowns — the "
                    "second lists only what's valid for the first. Rebuilds the model's whole "
                    "assembly (loaders + patches) from the library, so the workflow holds one node "

@@ -46,6 +46,7 @@ import time
 
 from ..context.character_card import VOICE_TYPE
 from ..timer.timer_nodes import _format_elapsed
+from ..categories import CAT_SIREN
 
 # One audio code per 200 ms. Not a guess: `tokens_duration = duration * 5` in the tokenizer, and
 # `audio_codes.shape[1] * 5` is compared against the 25 fps latent length in the model.
@@ -488,7 +489,7 @@ class KinburgSirenCast:
     RETURN_TYPES = ("CONDITIONING", "FLOAT", "STRING", "STRING", "GEN_INFO")
     RETURN_NAMES = ("conditioning", "seconds", "timeline", "report", "gen_extra_info")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_SIREN
     DESCRIPTION = ("AceStep 1.5 text encode that says who sings where. The audio-code plan the text "
                    "encoder's LM writes is a 5 Hz, frame-aligned track — the only conditioning in "
                    "the model with a time axis — so this node builds it section by section, each "

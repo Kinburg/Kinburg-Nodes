@@ -1,4 +1,4 @@
-"""Dream Board 🎬 — a chat becomes a storyboard.
+"""Morpheus Dream Board 🌙 — a chat becomes a storyboard.
 
 The bridge between `Local LLM Chat (GGUF)` and `Morpheus Storyboard 🌙`. You talk to a character,
 pictures accumulate in the conversation, and this node turns the part of it you pick into the three
@@ -38,6 +38,7 @@ import os
 import re
 
 from ..local_llm.attachments import att_base, resolve_refs
+from ..categories import CAT_MORPHEUS
 
 MORPHEUS_SHOT = "KINBURG_MORPHEUS_SHOT"   # mirrors morpheus/nodes.py; importing it would pull torch
 
@@ -292,7 +293,7 @@ class KinburgDreamBoard:
         "The shot table: which pictures bound each shot, how many messages went in, and anything "
         "that was dropped or cropped.")
     FUNCTION = "build"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_MORPHEUS
     DESCRIPTION = ("Turns a Local LLM Chat conversation into a Morpheus storyboard: the pictures "
                    "you pick become shot boundaries and the messages between them become each "
                    "shot's direction. Feeds Morpheus Storyboard 🌙.")
@@ -339,4 +340,4 @@ class KinburgDreamBoard:
 
 
 NODE_CLASS_MAPPINGS = {"KinburgDreamBoard": KinburgDreamBoard}
-NODE_DISPLAY_NAME_MAPPINGS = {"KinburgDreamBoard": "Dream Board 🎬"}
+NODE_DISPLAY_NAME_MAPPINGS = {"KinburgDreamBoard": "Morpheus Dream Board 🌙"}

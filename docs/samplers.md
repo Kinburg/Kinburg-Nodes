@@ -40,7 +40,7 @@ Settings follow the repo's bundle idiom, in two small companion nodes:
   Each knob is only passed to samplers
   that actually accept it, so unsupported ones are silently ignored (never an error). Defaults keep
   a single stage bit-identical to the classic path. (Image size comes from the latent — see below.)
-  Category `Kinburg-Nodes/sampling`.
+  Category `Kinburg-Nodes/Bestiary`.
   <br>**Multi-stage refine (chaining):** Sampler Settings has an optional **`sampler_settings`** input —
   wire one node's output into the next to build a **chain** (left→right = stage order). Feed the chain
   into Ouroboros and it runs in **refine mode**: each iteration samples through every stage in order,
@@ -55,13 +55,13 @@ iteration**, so the freshly rewritten prompt is still what gets encoded — feed
 input is a MODEL and not a GUIDER. ⚠ At **cfg 1.0** the guider skips the unconditional pass and the
 second model does nothing; the console says so at the start of the run.
 
-- **`Critic Settings (GGUF)`** → `critic_settings` (`CRITIC`): embeds a **vision `LLM_CONFIG`** (a
+- **`Ouroboros Critic Settings 🐍`** → `critic_settings` (`CRITIC`): embeds a **vision `LLM_CONFIG`** (a
   Local LLM Settings with an mmproj) plus the evaluation rules: `criteria` (pre-filled), `rubric`,
   `score_min/max`, editable `system_prompt` and `advice_style`, `samples`
   (self-consistency: judge N times, take the median), and **`image_downscale`** — shrink the image
   the critic sees by this factor (`2` = half-size, `4` = quarter) for **fewer image tokens → faster
   judging and less VRAM**, at the cost of fine detail; `1.0` = full resolution (it never upscales
-  past the Vision Settings `image_max_side` cap). Category `Kinburg-Nodes/LLM`.
+  past the Vision Settings `image_max_side` cap). Category `Kinburg-Nodes/Bestiary/Ouroboros`.
 
 Wire into Ouroboros: `model` / `clip` / `vae`, a **`latent`** (required — an Empty Latent matching
 your model sets the image size; feed a real latent + denoise<1 for img2img/hires-feedback),
@@ -133,7 +133,7 @@ diffusion — so only **one model is resident at any moment** (diffusion *or* on
 model reloads around each phase; that is the accepted trade for running at all on low VRAM. On big
 GPUs/farms, turn `unload_comfy_models` off to keep everything resident (no reloads); pointing the
 enhancer and critic at the **same model file** further minimizes reloads. Category
-`Kinburg-Nodes/sampling`.
+`Kinburg-Nodes/Bestiary/Ouroboros`.
 
 ---
 
@@ -223,7 +223,7 @@ another sampler if you want), **`handoff_denoised`** (the **x0 estimate** at the
 this to actually *see* what stage A produced, since the raw handoff latent is still noisy),
 **`report`** (the exact split: curve, per-stage step ranges, sigma boundaries, every warning — also
 printed to the console unless `verbose` is off), **`gen_extra_info`**, and **`time`** / **`seconds`**.
-Category `Kinburg-Nodes/sampling`.
+Category `Kinburg-Nodes/Bestiary/Chimera`.
 
 **`gen_extra_info` (`GEN_INFO`) is an ADDITION to a settings dump, not a dump on its own.** It holds
 only what the node resolved at run time — one `[Chimera]` entry (handoff, split, `steps` walked vs
@@ -255,57 +255,6 @@ several sampler branches in one graph and the intervals can overlap, so a 6-step
 moves the result off the GPU before returning, so it waits for the work to finish. One honest caveat:
 the **first stage absorbs the model load** when the checkpoint isn't resident yet, because ComfyUI
 loads it inside that first sampling call.
-
----
-
-## 🔄 `loops/` — Flexible Iteration Loops
-
-> **System Purpose & Overview**  
-> Flexible iteration control flow graphs for ComfyUI workflows: For Each, Repeat, and While loops with index retrieval and delay.
-
-ComfyUI's execution graph is acyclic, so these cover the two practical loop shapes, both with
-**auto-growing wildcard `*` state slots** (the node shows only the connected slots plus one
-spare; drag in any type, a matching slot appears — on inputs *and* outputs):
-
-**`For Each (Open)` / `For Each (Collect)`** — iterate a batch/list **one element at a time**,
-on the same graph-expansion engine as Repeat. Feed Open any iterables (image/mask batches,
-LATENT batches, lists…); each iteration it emits a single **`element_*`** (the idx-th item of
-each input) plus `index` / `total`, iterating to the **shortest** input. Build your body off
-the `element_*` outputs (e.g. a collage from `element_0` + `element_1`) and wire the result(s)
-into Collect's **`result_*`** inputs; Collect accumulates each iteration's results and, when the
-loop ends, emits each `collected_*` as the gathered Python list. Feeding that into a **`List
-Output`** node turns it into a real per-item ComfyUI list — so different-sized images travel
-separately (a Preview shows N images, one per item; a Save writes each). The **🔗 Add / link
-Close** button on Open wires the whole chain: it creates Collect (linked by `flow`) plus a List
-Output on `collected_0`. (A list output can't be emitted from inside the loop itself — ComfyUI
-flattens list outputs during graph expansion — so the fan-out lives in this node just past it.)
-Category `Kinburg-Nodes/loops`.
-
-**`List Output`** fans a value that holds a Python list into a proper ComfyUI list (one item per
-element). For Each (Collect) pairs with it, but it's a handy standalone converter too.
-
-**`Repeat (Open)` / `Repeat (Close)`** — a real iterative loop with **carried state**, built on
-ComfyUI's graph expansion: each pass, Close clones the loop body wired back into the next
-iteration, all inside one queue run. Wire your starting values into `Open`, read `index` inside
-the body, and feed the updated values into `Close`; after `count` iterations `Close` outputs the
-final state. The **🔗 Add / link Close** button on `Open` spawns the matching Close and wires the
-`flow` (and `index`) links for you, so you never hand-draw the feedback. `count` must stay a
-widget value (it's read when the loop expands). Category `Kinburg-Nodes/loops`.
-
-**`While (Open)` / `While (Close)`** — the same engine, condition-driven instead of counted.
-Close has a `condition` (BOOLEAN) input computed in the loop body: the loop keeps going while
-it's True and stops the moment it's False, with `max_iterations` on Open as a hard safety cap.
-Same wildcard state slots and 🔗 auto-pairing as Repeat. Category `Kinburg-Nodes/loops`.
-
-**`Get by Index`** takes the index-th element of anything indexable — an IMAGE/MASK batch (→ a
-1-frame batch), a LATENT batch (→ one latent, other keys preserved), a list, a string, or any
-other tensor — so inside a loop you can feed a whole batch in and pull out the current frame by
-`index`. Negative indices count from the end; `out_of_range` is `clamp` / `wrap` (cycle) /
-`error`. It also outputs `length` (the container size), handy for driving a loop's `count`.
-
-**`Delay`** passes any value straight through after pausing `seconds` (with an optional console
-`label`). Drop it into a wire inside a loop body to slow iterations down and watch the loop run.
-Category `Kinburg-Nodes/loops`.
 
 ---
 

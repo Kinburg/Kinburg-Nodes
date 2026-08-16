@@ -39,9 +39,8 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 
 | Package | Nodes |
 |---|---|
-| [`ouroboros/` — Ouroboros (Self-Correcting Sampler) 🐍](docs/samplers.md#-ouroboros--ouroboros-self-correcting-sampler-) | `Critic Settings (GGUF)`, `Ouroboros (Self-Correcting Sampler) 🐍`, `Ouroboros Live Log 🐍📜`, `Sampler Settings` |
+| [`ouroboros/` — Ouroboros (Self-Correcting Sampler) 🐍](docs/samplers.md#-ouroboros--ouroboros-self-correcting-sampler-) | `Ouroboros (Self-Correcting Sampler) 🐍`, `Ouroboros Critic Settings 🐍`, `Ouroboros Live Log 🐍📜`, `Sampler Settings` |
 | [`chimera/` — Chimera (Multi-Sampler) 🦁](docs/samplers.md#-chimera--chimera-multi-sampler-) | `Chimera (Multi-Sampler) 🦁` |
-| [`loops/` — Flexible Iteration Loops](docs/samplers.md#-loops--flexible-iteration-loops) | `Delay`, `For Each (Collect)`, `For Each (Open)`, `Get by Index`, `List Output`, `Repeat (Close)`, `Repeat (Open)`, `While (Close)`, `While (Open)` |
 
 ### 🎵 Audio & Music Suite
 
@@ -59,7 +58,7 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 
 | Package | Nodes |
 |---|---|
-| [`morpheus/` — Morpheus Suite 🌙](docs/video.md#-morpheus--morpheus-suite-) | `Dream Board 🎬`, `Morpheus (Video Sampler) 🌙`, `Morpheus Dream 🌙`, `Morpheus Storyboard 🌙` |
+| [`morpheus/` — Morpheus Suite 🌙](docs/video.md#-morpheus--morpheus-suite-) | `Morpheus (Video Sampler) 🌙`, `Morpheus Dream Board 🌙`, `Morpheus Dream 🌙`, `Morpheus Storyboard 🌙` |
 
 ### 🎛️ Presets & Asset Management
 
@@ -92,6 +91,7 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 | [`timer/` — Execution Timer](docs/utilities.md#-timer--execution-timer) | `Start Timer`, `Stop Timer` |
 | [`gen_info/` — Generation Info & Filter](docs/utilities.md#-gen_info--generation-info--filter) | `Generation Info`, `Generation Info Filter` |
 | [`group_control/` — Group Control 🎚️](docs/utilities.md#-group_control--group-control-) | `Group Control 🎚️` |
+| [`loops/` — Flexible Iteration Loops](docs/utilities.md#-loops--flexible-iteration-loops) | `Delay`, `For Each (Collect)`, `For Each (Open)`, `Get by Index`, `List Output`, `Repeat (Close)`, `Repeat (Open)`, `While (Close)`, `While (Open)` |
 | [`accumulators/` — Name-Based Accumulators](docs/utilities.md#-accumulators--name-based-accumulators) | `Get Accumulator (audio)`, `Get Accumulator (captions)`, `Get Accumulator (gen info)`, `Get Accumulator (images list)`, `Get Accumulator (images)`, `Get Accumulator (prompts)`, `Get Accumulator (texts)`, `Set Accumulator (audio)`, `Set Accumulator (captions)`, `Set Accumulator (gen info)`, `Set Accumulator (images)`, `Set Accumulator (prompts)`, `Set Accumulator (texts)` |
 | [`list_ops/` — List & Batch Operations](docs/utilities.md#-list_ops--list--batch-operations) | `Image Batch Insert`, `Image Batch Remove`, `List Insert`, `List Remove` |
 | [`report/` — Investigation Report DB](docs/utilities.md#-report--investigation-report-db) | — *no nodes of its own* |
@@ -106,36 +106,34 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 | Any Switch | `KinburgAnySwitch` | `Kinburg-Nodes/util` |
 | Any to String | `AnyToString` | `Kinburg-Nodes/util` |
 | Audio SR (48 kHz Upscale) 🔊 | `KinburgAudioSR` | `Kinburg-Nodes/audio` |
-| Card Presets | `CardPresets` | `Kinburg-Nodes/LLM` |
-| Card Save | `CardSave` | `Kinburg-Nodes/LLM` |
-| Character Card | `CharacterCard` | `Kinburg-Nodes/LLM` |
-| Chimera (Multi-Sampler) 🦁 | `KinburgChimeraSampler` | `Kinburg-Nodes/sampling` |
+| Card Presets | `CardPresets` | `Kinburg-Nodes/LLM/presets` |
+| Card Save | `CardSave` | `Kinburg-Nodes/LLM/presets` |
+| Character Card | `CharacterCard` | `Kinburg-Nodes/LLM/context` |
+| Chimera (Multi-Sampler) 🦁 | `KinburgChimeraSampler` | `Kinburg-Nodes/Bestiary/Chimera` |
 | Collage | `CustomCollageNode` | `Kinburg-Nodes/image` |
 | Color Caption | `ColorCaption` | `Kinburg-Nodes/image/compare` |
 | Color Picker | `ColorPicker` | `Kinburg-Nodes/util` |
 | Combo to String | `ComboToString` | `Kinburg-Nodes/util` |
-| Context Collector | `ContextCollector` | `Kinburg-Nodes/LLM` |
+| Context Collector | `ContextCollector` | `Kinburg-Nodes/LLM/context` |
 | Context Sizer (GGUF) | `KinburgContextSizer` | `Kinburg-Nodes/LLM` |
-| Criteria Builder 📋 | `CriteriaBuilder` | `Kinburg-Nodes/LLM` |
-| Critic Settings (GGUF) | `KinburgCriticSettings` | `Kinburg-Nodes/LLM` |
+| Criteria Builder 📋 | `CriteriaBuilder` | `Kinburg-Nodes/LLM/presets` |
 | Date String | `KinburgDateString` | `Kinburg-Nodes/util` |
-| Delay | `KinburgDelay` | `Kinburg-Nodes/loops` |
-| Diffusion Safetensors -> GGUF (city96) | `SafetensorsToGGUFDiffusion` | `Kinburg-Nodes/GGUF` |
-| Dream Board 🎬 | `KinburgDreamBoard` | `Kinburg-Nodes/sampling` |
-| Entity Card | `EntityCard` | `Kinburg-Nodes/LLM` |
-| For Each (Collect) | `KinburgForEachCollect` | `Kinburg-Nodes/loops` |
-| For Each (Open) | `KinburgForEachOpen` | `Kinburg-Nodes/loops` |
+| Delay | `KinburgDelay` | `Kinburg-Nodes/flow/loops` |
+| Diffusion Safetensors -> GGUF (city96) | `SafetensorsToGGUFDiffusion` | `Kinburg-Nodes/LLM/GGUF` |
+| Entity Card | `EntityCard` | `Kinburg-Nodes/LLM/context` |
+| For Each (Collect) | `KinburgForEachCollect` | `Kinburg-Nodes/flow/loops` |
+| For Each (Open) | `KinburgForEachOpen` | `Kinburg-Nodes/flow/loops` |
 | Generation Info | `GenerationInfo` | `Kinburg-Nodes/util` |
 | Generation Info Filter | `GenerationInfoFilter` | `Kinburg-Nodes/util` |
-| Get Accumulator (audio) | `GetAccumAudio` | `Kinburg-Nodes/accumulators` |
-| Get Accumulator (captions) | `GetAccumCaptions` | `Kinburg-Nodes/accumulators` |
-| Get Accumulator (gen info) | `GetAccumGenInfo` | `Kinburg-Nodes/accumulators` |
-| Get Accumulator (images list) | `GetAccumImagesList` | `Kinburg-Nodes/accumulators` |
-| Get Accumulator (images) | `GetAccumImages` | `Kinburg-Nodes/accumulators` |
-| Get Accumulator (prompts) | `GetAccumPrompts` | `Kinburg-Nodes/accumulators` |
-| Get Accumulator (texts) | `GetAccumTexts` | `Kinburg-Nodes/accumulators` |
-| Get by Index | `KinburgGetByIndex` | `Kinburg-Nodes/loops` |
-| Grammar Presets | `GrammarPresets` | `Kinburg-Nodes/LLM` |
+| Get Accumulator (audio) | `GetAccumAudio` | `Kinburg-Nodes/flow/accumulators` |
+| Get Accumulator (captions) | `GetAccumCaptions` | `Kinburg-Nodes/flow/accumulators` |
+| Get Accumulator (gen info) | `GetAccumGenInfo` | `Kinburg-Nodes/flow/accumulators` |
+| Get Accumulator (images list) | `GetAccumImagesList` | `Kinburg-Nodes/flow/accumulators` |
+| Get Accumulator (images) | `GetAccumImages` | `Kinburg-Nodes/flow/accumulators` |
+| Get Accumulator (prompts) | `GetAccumPrompts` | `Kinburg-Nodes/flow/accumulators` |
+| Get Accumulator (texts) | `GetAccumTexts` | `Kinburg-Nodes/flow/accumulators` |
+| Get by Index | `KinburgGetByIndex` | `Kinburg-Nodes/flow/loops` |
+| Grammar Presets | `GrammarPresets` | `Kinburg-Nodes/LLM/presets` |
 | Group Control 🎚️ | `KinburgGroupControl` | `Kinburg-Nodes/util` |
 | Image Batch Insert | `ImageBatchInsert` | `Kinburg-Nodes/image` |
 | Image Batch Remove | `ImageBatchRemove` | `Kinburg-Nodes/image` |
@@ -143,9 +141,9 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 | JSON Extract | `KinburgJSONExtract` | `Kinburg-Nodes/util` |
 | Kinburg Live Log 📜 | `KinburgLiveLog` | `Kinburg-Nodes/LLM` |
 | LLM Live Log (old id) | `KinburgLLMLog` | `Kinburg-Nodes/LLM` |
-| List Insert | `ListInsert` | `Kinburg-Nodes/list` |
-| List Output | `KinburgListEmit` | `Kinburg-Nodes/loops` |
-| List Remove | `ListRemove` | `Kinburg-Nodes/list` |
+| List Insert | `ListInsert` | `Kinburg-Nodes/flow/list` |
+| List Output | `KinburgListEmit` | `Kinburg-Nodes/flow/loops` |
+| List Remove | `ListRemove` | `Kinburg-Nodes/flow/list` |
 | Local LLM (GGUF) | `LocalLLMGGUF` | `Kinburg-Nodes/LLM` |
 | Local LLM (server client, text) | `LocalLLMServerText` | `Kinburg-Nodes/LLM` |
 | Local LLM Chat (GGUF) | `LocalLLMChatGGUF` | `Kinburg-Nodes/LLM` |
@@ -154,34 +152,36 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 | Lora Unlim Accumulator | `LoraUnlimAccumulator` | `Kinburg-Nodes/lora` |
 | Model Capture 📥 | `KinburgModelCapture` | `Kinburg-Nodes/model` |
 | Model Select 🎛 | `KinburgModelSelect` | `Kinburg-Nodes/model` |
-| Morpheus (Video Sampler) 🌙 | `KinburgMorpheus` | `Kinburg-Nodes/sampling` |
-| Morpheus Dream 🌙 | `KinburgMorpheusDream` | `Kinburg-Nodes/sampling` |
-| Morpheus Storyboard 🌙 | `KinburgMorpheusStoryboard` | `Kinburg-Nodes/sampling` |
-| Ouroboros (Self-Correcting Sampler) 🐍 | `KinburgOuroboros` | `Kinburg-Nodes/sampling` |
-| Ouroboros Live Log 🐍📜 | `KinburgOuroborosLog` | `Kinburg-Nodes/sampling` |
+| Morpheus (Video Sampler) 🌙 | `KinburgMorpheus` | `Kinburg-Nodes/Bestiary/Morpheus` |
+| Morpheus Dream Board 🌙 | `KinburgDreamBoard` | `Kinburg-Nodes/Bestiary/Morpheus` |
+| Morpheus Dream 🌙 | `KinburgMorpheusDream` | `Kinburg-Nodes/Bestiary/Morpheus` |
+| Morpheus Storyboard 🌙 | `KinburgMorpheusStoryboard` | `Kinburg-Nodes/Bestiary/Morpheus` |
+| Ouroboros (Self-Correcting Sampler) 🐍 | `KinburgOuroboros` | `Kinburg-Nodes/Bestiary/Ouroboros` |
+| Ouroboros Critic Settings 🐍 | `KinburgCriticSettings` | `Kinburg-Nodes/Bestiary/Ouroboros` |
+| Ouroboros Live Log 🐍📜 | `KinburgOuroborosLog` | `Kinburg-Nodes/Bestiary/Ouroboros` |
 | Prompt Presets | `PromptPresets` | `Kinburg-Nodes/prompt` |
 | Prompt Variations | `PromptVariations` | `Kinburg-Nodes/prompt` |
-| Repeat (Close) | `KinburgRepeatClose` | `Kinburg-Nodes/loops` |
-| Repeat (Open) | `KinburgRepeatOpen` | `Kinburg-Nodes/loops` |
-| Safetensors -> GGUF (llama.cpp) | `SafetensorsToGGUF` | `Kinburg-Nodes/GGUF` |
-| Sampler Settings | `KinburgSamplerSettings` | `Kinburg-Nodes/sampling` |
+| Repeat (Close) | `KinburgRepeatClose` | `Kinburg-Nodes/flow/loops` |
+| Repeat (Open) | `KinburgRepeatOpen` | `Kinburg-Nodes/flow/loops` |
+| Safetensors -> GGUF (llama.cpp) | `SafetensorsToGGUF` | `Kinburg-Nodes/LLM/GGUF` |
+| Sampler Settings | `KinburgSamplerSettings` | `Kinburg-Nodes/Bestiary` |
 | Save Song | `KinburgSaveSong` | `Kinburg-Nodes/audio` |
 | Send Image to Chat | `LocalLLMChatSendImage` | `Kinburg-Nodes/LLM` |
-| Set Accumulator (audio) | `SetAccumAudio` | `Kinburg-Nodes/accumulators` |
-| Set Accumulator (captions) | `SetAccumCaptions` | `Kinburg-Nodes/accumulators` |
-| Set Accumulator (gen info) | `SetAccumGenInfo` | `Kinburg-Nodes/accumulators` |
-| Set Accumulator (images) | `SetAccumImages` | `Kinburg-Nodes/accumulators` |
-| Set Accumulator (prompts) | `SetAccumPrompts` | `Kinburg-Nodes/accumulators` |
-| Set Accumulator (texts) | `SetAccumTexts` | `Kinburg-Nodes/accumulators` |
+| Set Accumulator (audio) | `SetAccumAudio` | `Kinburg-Nodes/flow/accumulators` |
+| Set Accumulator (captions) | `SetAccumCaptions` | `Kinburg-Nodes/flow/accumulators` |
+| Set Accumulator (gen info) | `SetAccumGenInfo` | `Kinburg-Nodes/flow/accumulators` |
+| Set Accumulator (images) | `SetAccumImages` | `Kinburg-Nodes/flow/accumulators` |
+| Set Accumulator (prompts) | `SetAccumPrompts` | `Kinburg-Nodes/flow/accumulators` |
+| Set Accumulator (texts) | `SetAccumTexts` | `Kinburg-Nodes/flow/accumulators` |
 | Settings Save 💾 | `KinburgSettingsSave` | `Kinburg-Nodes/model` |
 | Settings Select ⚙ | `KinburgSettingsSelect` | `Kinburg-Nodes/model` |
 | Show Text (Markdown) | `KinburgShowText` | `Kinburg-Nodes/util` |
-| Siren (Music Sampler) 🧜 | `KinburgSirenSampler` | `Kinburg-Nodes/sampling` |
-| Siren Cast (Voice Plan) 🧜 | `KinburgSirenCast` | `Kinburg-Nodes/sampling` |
-| Siren Compare (Audio) 🧜 | `KinburgSirenCompare` | `Kinburg-Nodes/audio` |
-| Siren Scope (Audio → Image) 🧜 | `KinburgSirenScope` | `Kinburg-Nodes/audio` |
-| Siren Score (Lyrics → Plan) 🧜 | `KinburgSirenScore` | `Kinburg-Nodes/sampling` |
-| Siren Section (Audio Window) 🧜 | `KinburgSirenSection` | `Kinburg-Nodes/sampling` |
+| Siren (Music Sampler) 🧜 | `KinburgSirenSampler` | `Kinburg-Nodes/Bestiary/Siren` |
+| Siren Cast (Voice Plan) 🧜 | `KinburgSirenCast` | `Kinburg-Nodes/Bestiary/Siren` |
+| Siren Compare (Audio) 🧜 | `KinburgSirenCompare` | `Kinburg-Nodes/Bestiary/Siren` |
+| Siren Scope (Audio → Image) 🧜 | `KinburgSirenScope` | `Kinburg-Nodes/Bestiary/Siren` |
+| Siren Score (Lyrics → Plan) 🧜 | `KinburgSirenScore` | `Kinburg-Nodes/Bestiary/Siren` |
+| Siren Section (Audio Window) 🧜 | `KinburgSirenSection` | `Kinburg-Nodes/Bestiary/Siren` |
 | Song Tags | `KinburgSongTags` | `Kinburg-Nodes/audio` |
 | Start Timer | `StartTimer` | `Kinburg-Nodes/util` |
 | Stop Timer | `StopTimer` | `Kinburg-Nodes/util` |
@@ -192,8 +192,8 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 | Unlim Text Concat | `UnlimTextConcat` | `Kinburg-Nodes/util` |
 | Vision LLM Judge | `VisionLLMJudge` | `Kinburg-Nodes/LLM` |
 | Vision Settings (GGUF) | `LocalLLMVisionSettingsGGUF` | `Kinburg-Nodes/LLM` |
-| While (Close) | `KinburgWhileClose` | `Kinburg-Nodes/loops` |
-| While (Open) | `KinburgWhileOpen` | `Kinburg-Nodes/loops` |
+| While (Close) | `KinburgWhileClose` | `Kinburg-Nodes/flow/loops` |
+| While (Open) | `KinburgWhileOpen` | `Kinburg-Nodes/flow/loops` |
 
 </details>
 <!-- END GENERATED index -->

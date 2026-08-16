@@ -261,7 +261,7 @@ wired frame always wins — so it is how you put one hard cut into an otherwise 
 it blank and every shot follows the single `link` widget; that case keeps the cache key byte-identical
 to before the option existed, so adding it re-wrote nobody's prompts and re-sampled nobody's video.
 
-### `Dream Board 🎬` — a conversation becomes a storyboard
+### `Morpheus Dream Board 🌙` — a conversation becomes a storyboard
 
 The bridge from `Local LLM Chat (GGUF)` to Storyboard. You chat with a character, pictures pile up in
 the conversation, and this node turns the part you pick into a storyboard.

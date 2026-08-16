@@ -12,6 +12,7 @@ upstream work.
 import re
 
 from .anytype import ANY
+from ..categories import CAT_UTIL
 
 MAX_SLOTS = 20
 _IDX_RE = re.compile(r"^input_(\d+)$")
@@ -30,7 +31,7 @@ class AnySwitch:
     RETURN_TYPES = (ANY, "INT")
     RETURN_NAMES = ("output", "selected")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     @staticmethod
     def _index(key):

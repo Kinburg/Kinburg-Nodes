@@ -18,6 +18,7 @@ frontend (web/save_song.js) turns into an ``<audio>`` player and the cover image
 import os
 
 from . import tagging
+from ..categories import CAT_AUDIO
 
 # quality label -> (container format, bitrate/quality token)
 _QUALITY = {
@@ -134,7 +135,7 @@ class KinburgSaveSong:
     RETURN_NAMES = ("audio", "path")
     FUNCTION = "run"
     OUTPUT_NODE = True
-    CATEGORY = "Kinburg-Nodes/audio"
+    CATEGORY = CAT_AUDIO
 
     def run(self, audio, filename_prefix="songs/song", quality="MP3 V0 (VBR)",
             image=None, lyrics="", image_quality=90, tags=None):

@@ -12,7 +12,7 @@ Design (settled with the author):
   * Modular settings, matching the repo's "settings bundle" idiom:
       - **Sampler Settings** → SAMPLER_CFG (chainable: wire them in series for a multi-stage refine
         pipeline — 2+ stages = draft then polish, critic judges only the final image)
-      - **Critic Settings (GGUF)** → CRITIC (embeds a vision LLM_CONFIG + the evaluation rules)
+      - **Ouroboros Critic Settings 🐍** → CRITIC (embeds a vision LLM_CONFIG + the evaluation rules)
       - the expander is a plain Local LLM Settings (GGUF) `LLM_CONFIG`.
   * **Fixed seed** + a fixed start latent so only the prompt (and accumulated negative) varies —
     a clean optimization signal. Two LLM configs (expander + critic); on low VRAM the same vision
@@ -39,6 +39,7 @@ from ..vision_judge.judge_node import (
     _grammar_tail, _parse_criteria, _recover_obj, _clamp_int, _clean_tags, DEFAULT_CRITERIA,
 )
 from . import stop
+from ..categories import CAT_BESTIARY, CAT_OUROBOROS
 
 # Custom socket types for the settings bundles (any matching string connects).
 CRITIC = "KINBURG_CRITIC"
@@ -525,7 +526,7 @@ class KinburgSamplerSettings:
     RETURN_TYPES = (SAMPLER_CFG,)
     RETURN_NAMES = ("sampler_settings",)
     FUNCTION = "build"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_BESTIARY
     DESCRIPTION = ("KSampler settings bundle for the Ouroboros self-correcting sampler. Chain several "
                    "(optional 'sampler_settings' input) → a multi-stage refine pipeline. Image "
                    "dimensions come from the latent wired into Ouroboros.")
@@ -573,7 +574,7 @@ class KinburgCriticSettings:
     RETURN_TYPES = (CRITIC,)
     RETURN_NAMES = ("critic_settings",)
     FUNCTION = "build"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_OUROBOROS
     DESCRIPTION = "Critic (vision judge) settings bundle for the Ouroboros loop — model + scoring rules."
 
     def build(self, config, criteria, score_min, score_max,
@@ -606,7 +607,7 @@ class KinburgOuroboros:
                 "user_prompt": ("STRING", {"multiline": True, "default": "", "tooltip": "Your intent — what you want. The enhancer improves it; the critic anchors advice to it."}),
                 "negative": ("STRING", {"multiline": True, "default": "", "tooltip": "Base negative prompt; the critic's flaw terms accumulate onto it each iteration."}),
                 "enhancer_settings": (LLM_CONFIG, {"tooltip": "A 'Local LLM Settings (GGUF)' for the prompt-enhancer LLM — its model/temperature AND its system_prompt define how the prompt is expanded. On low VRAM, point it at the SAME model file as the critic."}),
-                "critic_settings": (CRITIC, {"tooltip": "A 'Critic Settings (GGUF)' bundle — the vision judge + scoring rules."}),
+                "critic_settings": (CRITIC, {"tooltip": "A 'Ouroboros Critic Settings 🐍' bundle — the vision judge + scoring rules."}),
                 "sampler_settings": (SAMPLER_CFG, {"tooltip": "A 'Sampler Settings' bundle — OR a chain of them (wire Sampler Settings nodes in series). One = classic single pass. Two or more = REFINE mode: each iteration runs the stages in order (stage 1 drafts, later stages polish the previous latent with their own denoise / sampler / eta); the critic judges only the FINAL image."}),
                 "target_score": ("FLOAT", {"default": 4.0, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "The loop stops once the overall score reaches this (on the critic's score_min..score_max scale)."}),
                 "max_iterations": ("INT", {"default": 6, "min": 1, "max": 100, "tooltip": "Hard cap on refinement rounds."}),
@@ -627,7 +628,7 @@ class KinburgOuroboros:
     RETURN_NAMES = ("images", "prompts", "judge_data", "best_image", "best_prompt", "best_score",
                     "report", "iterations", "captions", "times", "settings_data")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_OUROBOROS
     DESCRIPTION = ("Self-correcting text→image loop: an LLM expands the prompt, an image is sampled, "
                    "a vision critic scores it and advises how to improve the prompt, and it repeats "
                    "until the target score (or max iterations). Outputs the whole trajectory (wire "
@@ -1080,7 +1081,7 @@ class KinburgOuroborosLog:
     RETURN_TYPES = ()
     RETURN_NAMES = ()
     FUNCTION = "noop"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_OUROBOROS
     OUTPUT_NODE = False
     DESCRIPTION = ("Live log for the Ouroboros sampler: shows each iteration's thumbnail, seed, "
                    "score, prompt and advice as the loop runs. Drop it anywhere on the canvas — "
@@ -1098,7 +1099,7 @@ NODE_CLASS_MAPPINGS = {
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KinburgOuroboros": "Ouroboros (Self-Correcting Sampler) 🐍",
-    "KinburgCriticSettings": "Critic Settings (GGUF)",
+    "KinburgCriticSettings": "Ouroboros Critic Settings 🐍",
     "KinburgSamplerSettings": "Sampler Settings",
     "KinburgOuroborosLog": "Ouroboros Live Log 🐍📜",
 }

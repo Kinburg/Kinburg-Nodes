@@ -6,6 +6,7 @@ counting never disturbs generation. No text is generated. Handy for budgeting a 
 a model's context window (`n_ctx`). Counts the raw text tokens (no BOS added).
 """
 from .llm_node import LLM_CONFIG, count_tokens, _shutdown_worker, UNLOAD_MODES, resolve_unload
+from ..categories import CAT_LLM
 
 
 class TokenCounter:
@@ -24,7 +25,7 @@ class TokenCounter:
     RETURN_TYPES = ("INT", "INT", "STRING")
     RETURN_NAMES = ("token_count", "char_count", "info")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def run(self, config, text="", unload_after_run="config default"):
         cfg = config if isinstance(config, dict) else {}

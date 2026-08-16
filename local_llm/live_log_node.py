@@ -23,6 +23,7 @@ collapsible section. The 'start' / 'done' payloads carry the figures and the mar
 it, so it gains the images too) purely so workflows saved against it keep working; it is hidden
 from the node picker.
 """
+from ..categories import CAT_LLM
 
 _SHARED_DESCRIPTION = (
     "Live view of every LLM node in the pack as it generates: Local LLM (GGUF), Chat, Morpheus "
@@ -43,7 +44,7 @@ class KinburgLiveLog:
     RETURN_TYPES = ()
     RETURN_NAMES = ()
     FUNCTION = "noop"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
     OUTPUT_NODE = False
     DESCRIPTION = _SHARED_DESCRIPTION
 

@@ -10,6 +10,7 @@ from ..image_batch.batch_node import UnlimImageBatch
 from ..image_batch.list_node import UnlimImageList
 from ..util.text_concat import UnlimTextConcat
 from ..util.separators import BLOCK_JOINER
+from ..categories import CAT_FLOW_ACCUMULATORS
 
 _MODES = ["as is", "crop to smallest", "pad to largest"]
 
@@ -58,7 +59,7 @@ class GetAccumImages:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("images",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, name="", mode="as is", pad_color="#000000", skip_empty=True, **kwargs):
         # kwargs carries the frontend-wired image_1, image_2, … links — batch them.
@@ -81,7 +82,7 @@ class GetAccumImagesList:
     RETURN_NAMES = ("images",)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, name="", **kwargs):
         # kwargs carries the frontend-wired image_1, image_2, … links — emit them as a list
@@ -109,7 +110,7 @@ class GetAccumAudio:
     RETURN_NAMES = ("audios",)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, name="", skip_empty=True, **kwargs):
         # kwargs carries the frontend-wired audio_1, audio_2, … links, in index order.
@@ -140,7 +141,7 @@ class GetAccumTexts:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, name="", separator="\n", skip_empty=True, **kwargs):
         # kwargs carries the frontend-wired text_1, text_2, … links — join them.
@@ -166,7 +167,7 @@ class GetAccumPrompts:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("prompts",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, name="", skip_empty=True, **kwargs):
         # kwargs carries the frontend-wired text_1, text_2, … links — join them with a '---'
@@ -192,7 +193,7 @@ class GetAccumCaptions:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("captions",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, name="", skip_empty=True, **kwargs):
         # kwargs carries the frontend-wired text_1, text_2, … links — one caption per line.
@@ -212,7 +213,7 @@ class GetAccumGenInfo:
     RETURN_TYPES = ("GEN_INFO_LIST",)
     RETURN_NAMES = ("data",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/accumulators"
+    CATEGORY = CAT_FLOW_ACCUMULATORS
 
     def run(self, name="", skip_empty=True, **kwargs):
         # kwargs carries the frontend-wired data_1, data_2, … GEN_INFO links — bundle them in

@@ -257,7 +257,7 @@ already carries `shift: 3.0`, so bypass and shift 3.0 are the same run.)
 Outputs mirror Chimera's so the node drops into the same pipeline: **`latent`**, **`report`** (schedule,
 per-stage times, section coverage as a percentage of the track, every warning), **`gen_extra_info`**
 (`GEN_INFO`, for Generation Info's `extra` input) and **`time`** / **`seconds`**, measured around the
-sampling calls inside the node. Category `Kinburg-Nodes/sampling`.
+sampling calls inside the node. Category `Kinburg-Nodes/Bestiary/Siren`.
 
 ### `Siren Scope (Audio → Image) 🧜`
 
@@ -310,7 +310,7 @@ in a way no picture will.
 `time_labels` off removes the ruler **and** its lines, so the panel is pure signal for a pixel-exact
 overlay; the `bpm` grid is musical structure and stays. Rendering is plain torch (a colour ramp and a
 5×7 bitmap font), so there is no plotting library in the graph and no font on disk to go missing.
-Category `Kinburg-Nodes/audio`.
+Category `Kinburg-Nodes/Bestiary/Siren`.
 
 ### `Siren Compare (Audio) 🧜`
 

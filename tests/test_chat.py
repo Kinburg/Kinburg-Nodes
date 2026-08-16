@@ -1,5 +1,4 @@
 """Exercise LocalLLMChatGGUF.run() for hold_open + 6 personas, without ComfyUI."""
-import importlib.util
 import json
 import types
 import sys
@@ -10,18 +9,13 @@ from _env import COMFY, PACK, comfy_on_path, fake_package, load_module, load_pac
 
 comfy_on_path()
 
-pkg = types.ModuleType("kn")
-pkg.__path__ = [str(PACK / "local_llm")]
-sys.modules["kn"] = pkg
+# Two levels, not one: the node modules reach up to `..categories` for their menu path, and a
+# single fake parent would put that import beyond the top-level package.
+fake_package("kn", "local_llm")
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(
-        "kn." + name, str(PACK / "local_llm" / (name + ".py")))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["kn." + name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module("kn.local_llm." + name, "local_llm/" + name + ".py")
 
 
 load("llm_node")

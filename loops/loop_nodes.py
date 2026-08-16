@@ -38,6 +38,7 @@ FLOW_TYPE = "KINBURG_LOOP_FLOW"
 
 
 from ..util.anytype import ANY
+from ..categories import CAT_FLOW_LOOPS
 
 
 class _ByPassTuple(tuple):
@@ -84,7 +85,7 @@ class ListEmit:
     RETURN_NAMES = _ByPassTuple(tuple(_value_names("item")))
     OUTPUT_IS_LIST = (True,) * MAX_SLOTS
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, **kwargs):
         out = []
@@ -111,7 +112,7 @@ class RepeatOpen:
     RETURN_TYPES = _ByPassTuple((FLOW_TYPE, "INT") + (ANY,) * MAX_SLOTS)
     RETURN_NAMES = _ByPassTuple(("flow", "index") + tuple(_value_names()))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, count, loop_index=0, **kwargs):
         # First pass: index 0 and the initial values. On each later pass the Close node clones
@@ -205,7 +206,7 @@ class RepeatClose(_LoopCloseBase):
     RETURN_TYPES = _ByPassTuple(tuple((ANY,) * MAX_SLOTS))
     RETURN_NAMES = _ByPassTuple(tuple(_value_names()))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, flow, index, dynprompt=None, unique_id=None, **kwargs):
         open_id = flow[0]
@@ -231,7 +232,7 @@ class WhileOpen:
     RETURN_TYPES = _ByPassTuple((FLOW_TYPE, "INT") + (ANY,) * MAX_SLOTS)
     RETURN_NAMES = _ByPassTuple(("flow", "index") + tuple(_value_names()))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, max_iterations, loop_index=0, **kwargs):
         index = int(loop_index or 0)
@@ -255,7 +256,7 @@ class WhileClose(_LoopCloseBase):
     RETURN_TYPES = _ByPassTuple(tuple((ANY,) * MAX_SLOTS))
     RETURN_NAMES = _ByPassTuple(tuple(_value_names()))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, flow, index, condition, dynprompt=None, unique_id=None, **kwargs):
         open_id = flow[0]
@@ -282,7 +283,7 @@ class ForEachOpen:
     RETURN_TYPES = _ByPassTuple((FLOW_TYPE, "INT", "INT") + (ANY,) * MAX_SLOTS)
     RETURN_NAMES = _ByPassTuple(("flow", "index", "total") + tuple(_value_names("element")))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, unique_id=None, loop_index=0, accum=None, **kwargs):
         uid = _first(unique_id)
@@ -322,7 +323,7 @@ class ForEachCollect(_LoopCloseBase):
     RETURN_TYPES = _ByPassTuple(tuple((ANY,) * MAX_SLOTS))
     RETURN_NAMES = _ByPassTuple(tuple(_value_names("collected")))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, flow, dynprompt=None, unique_id=None, **kwargs):
         bundle = flow if isinstance(flow, dict) else {}
@@ -412,7 +413,7 @@ class GetByIndex:
     RETURN_TYPES = (ANY, "INT")
     RETURN_NAMES = ("item", "length")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, value, index, out_of_range="clamp"):
         item, length = _index_into(value, index, out_of_range)
@@ -436,7 +437,7 @@ class Delay:
     RETURN_TYPES = (ANY,)
     RETURN_NAMES = ("value",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/loops"
+    CATEGORY = CAT_FLOW_LOOPS
 
     def run(self, value, seconds=0.5, label=""):
         s = max(0.0, float(seconds))

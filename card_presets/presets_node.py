@@ -11,6 +11,7 @@ Category ``Kinburg-Nodes/LLM``.
 """
 from . import store
 from ..context.character_card import VOICE_TYPE
+from ..categories import CAT_LLM_PRESETS
 
 
 class CardPresets:
@@ -33,7 +34,7 @@ class CardPresets:
     RETURN_TYPES = ("STRING", VOICE_TYPE)
     RETURN_NAMES = ("card", "voice")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM_PRESETS
 
     def run(self, preset="", filter=None):
         return (store.render(preset), store.voice(preset))

@@ -91,6 +91,7 @@ import os
 from .attachments import resolve_refs
 from .llm_node import HELP_TEXT, build_llm_request, _generate_and_format, _shutdown_worker
 from .settings_node import LLM_CONFIG
+from ..categories import CAT_LLM
 
 try:
     from comfy_execution.graph_utils import ExecutionBlocker
@@ -335,7 +336,7 @@ class LocalLLMChatGGUF:
     RETURN_NAMES = ("text", "help")
     FUNCTION = "run"
     OUTPUT_NODE = True
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def run(self, persona_1, image=None, persona_2=None, persona_3=None, persona_4=None,
             persona_5=None, persona_6=None, unload_on_approve=True, chat_state="",

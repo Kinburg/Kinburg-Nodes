@@ -4,6 +4,7 @@ Pick a color (palette swatches + a native color picker, or type a HEX) and get i
 normalized `#RRGGBB` string plus its R / G / B components.
 """
 import re
+from ..categories import CAT_UTIL
 
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
 
@@ -37,7 +38,7 @@ class ColorPicker:
     RETURN_TYPES = ("STRING", "INT", "INT", "INT")
     RETURN_NAMES = ("hex", "R", "G", "B")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, color):
         hexv = _normalize_hex(color)

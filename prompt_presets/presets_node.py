@@ -9,6 +9,7 @@ Saved "setups" (a named combination of all five slots' category+preset) are a fr
 convenience applied via the ``⚙ setup`` selector.
 """
 from . import store
+from ..categories import CAT_PROMPT
 
 
 class PromptPresets:
@@ -33,7 +34,7 @@ class PromptPresets:
         (store.SLOT_DEFAULT_CATS[i] if i < len(store.SLOT_DEFAULT_CATS) else f"slot_{i + 1}")
         for i in range(store.N_SLOTS))
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/prompt"
+    CATEGORY = CAT_PROMPT
 
     def run(self, **kwargs):
         out = []

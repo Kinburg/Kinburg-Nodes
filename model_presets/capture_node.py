@@ -21,6 +21,7 @@ Two properties worth knowing:
 mis-wired capture can't quietly overwrite a good bundle.
 """
 from . import replay, store
+from ..categories import CAT_MODEL
 
 MODES = ["preview", "register"]
 
@@ -112,7 +113,7 @@ class ModelCapture:
     RETURN_NAMES = ("report",)
     FUNCTION = "run"
     OUTPUT_NODE = True
-    CATEGORY = "Kinburg-Nodes/model"
+    CATEGORY = CAT_MODEL
     DESCRIPTION = ("Register a model assembly (loaders + patches, however exotic) in the Model "
                    "Library by reading it out of the graph — then delete those loaders and use "
                    "Model Select instead. Knows no node types: it copies the subgraph and replays "

@@ -38,6 +38,7 @@ Design notes for the frontend side:
   * No per-node state is stored here — the on/off state is the `mode` already saved on the
     target nodes, so it survives a workflow reload for free.
 """
+from ..categories import CAT_UTIL
 
 
 class KinburgGroupControl:
@@ -50,7 +51,7 @@ class KinburgGroupControl:
     RETURN_TYPES = ()
     RETURN_NAMES = ()
     FUNCTION = "noop"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
     OUTPUT_NODE = False
     DESCRIPTION = (
         "Control panel for enabling/bypassing/muting workflow groups by name, and running a "

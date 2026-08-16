@@ -14,6 +14,7 @@ For frame-level editing of a same-size IMAGE batch tensor, use Image Batch Inser
 
 
 from ..util.anytype import ANY
+from ..categories import CAT_FLOW_LIST
 
 _POS = ["at end", "at start", "at index", "after index"]
 
@@ -51,7 +52,7 @@ class ListInsert:
     RETURN_NAMES = ("list", "count")
     OUTPUT_IS_LIST = (True, False)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/list"
+    CATEGORY = CAT_FLOW_LIST
 
     def run(self, **kw):
         base = _as_list(kw.get("list"))
@@ -92,7 +93,7 @@ class ListRemove:
     RETURN_NAMES = ("list", "removed", "count")
     OUTPUT_IS_LIST = (True, True, False)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/list"
+    CATEGORY = CAT_FLOW_LIST
 
     def run(self, **kw):
         base = _as_list(kw.get("list"))

@@ -10,6 +10,7 @@ The input list grows on demand (web/image_list.js), same as the other Unlim node
 options — it just gathers whatever is connected, in slot order, untouched.
 """
 import re
+from ..categories import CAT_IMAGE
 
 _IDX_RE = re.compile(r"^image_(\d+)$")
 
@@ -26,7 +27,7 @@ class UnlimImageList:
     RETURN_NAMES = ("images",)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/image"
+    CATEGORY = CAT_IMAGE
 
     @staticmethod
     def _index(key):

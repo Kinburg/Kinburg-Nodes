@@ -19,6 +19,7 @@ A hard internal ceiling guards against a runaway cartesian explosion.
 import os
 import re
 import random
+from ..categories import CAT_PROMPT
 
 MAX_COMBOS = 5000  # hard safety ceiling on how many combinations are ever materialized
 _WILDCARD_RE = re.compile(r"__([A-Za-z0-9_\-/]+)__")
@@ -140,7 +141,7 @@ class PromptVariations:
     RETURN_NAMES = ("prompts", "count", "preview")
     OUTPUT_IS_LIST = (True, False, False)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/prompt"
+    CATEGORY = CAT_PROMPT
 
     def run(self, template="", mode="all", limit=25, seed=0, dedupe=True, wildcards_dir=""):
         template = template or ""

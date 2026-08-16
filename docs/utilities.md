@@ -209,6 +209,57 @@ before the run. Category `Kinburg-Nodes/util`.
 
 ---
 
+## 🔄 `loops/` — Flexible Iteration Loops
+
+> **System Purpose & Overview**  
+> Flexible iteration control flow graphs for ComfyUI workflows: For Each, Repeat, and While loops with index retrieval and delay.
+
+ComfyUI's execution graph is acyclic, so these cover the two practical loop shapes, both with
+**auto-growing wildcard `*` state slots** (the node shows only the connected slots plus one
+spare; drag in any type, a matching slot appears — on inputs *and* outputs):
+
+**`For Each (Open)` / `For Each (Collect)`** — iterate a batch/list **one element at a time**,
+on the same graph-expansion engine as Repeat. Feed Open any iterables (image/mask batches,
+LATENT batches, lists…); each iteration it emits a single **`element_*`** (the idx-th item of
+each input) plus `index` / `total`, iterating to the **shortest** input. Build your body off
+the `element_*` outputs (e.g. a collage from `element_0` + `element_1`) and wire the result(s)
+into Collect's **`result_*`** inputs; Collect accumulates each iteration's results and, when the
+loop ends, emits each `collected_*` as the gathered Python list. Feeding that into a **`List
+Output`** node turns it into a real per-item ComfyUI list — so different-sized images travel
+separately (a Preview shows N images, one per item; a Save writes each). The **🔗 Add / link
+Close** button on Open wires the whole chain: it creates Collect (linked by `flow`) plus a List
+Output on `collected_0`. (A list output can't be emitted from inside the loop itself — ComfyUI
+flattens list outputs during graph expansion — so the fan-out lives in this node just past it.)
+Category `Kinburg-Nodes/flow/loops`.
+
+**`List Output`** fans a value that holds a Python list into a proper ComfyUI list (one item per
+element). For Each (Collect) pairs with it, but it's a handy standalone converter too.
+
+**`Repeat (Open)` / `Repeat (Close)`** — a real iterative loop with **carried state**, built on
+ComfyUI's graph expansion: each pass, Close clones the loop body wired back into the next
+iteration, all inside one queue run. Wire your starting values into `Open`, read `index` inside
+the body, and feed the updated values into `Close`; after `count` iterations `Close` outputs the
+final state. The **🔗 Add / link Close** button on `Open` spawns the matching Close and wires the
+`flow` (and `index`) links for you, so you never hand-draw the feedback. `count` must stay a
+widget value (it's read when the loop expands). Category `Kinburg-Nodes/flow/loops`.
+
+**`While (Open)` / `While (Close)`** — the same engine, condition-driven instead of counted.
+Close has a `condition` (BOOLEAN) input computed in the loop body: the loop keeps going while
+it's True and stops the moment it's False, with `max_iterations` on Open as a hard safety cap.
+Same wildcard state slots and 🔗 auto-pairing as Repeat. Category `Kinburg-Nodes/flow/loops`.
+
+**`Get by Index`** takes the index-th element of anything indexable — an IMAGE/MASK batch (→ a
+1-frame batch), a LATENT batch (→ one latent, other keys preserved), a list, a string, or any
+other tensor — so inside a loop you can feed a whole batch in and pull out the current frame by
+`index`. Negative indices count from the end; `out_of_range` is `clamp` / `wrap` (cycle) /
+`error`. It also outputs `length` (the container size), handy for driving a loop's `count`.
+
+**`Delay`** passes any value straight through after pausing `seconds` (with an optional console
+`label`). Drop it into a wire inside a loop body to slow iterations down and watch the loop run.
+Category `Kinburg-Nodes/flow/loops`.
+
+---
+
 ## 🗄️ `accumulators/` — Name-Based Accumulators
 
 > **System Purpose & Overview**  
@@ -273,7 +324,7 @@ Insert`** inserts the `item` input into `list` at the chosen `position` / `index
 multi-item list to insert several at once); **`List Remove`** drops `count` item(s) at `index`
 and returns the `list` remainder plus the `removed` items. An item is one list element (a single
 value counts as a one-item list). Use these when items aren't same-size images — for frame-level
-edits of a same-size IMAGE batch, use the Image Batch nodes above. Category `Kinburg-Nodes/list`.
+edits of a same-size IMAGE batch, use the Image Batch nodes above. Category `Kinburg-Nodes/flow/list`.
 
 ---
 

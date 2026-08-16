@@ -1,4 +1,5 @@
 from datetime import datetime
+from ..categories import CAT_UTIL
 
 DATE_PRESETS = {
     "YYYY-MM-DD": "%Y-%m-%d",
@@ -57,7 +58,7 @@ class KinburgDateString:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, text, date_format, custom_date_format, include_time, time_format, custom_time_format, separator):
         return (_build(text, separator, date_format, custom_date_format,

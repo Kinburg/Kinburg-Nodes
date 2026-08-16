@@ -9,6 +9,7 @@ import urllib.parse
 
 from ..util.separators import BLOCK_SEP
 from ..util.paths import first_free
+from ..categories import CAT_IMAGE_COMPARE
 
 # Heavy / ComfyUI-only imports are guarded so the package still imports — and the
 # Comfy Registry can enumerate its nodes — in an environment without ComfyUI present.
@@ -449,7 +450,7 @@ class ImageCompare:
     RETURN_TYPES = ("IMAGE", "STRING", "STRING")
     RETURN_NAMES = ("images_captioned", "html_path", "url")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/image/compare"
+    CATEGORY = CAT_IMAGE_COMPARE
     OUTPUT_NODE = True
 
     def run(self, images, title, columns, overlay_captions,

@@ -7,6 +7,7 @@ a photo + a short prompt ("fill the card from this image"), and the vision model
 that structure. Category ``Kinburg-Nodes/LLM``.
 """
 from . import store
+from ..categories import CAT_LLM_PRESETS
 
 
 class GrammarPresets:
@@ -28,7 +29,7 @@ class GrammarPresets:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("grammar",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM_PRESETS
 
     def run(self, preset=""):
         return (store.get(preset),)

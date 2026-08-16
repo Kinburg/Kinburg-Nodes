@@ -42,6 +42,7 @@ from ..ouroboros.nodes import (
     SAMPLER_CFG, _stage_extra_options, _sample_stage, build_dual_guider, guider_model,
 )
 from ..timer.timer_nodes import _format_elapsed
+from ..categories import CAT_CHIMERA
 
 SPLIT_MODES = ["stage steps", "at step", "at percent", "at sigma"]
 # Older workflows stored the first names these modes had; map them so nothing breaks on load.
@@ -242,7 +243,7 @@ class KinburgChimeraSampler:
     RETURN_NAMES = ("latent", "handoff_latent", "handoff_denoised", "report", "gen_extra_info",
                     "time", "seconds")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_CHIMERA
     DESCRIPTION = ("Multi-stage sampler: run two (or more) 'Sampler Settings' bundles over ONE image "
                    "with an explicit step budget. 'continuous' handoff builds a single sigma schedule "
                    "and gives each stage a slice of it — stage 2 resumes exactly where stage 1 stopped "

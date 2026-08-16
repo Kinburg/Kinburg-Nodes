@@ -40,6 +40,7 @@ from ..local_llm.llm_node import (
     LLM_CONFIG, build_llm_request, _generate_and_format, _shutdown_worker,
     _resolve_path, PLACEHOLDER, UNLOAD_MODES, resolve_unload,
 )
+from ..categories import CAT_LLM
 
 # GBNF grammar forcing {"score": <int>, "tags": [<string>…], "comment": "<string>"}.
 # Uses the standard JSON string production (escapes + any non-control codepoint), so a comment
@@ -283,7 +284,7 @@ class VisionLLMJudge:
     RETURN_TYPES = ("STRING", "STRING", "INT", "STRING")
     RETURN_NAMES = ("summary", "results_json", "best_index", "help")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def _err(self, msg):
         print(f"[VisionJudge] ERROR: {msg}")

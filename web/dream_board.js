@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { chatNodes, chatSnapshot, registerRefHolder } from "./chat_llm.js";
 
-// Dream Board 🎬 — pick a conversation apart into shots.
+// Morpheus Dream Board 🌙 — pick a conversation apart into shots.
 //   • ⟳ Update History snapshots the chosen chat node CLIENT-SIDE. No graph link on purpose: a link
 //     would sit below the chat's blocked output, so rendering a video would need the chat to run
 //     first. It also means this node works when you run it by itself, which is how the author works.

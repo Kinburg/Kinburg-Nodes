@@ -41,6 +41,7 @@ from ..chimera.nodes import (
 )
 from ..ouroboros.nodes import SAMPLER_CFG, SOLVER_TYPES
 from ..timer.timer_nodes import _format_elapsed
+from ..categories import CAT_SIREN
 
 SIREN_SECTION = "KINBURG_SIREN_SECTION"
 SECTION_MODES = ["retake", "extend"]
@@ -179,7 +180,7 @@ class KinburgSirenSection:
     RETURN_TYPES = ("LATENT", SIREN_SECTION, "STRING")
     RETURN_NAMES = ("latent", "section", "report")
     FUNCTION = "build"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_SIREN
     DESCRIPTION = ("Mark a stretch of an AceStep audio latent as the part to regenerate — a section "
                    "retake — or grow the latent to extend the track. Edges can snap to the bar/beat "
                    "grid and are crossfaded so the join doesn't click. The mask is written to the "
@@ -386,7 +387,7 @@ class KinburgSirenSampler:
     RETURN_TYPES = ("LATENT", "STRING", "GEN_INFO", "STRING", "FLOAT")
     RETURN_NAMES = ("latent", "report", "gen_extra_info", "time", "seconds")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/sampling"
+    CATEGORY = CAT_SIREN
     DESCRIPTION = ("Sampler for AceStep music latents, with the dials it actually needs on the node. "
                    "'steps' is the whole schedule and 'stage_b_steps' carves the tail off it, so cfg "
                    "can be high while the lyrics and structure are decided and lower while the sound "

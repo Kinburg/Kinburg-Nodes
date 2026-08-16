@@ -8,6 +8,7 @@ the block's place in the context hierarchy — or as 'none' (title in bold, no h
 Category `Kinburg-Nodes/LLM`.
 """
 import re
+from ..categories import CAT_LLM_CONTEXT
 
 _IDX_RE = re.compile(r"^item_(\d+)$")
 
@@ -39,7 +40,7 @@ class ContextCollector:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("context",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM_CONTEXT
 
     @staticmethod
     def _index(key):

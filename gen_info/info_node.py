@@ -18,6 +18,7 @@ dump on its own: a branch that skips this node has none of the shared settings, 
 """
 import json
 from collections import deque
+from ..categories import CAT_UTIL
 
 
 def _is_link(v):
@@ -90,7 +91,7 @@ class GenerationInfo:
     RETURN_NAMES = ("passthrough", "info", "data")
     FUNCTION = "run"
     OUTPUT_NODE = True
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def run(self, passthrough, extra=None, prompt=None, unique_id=None):
         data = _renumber(_parse_info(extra) + self._collect(prompt, unique_id))

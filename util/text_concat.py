@@ -7,6 +7,7 @@ connected (even undeclared) link input through to `run`, so the extra `text_N` s
 arrive via **kwargs and are joined in slot order.
 """
 import re
+from ..categories import CAT_UTIL
 
 _IDX_RE = re.compile(r"^text_(\d+)$")
 
@@ -28,7 +29,7 @@ class UnlimTextConcat:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     @staticmethod
     def _index(key):

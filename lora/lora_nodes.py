@@ -13,6 +13,7 @@ Heavy ComfyUI imports live inside the methods so the package still imports (and 
 enumerate nodes) without ComfyUI present.
 """
 import re
+from ..categories import CAT_LORA
 
 LORA_TYPE = "KINBURG_LORA"
 _IDX_RE = re.compile(r"^lora_(\d+)$")
@@ -44,7 +45,7 @@ class LoraTriggerLoader:
     RETURN_TYPES = (LORA_TYPE,)
     RETURN_NAMES = ("lora",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/lora"
+    CATEGORY = CAT_LORA
 
     def run(self, lora_name, strength_model, strength_clip, trigger=""):
         return ({"name": lora_name, "strength_model": float(strength_model),
@@ -72,7 +73,7 @@ class LoraUnlimAccumulator:
     RETURN_TYPES = ("MODEL", "CLIP", "STRING", "STRING")
     RETURN_NAMES = ("model", "clip", "prompt", "triggers")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/lora"
+    CATEGORY = CAT_LORA
 
     def run(self, model, clip=None, prompt="", **kwargs):
         # The frontend-wired lora_1, lora_2, … specs arrive via kwargs — apply them in slot order.

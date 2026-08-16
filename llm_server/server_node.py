@@ -26,6 +26,7 @@ import threading
 import subprocess
 from collections import deque
 from urllib import request as _urlreq, error as _urlerr
+from ..categories import CAT_LLM
 
 try:
     from ..local_llm.llm_node import (
@@ -289,7 +290,7 @@ class LocalLLMServerText:
     RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "STRING", "INT", "INT", "STRING")
     RETURN_NAMES = ("text", "thoughts", "finish_reason", "sys_tokens", "user_tokens", "output_tokens", "gen_seconds", "help", "thoughts_tokens", "answer_tokens", "server_log")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM
 
     def run(self, backend, server_binary, server_binary_path, base_url, model, model_path,
             model_name, system_prompt, user_prompt, max_tokens, temperature, top_p, top_k,

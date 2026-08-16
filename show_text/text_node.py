@@ -30,6 +30,7 @@ import json
 from datetime import datetime
 
 from ..util.anytype import ANY
+from ..categories import CAT_UTIL
 
 
 def _first(v, default=None):
@@ -132,7 +133,7 @@ class KinburgShowText:
     RETURN_NAMES = ("text",)
     FUNCTION = "run"
     OUTPUT_NODE = True
-    CATEGORY = "Kinburg-Nodes/util"
+    CATEGORY = CAT_UTIL
 
     def check_lazy_status(self, value=None, use_saved_text=False, saved_text="",
                           markdown=True, save_path="", autosave=False):

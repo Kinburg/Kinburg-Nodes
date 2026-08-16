@@ -8,6 +8,7 @@ Everything here is optional — an empty field is simply not written, and Save S
 title from the filename and embeds the cover and lyrics it already has.
 """
 import json
+from ..categories import CAT_AUDIO
 
 _HINT = "Leave empty to skip this tag."
 
@@ -48,7 +49,7 @@ class KinburgSongTags:
     RETURN_TYPES = ("SONG_TAGS",)
     RETURN_NAMES = ("tags",)
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/audio"
+    CATEGORY = CAT_AUDIO
     DESCRIPTION = ("The tags Save Song writes INTO the file — title, artist, album, year, genre and "
                    "anything else you name. Kept on its own node because it is filled in once, "
                    "while Save Song is the one you keep re-running. Wire 'tags' into Save Song; "

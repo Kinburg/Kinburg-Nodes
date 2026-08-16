@@ -46,6 +46,7 @@ _VOICE_FIELDS = [
     ("voice_tags", "Voice (music tags)"),
     ("voice_notes", "Voice"),
 ]
+from ..categories import CAT_LLM_CONTEXT
 
 
 class CharacterCard:
@@ -67,7 +68,7 @@ class CharacterCard:
     RETURN_TYPES = ("STRING", VOICE_TYPE)
     RETURN_NAMES = ("card", "voice")
     FUNCTION = "run"
-    CATEGORY = "Kinburg-Nodes/LLM"
+    CATEGORY = CAT_LLM_CONTEXT
 
     def run(self, name="", notes="", save_preset_as="", tags="", **kwargs):
         lines = []
