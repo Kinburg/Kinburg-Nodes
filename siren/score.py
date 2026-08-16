@@ -217,8 +217,13 @@ def _names_in(text, voices):
 
 # ------------------------------------------------------------------------------ reading the sheet
 def _new(label, marker, sub=False, names=(), inherit=()):
-    return {"label": label, "marker": str(marker).strip(" -–—:,/"), "notes": [], "lines": 0,
-            "syl": 0, "sub": sub, "names": list(names), "inherit": list(inherit)}
+    # `text` is the section's words verbatim, in order, round-bracket lines included. Nothing in
+    # Score reads it — a length comes from `syl` and `lines` — but Siren Cast M3 has to hand MiniMax
+    # the actual lyric of one section at a time, and this splitter is already the thing that knows
+    # where a section starts and ends.
+    return {"label": label, "marker": str(marker).strip(" -–—:,/"), "notes": [], "asides": [],
+            "lines": 0, "syl": 0, "sub": sub, "names": list(names), "inherit": list(inherit),
+            "text": []}
 
 
 def _split_sections(lyrics, voices=(), split=True):
@@ -235,9 +240,21 @@ def _split_sections(lyrics, voices=(), split=True):
         if not line:
             continue
         m = _PARENS.match(line)
-        if m:                                  # a round-bracket line: an annotation, never a lyric
+        if m:
+            # A round-bracket line on its own is one of two things, and WHERE it sits tells them
+            # apart. Before the section has sung anything it is a production note describing the
+            # part — "(Distorted bassline, haunting atmospheric electric guitar)" under an
+            # instrumental Intro — and belongs in the caption. After a sung line it is a backing
+            # echo — "(Живий!)" — sung OVER the line above, so it belongs in the words instead.
+            # Neither adds duration, which is why both were once lumped together; but lumping them
+            # put a line of the song into the caption ("…heavy sludge rock style, Лише пусті
+            # знаки!") and a stage direction into the mouth of the singer.
             if out:
-                out[-1]["notes"].append(m.group(1).strip())
+                out[-1]["asides"].append(m.group(1).strip())
+                if out[-1]["lines"] == 0:
+                    out[-1]["notes"].append(m.group(1).strip())
+                else:
+                    out[-1]["text"].append(line)
             continue
         m = _BRACKETED.match(line)
         if m:
@@ -254,9 +271,11 @@ def _split_sections(lyrics, voices=(), split=True):
                     # it becomes the first sub-section and hands its arrangement notes down.
                     out[-1] = _new(prev["label"], inner, sub=True, names=named,
                                    inherit=[prev["marker"]] + prev["notes"])
+                    out[-1]["text"] = prev["text"]
                 elif prev["sub"] and prev["lines"] == 0:
                     out[-1] = _new(prev["label"], inner, sub=True, names=named,
                                    inherit=prev["inherit"])
+                    out[-1]["text"] = prev["text"]
                 else:
                     out.append(_new(prev["label"], inner, sub=True, names=named))
                 continue
@@ -270,6 +289,7 @@ def _split_sections(lyrics, voices=(), split=True):
         if out:
             out[-1]["lines"] += 1
             out[-1]["syl"] += _syllables(line)
+            out[-1]["text"].append(line)
         else:
             stray += 1
     if stray:
