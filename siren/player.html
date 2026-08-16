@@ -118,7 +118,7 @@ const S = {
   ctx:null, buffers:[], gains:[], sources:[], playing:false,
   startedAt:0, startOffset:0, duration:(DATA&&DATA.duration)||0,
   loop:false, loopA:0, loopB:0, levelMatch:false, blind:false,
-  tab:"measure", diffOnly:false, lyricsOpen:false,
+  tab:"measure", diffOnly:false, lyricsOpen:false, lyric:0, shuffled:false,
 };
 /* View state — all of it live, because the page holds the spectrogram DATA rather than a picture:
  * recolouring, re-windowing, zooming and diffing are array arithmetic, not a server round trip. */
@@ -128,6 +128,11 @@ const V = {
   bpm:(DATA&&DATA.bpm)||0, beats:(DATA&&DATA.beats_per_bar)||4,
 };
 const T = (DATA && DATA.tracks) || [];
+/* The order the takes are SHOWN in — a permutation of indices into T, never a reordering of T
+ * itself. Buffers, gains, canvases, the matrix cache, the diff reference and the DOM ids are all
+ * keyed by a take's ORIGINAL index, so shuffling the page for a blind test is this one array and
+ * nothing else has to know about it. */
+let ORD = T.map((_, i) => i);
 const M = (DATA && DATA.matrix) || {bands:192, cols:1600, db_min:-120, db_max:6};
 const CACHE = {};
 const RENDER_W = Math.max(600, Math.min(M.cols, 2000));   // canvas pixels; zoom samples into it
@@ -520,11 +525,12 @@ function paintLoop(){
 /* ------------------------------------------------------------------------ tabs */
 function diffTable(rows, keys){
   let h = '<table><thead><tr><th>field</th>';
-  T.forEach((t,i) => { h += "<th>"+esc(S.blind ? "Take "+(i+1) : t.label)+"</th>"; });
+  ORD.forEach(i => { h += "<th>"+esc(nameOf(i))+"</th>"; });
   h += "</tr></thead><tbody>";
   let shown = 0;
   keys.forEach(k => {
-    const vals = rows.map(r => r[k]);
+    // Columns follow the page, so a shuffled table still reads left-to-right against the takes.
+    const vals = ORD.map(i => (rows[i] || {})[k]);
     const differs = vals.some(v => String(v) !== String(vals[0]));
     if (S.diffOnly && !differs) return;
     shown++;
@@ -545,8 +551,8 @@ function tabBody(){
         + "<b>settings_data</b> to see them here.</div>";
   }
   if (!T.some(t => (t.notes||"").trim())) return "<div class='muted'>No notes wired.</div>";
-  return T.map((t,i) => '<div class="noteblock"><b>'+esc(S.blind?"Take "+(i+1):t.label)
-    + "</b><pre>"+esc(t.notes||"—")+"</pre></div>").join("");
+  return ORD.map(i => '<div class="noteblock"><b>'+esc(nameOf(i))
+    + "</b><pre>"+esc(T[i].notes||"—")+"</pre></div>").join("");
 }
 function setTab(name){
   S.tab = name;
@@ -575,7 +581,9 @@ function hiLyrics(text){
 }
 function paintLyrics(){
   const sel = document.getElementById("lyrsel");
-  const i = sel ? (parseInt(sel.value,10)||0) : 0;
+  // Remembered, because a shuffle changes which take the list starts with: otherwise re-rendering
+  // would quietly swap the panel over to somebody else's words.
+  const i = S.lyric = sel ? (parseInt(sel.value,10)||0) : 0;
   const txt = (T[i] && T[i].lyrics) || "";
   document.getElementById("lyrbd").innerHTML =
     txt.trim() ? hiLyrics(txt) : "<span class='muted'>(no lyrics wired)</span>";
@@ -593,12 +601,15 @@ function wireGrip(){
 }
 
 /* --------------------------------------------------------------------- markup */
-function trackMarkup(t, i){
+/* Called as ORD.map(trackMarkup): `i` is the take's own index (ids, audio, canvases), `p` is where
+ * it currently sits on the page (the badge, the name in blind mode, the solo key). */
+function trackMarkup(i, p){
+  const t = T[i];
   return '<div class="track" id="tr'+i+'">'
-    + '<div class="thead"><span class="idx">'+(i+1)+"</span>"
-    + '<span class="name">'+esc(S.blind ? "Take "+(i+1) : t.label)+"</span>"
+    + '<div class="thead"><span class="idx">'+(p+1)+"</span>"
+    + '<span class="name">'+esc(nameOf(i))+"</span>"
     + (t.time ? '<span class="gv" title="generation time">⏱ '+esc(t.time)+"</span>" : "")
-    + '<button id="solo'+i+'" onclick="doSolo('+i+')" title="Hear only this one (key '+(i+1)+')">solo</button>'
+    + '<button id="solo'+i+'" onclick="doSolo('+i+')" title="Hear only this one (key '+(p+1)+')">solo</button>'
     + '<button id="mute'+i+'" onclick="doMute('+i+')">on</button>'
     + '<input type="range" min="-24" max="12" step="0.5" value="'+(t.gain_db||0)
     + '" oninput="doGain('+i+',this.value)" title="Trim" style="width:100px">'
@@ -623,8 +634,9 @@ function render(){
         + "<div class='played' id='played'></div><div class='win' id='winbox'></div></div>"
       + "<button id='loopbtn' onclick='doLoopToggle()'>loop</button>"
       + "<button onclick='clearLoop()'>clear</button>"
-      + "<button id='lmb' onclick='doLevelMatch()' title='Trim every take to the same RMS so the louder one does not simply win'>match level</button>"
-      + "<button id='blindb' onclick='doBlind()'>blind</button>"
+      + "<button id='lmb'"+(S.levelMatch?" class='on'":"")+" onclick='doLevelMatch()' title='Trim every take to the same RMS so the louder one does not simply win'>match level</button>"
+      + "<button id='blindb'"+(S.blind?" class='on'":"")+" onclick='doBlind()' title='Hide the names AND shuffle the takes. Switching it off keeps the shuffled order and reveals the names, so you can see which one you picked.'>blind</button>"
+      + (S.shuffled && T.length > 1 ? "<button id='ordb' onclick='restoreOrder()' title='Put the takes back in the order the node wrote them'>↺ original order</button>" : "")
       + "<button onclick='doAll()'>hear all</button>"
       + "<button id='lyrbtn' onclick='toggleLyrics()'>lyrics</button>"
       + "<button id='viewbtn' onclick='doView()'>view ▾</button>"
@@ -646,7 +658,7 @@ function render(){
     + "</div><div class='row' style='margin-top:7px'>"
       + "<div class='grp' id='diffgrp'><b>diff</b>"
         + "<label>against <select onchange='setV(\"ref\",+this.value)'><option value='-1'>none</option>"
-          + T.map((t,i) => "<option value='"+i+"'>"+esc(t.label)+"</option>").join("")+"</select></label>"
+          + ORD.map(i => "<option value='"+i+"'"+(V.ref===i?" selected":"")+">"+esc(nameOf(i))+"</option>").join("")+"</select></label>"
         + "<span id='diffdials' style='display:flex;gap:9px;align-items:center'>"
         + "<label title='How big a difference is painted at full colour. Smaller = subtler differences become visible; larger = only gross ones show.'>"
           + "full colour at ±<input type='range' min='1' max='24' step='0.5' value='"+V.span+"' oninput='setV(\"span\",+this.value)'><span class='val' id='v_span'>"+V.span+" dB</span></label>"
@@ -662,7 +674,7 @@ function render(){
       + "<kbd>space</kbd> play · <kbd>1</kbd>…<kbd>9</kbd> solo · <kbd>0</kbd> all · <kbd>←</kbd><kbd>→</kbd> ±5 s · "
       + "<kbd>L</kbd> loop · <kbd>+</kbd><kbd>−</kbd> zoom · click a scope to seek · drag to pan · shift-drag to mark a loop</div>"
     + "</div></header><main>"
-    + T.map(trackMarkup).join("")
+    + ORD.map(trackMarkup).join("")
     + "<div class='card'><div class='tabs'>"
       + "<button id='tab_measure' onclick=\"setTab('measure')\" class='on'>Measurements</button>"
       + "<button id='tab_settings' onclick=\"setTab('settings')\">Settings</button>"
@@ -672,7 +684,8 @@ function render(){
     + (d.footer ? "<div class='card muted' style='white-space:pre-wrap;margin-top:11px'>"+esc(d.footer)+"</div>" : "")
     + "</main>";
   document.getElementById("lyrsel").innerHTML =
-    T.map((t,i) => "<option value='"+i+"'>"+esc(t.label)+"</option>").join("");
+    ORD.map(i => "<option value='"+i+"'"+(S.lyric===i?" selected":"")+">"+esc(nameOf(i))
+                 +"</option>").join("");
   wireScopes(); paintTracks(); setTab(S.tab); paintLyrics(); syncDiffGroup(); repaintNow();
 }
 
@@ -732,8 +745,36 @@ function doLevelMatch(){
   document.getElementById("lmb").classList.toggle("on", S.levelMatch);
   applyGains();
 }
-function doBlind(){ S.blind = !S.blind; render();
-  document.getElementById("blindb").classList.toggle("on", S.blind); }
+/* --------------------------------------------------------- blind mode and order
+ * Hiding the names is not enough to make a listening test blind, and on this page it was sometimes
+ * nothing at all: with no labels wired every take is already called "Take 1", "Take 2"… so hiding
+ * that hid nothing. Even with labels, the takes stayed in the order you wired them — which is the
+ * order you remember. So blind SHUFFLES as well, and names each take by its position with a LETTER,
+ * which cannot be mistaken for the "Take N" a track may carry as its real label.
+ *
+ * Switching blind off keeps the shuffled order and reveals the names in place, so the take you just
+ * picked is the one whose name appears where you were listening — the answer to "what did I choose"
+ * rather than a page that rearranges itself the moment you ask. `↺ original order` puts them back.
+ */
+const posOf = i => ORD.indexOf(i);
+const blindName = p => (p < 26 ? "Take " + String.fromCharCode(65 + p) : "Take #" + (p + 1));
+const nameOf = i => (S.blind ? blindName(posOf(i)) : (T[i] && T[i].label) || ("Take " + (i + 1)));
+function shuffleOrder(){
+  // A PLAIN uniform shuffle, which means the takes are sometimes left exactly where they were.
+  // Tempting to forbid that — it looks like the button did nothing — but "never the arrangement you
+  // just saw" is information, and with two takes it is the whole answer: the shuffle would then be
+  // a guaranteed swap, and an A/B page would be perfectly readable while claiming to be blind.
+  const a = ORD.slice();
+  for (let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1)), t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  ORD = a;
+  // Tracked as a FLAG rather than compared against 0,1,2… for the same reason: if the button only
+  // appeared when the order happened to change, its absence would announce "nothing moved".
+  S.shuffled = true;
+}
+function doBlind(){ S.blind = !S.blind; if (S.blind) shuffleOrder(); render(); }
+function restoreOrder(){ ORD = T.map((_,i) => i); S.shuffled = false; render(); }
 function doLoopToggle(){
   if (S.loopB <= S.loopA){ S.loopA = 0; S.loopB = S.duration; }
   S.loop = !S.loop; applyLoopLive(); paintLoop();
@@ -799,7 +840,8 @@ window.addEventListener("keydown", e => {
   if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
   if (e.code === "Space"){ e.preventDefault(); toggle(); return; }
   if (e.key === "0"){ doAll(); return; }
-  if (/^[1-9]$/.test(e.key)){ const i = +e.key-1; if (i < T.length) doSolo(i); return; }
+  // By POSITION on the page, not by original index: 1 is always the take shown first.
+  if (/^[1-9]$/.test(e.key)){ const p = +e.key-1; if (p < ORD.length) doSolo(ORD[p]); return; }
   if (e.key === "ArrowLeft"){ e.preventDefault(); seek(position()-5); return; }
   if (e.key === "ArrowRight"){ e.preventDefault(); seek(position()+5); return; }
   if (e.key === "+" || e.key === "=") { doZoom(1.6, t2frac(position())); return; }

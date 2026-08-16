@@ -366,8 +366,17 @@ The page builds it into one canvas per take, so:
   themselves, so the wrap is sample-accurate too.
 - **`match level`** trims every take down to the quietest one's RMS. Without it the louder take simply
   wins, every time. (Down, never up: several unmuted at once would otherwise clip.)
-- **`blind`** hides the labels; the **Measurements / Settings / Notes** tabs share a `differences
-  only` switch that collapses each table to the rows that actually differ between takes.
+- **`blind`** hides the names **and shuffles the takes**, calling them *Take A*, *Take B*… by
+  position — hiding names alone was not a blind test, because with no `labels` wired every take is
+  already called "Take 1", "Take 2", and even with labels the takes stayed in the order you wired
+  them, which is the order you remember. The shuffle is a plain uniform one, so it sometimes leaves
+  everything where it was: "never the arrangement you just saw" would be information, and with two
+  takes it would be the whole answer. Switch blind **off** and the shuffled order *stays* while the
+  names appear in place — the take you soloed is the one that lights up, which is the question you
+  actually had. **`↺ original order`** puts them back; it shows up whenever blind has shuffled,
+  never depending on how the draw came out. The **Measurements / Settings / Notes** tabs follow the
+  same order and share a `differences only` switch that collapses each table to the rows that
+  actually differ between takes.
 - Keyboard: <kbd>space</kbd>, <kbd>1</kbd>…<kbd>9</kbd> to solo, <kbd>0</kbd> for all,
   <kbd>←</kbd>/<kbd>→</kbd> to seek, <kbd>L</kbd> to loop.
 

@@ -147,7 +147,9 @@ class KinburgSirenCompare:
                    "clock, so they play in perfect sync and soloing between them mid-phrase is "
                    "instant and silent. Click a scope to seek, shift-drag to loop a bar, 'match "
                    "level' trims them to equal RMS so the louder one doesn't simply win, 'blind' "
-                   "hides the labels. The spectrograms ship as DATA, so colours, dB window, channel "
+                   "hides the names AND shuffles the takes — switch it off and the order stays put "
+                   "while the names appear, so you see which one you picked. The spectrograms ship "
+                   "as DATA, so colours, dB window, channel "
                    "and A/B diff are all live on the page — no re-running to change the view. "
                    "Measurements, Settings and Notes tabs each have a 'differences only' mode, and "
                    "the lyrics sit in a side panel. Writes a portable folder that opens offline.")
