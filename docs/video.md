@@ -75,6 +75,16 @@ exists because six things have to be right that a hand-wired graph gets wrong:
   960×544 — three times the time, silently. So the aspect check stayed and became a **report warning**,
   and the size stayed where everyone expects it.
 
+- **`trims`** (advanced) — frames dropped from the **tail** of each shot, a comma list with the last
+  value repeating, blank by default and byte-identical to before when blank. This is where Orpheus'
+  output goes: H3's lengths move in a 0.708 s quantum and bar lines do not, so a cut that must land
+  on a downbeat is reached by generating the first legal length *longer* than the music needs and
+  dropping the overshoot. `seam_trim` takes frames off the head for a different reason; these two
+  share the shot, and a shot is never trimmed below 5 frames — the report says when it was clamped.
+  The next shot's first frame moves to the cut point with it and the audio slot shrinks to match, so
+  picture and sound stay together. Free to change, like `seam_trim`: it happens at decode, so cached
+  latents replay.
+
 - **`lora_triggers`** — wire the **`triggers`** output of `Lora Unlim Accumulator` here and the
   trigger words go into **every** shot's prompt. Not simply appended: a Morpheus prompt is MiniMax's
   six numbered sections and the last one is `[Negative Prompt/Constraints]`, so text on the end
@@ -467,6 +477,85 @@ a draft-then-polish pass, exactly as in Chimera and Ouroboros. `width` and `heig
 rather than on the bundle: match the aspect ratio you will render the video at, since these pictures
 are also what the video model's writer looks at. `captions` and `settings_data` go straight into
 `Image Compare`, and each keyframe is pushed to a `Kinburg Live Log` node the moment it decodes.
+
+---
+
+## 🎶 `orpheus/` — Orpheus Suite 🎶
+
+> **System Purpose & Overview**
+> Reads a finished track and decides where the cuts fall, so a music video is edited to its own
+> music instead of to a shot length somebody typed.
+
+Orpheus is the one whose music moved everything else, and that is exactly the join this suite makes:
+Siren writes the song, Phantas makes the pictures, Morpheus the motion — and this decides *when*.
+It sits in front of the other two:
+
+```
+Siren 🧜  →  Orpheus 🎶  →  Phantas Storyboard 🎞  →  Phantas 🎞  →  Morpheus 🌙
+ the song    where to cut      what each picture is     renders them    renders the video
+```
+
+Wire its `durations` output into `Phantas Storyboard`'s `durations` (or Morpheus') and the shot
+boundaries stop being a guess.
+
+### The one thing that decides the whole design
+
+**H3's grid and the musical grid do not fit together.** A shot may be exactly one of fifteen
+lengths, 0.708 s apart; a bar at 128 BPM is 1.875 s. No whole number of bars is a legal shot length
+at that tempo — none of the six that fit the band. So if all you may choose is a shot *length*, a
+cut that has to land on a downbeat arrives up to **±0.354 s** away, which at 128 BPM is most of a
+beat: the difference between "cut to the music" and "the editor missed".
+
+So the cut is never chosen from the grid. It is chosen **on the music**, H3 is then asked for the
+smallest legal length that is *at least* that long, and the overshoot comes back as a per-shot trim
+in frames, to be dropped at assembly. Generate long, cut on the beat. Measured across three hundred
+random songs — random tempo, time signature, cut unit and downbeat phase — every musical cut lands
+within **20.8 ms** of its line, which is half a frame at 24 fps and therefore the floor.
+
+The trim is not free, and how expensive it is moves with the tempo. At 120 BPM a 4-bar phrase is
+8.00 s and sits exactly on H3's grid: nothing is wasted. At 128 BPM the same phrase is 7.50 s and
+snaps up to 8.00 — 6.2% of everything generated thrown away — while *two* phrases is 15.00 s against
+a 15.083 s ceiling and wastes 0.6%. Ten times the difference, hiding inside one dropdown, so the
+report prints the whole table for the tempo you actually have.
+
+### `Orpheus (Audio → Shots) 🎶`
+
+**With a Siren `plan` wired, section boundaries are not detected at all — they are read.** The table
+you wrote says where the chorus starts, exactly, with its name; detection then only fills in the
+accents inside each section. That is the normal case for your own songs and no detector can beat it.
+Without one, everything is measured: onsets from spectral flux, tempo by autocorrelation, the
+downbeat by the phase that carries the most onset energy, and the structural seams — the drop, the
+moment the drums enter — from how unlike the next few seconds are to the last few.
+
+Every estimate comes back with a **confidence**, and the report prints it. A ballad with no rhythm
+section has no beat grid to find, and saying so is the only honest answer; type the `bpm` when you
+know it, which for a song you generated you always do.
+
+Two inputs are not what they look like:
+
+- **`pace` is a bias, not a length.** It decides how many shots the rest of the track should become;
+  the cut then goes to the best *available* moment, which is never exactly that number. On a 7.5 s
+  phrase grid, 7 and 9 give byte-identical plans — there is nothing between the candidates to
+  choose. Move it in whole seconds and watch the shot count.
+- **`sensitivity`** is how far above its own neighbourhood a moment must stand to be a candidate.
+  Low leaves the planner spoilt for choice, so shots land near `pace`; high leaves it reaching for
+  the few big moments, so shots stretch. It does not touch section boundaries that came from a plan.
+
+**`cues` is deliberately not `beats`.** `Morpheus Storyboard` skips its own planning call when
+`beats` is filled — your lines win — so wiring a list of musical facts into it would hand the shot
+writer "0:48 — drop" as an entire director's note, and it would film exactly that. Read `cues`
+through a `Show Text` and merge the lines that earn it into `beats` yourself.
+
+The **`scope`** output is the check that costs half a second instead of a render: the spectrogram
+with the plan drawn on it, amber where a cut landed on a real moment and dim red where the planner
+had nothing to cut on and fell back to length alone. If the amber lines do not sit on the transients,
+nothing downstream is worth rendering. A row of red ones is a `sensitivity` or `cut_on` problem, and
+is otherwise invisible until the video looks wrong.
+
+`start_sec` / `end_sec` cut a window out of the track — to skip a long intro, or to make a teaser —
+while the *whole* track is still analysed, because tempo and downbeat are measured far more reliably
+over three minutes than over twenty seconds. `trims` is the per-shot frame count to drop; wire it
+into Morpheus, or read it and trim at assembly.
 
 ---
 

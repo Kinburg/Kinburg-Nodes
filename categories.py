@@ -24,6 +24,7 @@ ROOT = "Kinburg-Nodes"
 CAT_BESTIARY = ROOT + "/Bestiary"
 CAT_CHIMERA = CAT_BESTIARY + "/Chimera"
 CAT_MORPHEUS = CAT_BESTIARY + "/Morpheus"
+CAT_ORPHEUS = CAT_BESTIARY + "/Orpheus"
 CAT_OUROBOROS = CAT_BESTIARY + "/Ouroboros"
 CAT_PHANTAS = CAT_BESTIARY + "/Phantas"
 CAT_SIREN = CAT_BESTIARY + "/Siren"
@@ -61,6 +62,7 @@ ALL = frozenset(v for k, v in list(globals().items()) if k.startswith("CAT_"))
 SUITES = {
     "chimera": CAT_CHIMERA,
     "morpheus": CAT_MORPHEUS,
+    "orpheus": CAT_ORPHEUS,
     "ouroboros": CAT_OUROBOROS,
     "phantas": CAT_PHANTAS,
     "siren": CAT_SIREN,

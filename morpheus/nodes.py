@@ -79,6 +79,25 @@ LINK_MODES = ["continue", "cut"]
 # this one, so touching it at import time would close a cycle
 REFINE_SCOPES = ["auto", "off", "opening", "full"]
 AUDIO_MODES = ["concat", "mute"]
+
+
+def _per_shot_ints(text, n):
+    """`"12, 2"` → per shot, last value repeating; blank → all zeros.
+
+    The same comma-list shape `durations` and `links` already use, so there is one convention across
+    the suite. Junk becomes 0 rather than an error: a typo in an advanced field should cost you a
+    trim, not a chain that took twenty minutes to sample."""
+    vals = []
+    for tok in re.split(r"[,;\s]+", (text or "").strip()):
+        if not tok:
+            continue
+        try:
+            vals.append(max(0, int(round(float(tok)))))
+        except ValueError:
+            vals.append(0)
+    if not vals:
+        vals = [0]
+    return [vals[min(i, len(vals) - 1)] for i in range(max(0, n))]
 CACHE_MODES = ["disk", "off"]
 DEFAULT_AUD_SR = 44100
 
@@ -267,6 +286,12 @@ class KinburgMorpheus:
                                                 "tooltip": "Leave the LLM in memory between shots instead of shutting its worker down after every call. Faster (no reload per seam) but it holds its VRAM and RAM while H3 samples — on 12 GB with a 26B model that means OOM. Off is the safe default: the LLM is loaded, used and killed around each shot."}),
                 "shots_range": ("STRING", {"default": "", "advanced": True,
                                            "tooltip": "Render only part of the chain: '' = all, '3' = shot 3, '2-4' = shots 2..4. Shots after the range are skipped entirely; shots before it are still needed for the handoff frame (free if cached). Handy while you design the opening shots."}),
+                # APPENDED, and it has to stay last: ComfyUI maps a saved workflow's widget values by
+                # POSITION, so a new widget inserted anywhere earlier silently shifts every value
+                # after it — 'audio', 'cache' and 'cache_tag' would all come back holding their
+                # neighbour's setting in graphs that were saved before this existed.
+                "trims": ("STRING", {"default": "", "advanced": True,
+                                     "tooltip": "Frames dropped from the TAIL of each shot — a comma list, last value repeating, the same shape 'durations' and 'links' take. Blank (default) trims nothing and behaves exactly as before.\n\nThis is Orpheus' output. H3's shot lengths move in a 0.708 s quantum and bar lines do not, so a cut that has to land on a downbeat is reached by generating the first legal length LONGER than the music needs and dropping the overshoot here. Generate long, cut on the beat.\n\nCosts nothing to change: trimming happens at decode, so cached shots replay. The next shot's first frame moves to the cut point with it, and the shot's audio slot shrinks to match, so picture and sound stay together.\n\nNote it competes with 'seam_trim' for room — a shot is never trimmed below 5 frames, and the report says when it was clamped."}),
             },
             "optional": {
                 "audio_vae": ("VAE", {"tooltip": "The AUDIO vae. Without it the video comes out silent."}),
@@ -353,7 +378,7 @@ class KinburgMorpheus:
     # ------------------------------------------------------------------------------------- render
     def render(self, shots, model, clip, vae, width, height, steps, scheduler, sampler_name,
                seed, shift_video, shift_audio, seam_trim, audio, seam_fade_ms, cache,
-               cache_tag, live_preview=True, llm_keep_loaded=False, shots_range="",
+               cache_tag, trims="", live_preview=True, llm_keep_loaded=False, shots_range="",
                audio_vae=None, sigmas=None, sampler=None, noise=None, llm_config=None,
                lora_triggers="", unique_id=None):
         _require_h3()
@@ -396,13 +421,22 @@ class KinburgMorpheus:
         # --- plan: frames per shot, what gets dropped, what lands in the output ------------------
         plan = []
         trim = max(0, int(seam_trim))
+        cuts = _per_shot_ints(trims, len(chain))
         for i, s in enumerate(chain):
             has_start = s.get("start_frame") is not None or (i > 0 and s["link"] == "continue")
             # frame 0 duplicates the previous shot's tail; the frames after it are the model
             # accelerating its motion from a standstill, because a keyframe carries no velocity
             drop = min(trim, s["frames"] - 5) if (i > 0 and has_start) else 0
-            plan.append({"frames": s["frames"], "drop": drop, "out": s["frames"] - drop,
-                         "in_range": lo <= i + 1 <= hi})
+            # …and `cut` comes off the END, which is a different job: Orpheus asks for a shot longer
+            # than the music needs (H3's grid has nothing shorter) and names the overshoot, so the
+            # cut lands exactly on the beat. Sampling is unaffected — this happens at decode — so
+            # changing it replays cached latents and costs nothing.
+            cut = max(0, min(cuts[i], s["frames"] - drop - 5))
+            if cuts[i] > cut:
+                warn.append(f"shot {i + 1}: trim of {cuts[i]} frames would leave under 5 frames — "
+                            f"clamped to {cut}")
+            plan.append({"frames": s["frames"], "drop": drop, "cut": cut,
+                         "out": s["frames"] - drop - cut, "in_range": lo <= i + 1 <= hi})
             if not (124 <= s["frames"] <= 362):
                 warn.append(f"shot {i + 1}: {s['frames']} frames ({_seconds(s['frames']):.2f} s) is "
                             f"outside the model's trained 124-362 frame range")
@@ -568,22 +602,30 @@ class KinburgMorpheus:
 
             # decode only when the pixels are actually needed: for the output, or for the next
             # shot's keyframe when the cache didn't already hand us that frame
-            have_handoff = cached and entry.get("handoff") is not None
-            decoded, tail = None, None
+            # A cached handoff is the shot's TRUE last frame, saved without any end trim — so it is
+            # only the frame the next shot starts on when nothing is cut off this one. With a cut
+            # the handoff moves back to the cut point and has to be decoded. Keeping the cache
+            # trim-independent is deliberate: the trim is not part of the key (it must not
+            # re-sample), so a trimmed frame stored under that key would be wrong for the next run.
+            have_handoff = cached and entry.get("handoff") is not None and not p["cut"]
+            decoded, tail, handoff_at = None, None, None
             if p["in_range"] or (next_needs and not have_handoff):
                 decoded = self._decode_video(vae, video_lat)
                 tail = _fp16_round(decoded[-1:])
+                end_at = decoded.shape[0] - p["cut"]
+                handoff_at = _fp16_round(decoded[max(0, end_at - 1):end_at])
             if next_needs:
-                handoff = entry["handoff"].to(torch.float32) if have_handoff else tail
-            if emit is not None and (tail is not None or have_handoff):
+                handoff = entry["handoff"].to(torch.float32) if have_handoff else handoff_at
+            if emit is not None and (handoff_at is not None or have_handoff):
                 # the run's storyboard, building up live: this is the frame the next shot starts on
                 emit({"event": "frames",
                       "label": f"shot {i + 1}/{len(chain)} · last frame"
                                + (" (cached)" if cached else ""),
-                      "images": _log_uris([tail if tail is not None else entry["handoff"]])})
+                      "images": _log_uris([handoff_at if handoff_at is not None
+                                           else entry["handoff"]])})
 
             if p["in_range"]:
-                frames = decoded[p["drop"]:]
+                frames = decoded[p["drop"]:decoded.shape[0] - p["cut"] if p["cut"] else None]
                 if images is None:
                     images = torch.empty((total_out,) + tuple(frames.shape[1:]), dtype=torch.float32)
                 if frames.shape[1:] != images.shape[1:]:
@@ -683,6 +725,7 @@ class KinburgMorpheus:
         for idx, p, seed_i, secs, w_secs, cached, rmode, start in rows:
             mark = "" if p["in_range"] else "  (handoff only)"
             drop = f" -{p['drop']}" if p["drop"] else "   "
+            drop += f"/-{p['cut']}" if p.get("cut") else ""
             out.append(f"  {idx:<2} {p['frames']:>5}{drop} {_seconds(p['out']):>6.2f}s "
                        f"{start:<11} {rmode:<11} "
                        f"{(_format_elapsed(w_secs, 'human') if w_secs else '—'):<9} "

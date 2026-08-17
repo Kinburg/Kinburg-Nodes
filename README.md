@@ -2,7 +2,7 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.2.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-93-orange.svg)](#-node-index)
+[![nodes](https://img.shields.io/badge/nodes-94-orange.svg)](#-node-index)
 [![tests](https://img.shields.io/badge/tests-1072%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -16,7 +16,7 @@ A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **93** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **94** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -60,6 +60,7 @@ All **93** nodes, grouped by the package they live in. Every package links to it
 |---|---|
 | [`morpheus/` — Morpheus Suite 🌙](docs/video.md#-morpheus--morpheus-suite-) | `Morpheus (Video Sampler) 🌙`, `Morpheus Dream Board 🌙`, `Morpheus Dream 🌙`, `Morpheus Storyboard 🌙` |
 | [`phantas/` — Phantas Suite 🎞](docs/video.md#-phantas--phantas-suite-) | `Phantas Storyboard 🎞`, `Phantas 🎞` |
+| [`orpheus/` — Orpheus Suite 🎶](docs/video.md#-orpheus--orpheus-suite-) | `Orpheus (Audio → Shots) 🎶` |
 
 ### 🎛️ Presets & Asset Management
 
@@ -157,6 +158,7 @@ All **93** nodes, grouped by the package they live in. Every package links to it
 | Morpheus Dream Board 🌙 | `KinburgDreamBoard` | `Kinburg-Nodes/Bestiary/Morpheus` |
 | Morpheus Dream 🌙 | `KinburgMorpheusDream` | `Kinburg-Nodes/Bestiary/Morpheus` |
 | Morpheus Storyboard 🌙 | `KinburgMorpheusStoryboard` | `Kinburg-Nodes/Bestiary/Morpheus` |
+| Orpheus (Audio → Shots) 🎶 | `KinburgOrpheusScore` | `Kinburg-Nodes/Bestiary/Orpheus` |
 | Ouroboros (Self-Correcting Sampler) 🐍 | `KinburgOuroboros` | `Kinburg-Nodes/Bestiary/Ouroboros` |
 | Ouroboros Critic Settings 🐍 | `KinburgCriticSettings` | `Kinburg-Nodes/Bestiary/Ouroboros` |
 | Ouroboros Live Log 🐍📜 | `KinburgOuroborosLog` | `Kinburg-Nodes/Bestiary/Ouroboros` |
