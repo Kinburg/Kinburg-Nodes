@@ -27,6 +27,10 @@ Non-zero exit on any failure, so this drops into a pre-commit hook as-is.
 | `test_send_image.py` | `Send Image to Chat` — megapixel downscale, the content-hash filename, the payload, and `attachments.discard()` including everything it must refuse to delete |
 | `test_dream_board.py` | `Dream Board` — the whole "pictures define the shots" rule, the outputs, the `MORPHEUS_SHOT` chain |
 | `test_storyboard.py` | `Morpheus Storyboard.write()` over a **faked LLM** — filling a wired chain in place vs appending, per-shot keyframes/durations/links, the beats override |
+| `test_phantas_timing.py` | Phantas' clock — the fifteen legal shot lengths (checked against ComfyUI's own `align_frame_count`), the three counting units, and laying a target length onto shots by weight to within half a grid step |
+| `test_phantas_board.py` | `Phantas Storyboard.write()` over a **faked LLM** — the counting, the generated plan grammar, the bible stamped byte-for-byte, causal keys, the prompt override, and the over-determined-target error |
+| `test_phantas.py` | `Phantas.render()` over a **stubbed sampler** with a real disk cache — the shot chain and its shared boundary frames, the anchor rules, both reference mechanisms, `redo`, and that a cached frame is bit-identical to the fresh one |
+| `test_diskcache.py` | `util/diskcache.py` and the Morpheus adapter over it — causal keys, content hashes, the fp16 store round-trip, LRU pruning |
 | `test_lora_triggers.py` | `_with_triggers` — where trigger words land in a MiniMax prompt, and that they never land in `[Negative]` |
 | `test_siren_cast.py` | `Siren Cast` — plan parsing (lengths in seconds / bars / `m:ss`, voices, the 4th column), the per-section caption and its negative under each `guidance` mode, and that `seconds` matches the codes actually written |
 | `test_siren_score.py` | `Siren Score` — section and voice detection off a lyric sheet, syllable counting, the backwards length split (Hamilton on 2-bar units, floors, `tail_bars`, `pad_placement`) and the rate it reports |

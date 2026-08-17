@@ -64,6 +64,7 @@ from comfy_extras.nodes_custom_sampler import Guider_Basic, Noise_RandomNoise
 from . import cache as shot_cache
 from ..local_llm.llm_node import LLM_CONFIG, _shutdown_worker as _shutdown_llm
 from ..timer.timer_nodes import _format_elapsed
+from ..util.images import fp16_round as _fp16_round, log_uris as _log_uris
 from ..categories import CAT_MORPHEUS
 
 try:  # ComfyUI without MiniMax H3 support: fail with a readable message, not on import
@@ -161,32 +162,6 @@ def _parse_range(text, n):
     if hi < lo:
         lo, hi = hi, lo
     return lo, hi
-
-
-def _log_uris(images, max_side=320):
-    """Small JPEG data URIs for the live log — the same encoder the LLM vision path uses.
-
-    Deliberately downscaled: these go over the websocket on every shot, and the log only needs a
-    thumbnail. Never raises: a picture that fails to encode must not take a render down."""
-    try:
-        from ..local_llm.llm_node import _encode_images
-        frames = [im for im in (images or []) if im is not None]
-        if not frames:
-            return []
-        batch = frames[0] if len(frames) == 1 else torch.cat(frames, dim=0)
-        return _encode_images(batch, max_side)
-    except Exception as e:  # pragma: no cover
-        logging.debug(f"[Morpheus] live-log image encode skipped: {e}")
-        return []
-
-
-def _fp16_round(img):
-    """Every handoff frame goes through fp16 so the fresh path and the cached path are identical.
-
-    `.contiguous()` is not cosmetic: a real video VAE hands back frames as a permuted view, `.to()`
-    preserves those strides, and safetensors refuses to write a non-contiguous tensor — which is
-    exactly how the shot cache silently wrote nothing on the first real run."""
-    return img.detach().to("cpu", torch.float16).clamp(0.0, 1.0).to(torch.float32).contiguous()
 
 
 # =========================================================================================== nodes

@@ -25,6 +25,7 @@ CAT_BESTIARY = ROOT + "/Bestiary"
 CAT_CHIMERA = CAT_BESTIARY + "/Chimera"
 CAT_MORPHEUS = CAT_BESTIARY + "/Morpheus"
 CAT_OUROBOROS = CAT_BESTIARY + "/Ouroboros"
+CAT_PHANTAS = CAT_BESTIARY + "/Phantas"
 CAT_SIREN = CAT_BESTIARY + "/Siren"
 
 # --- language & vision --------------------------------------------------------------------------
@@ -61,5 +62,6 @@ SUITES = {
     "chimera": CAT_CHIMERA,
     "morpheus": CAT_MORPHEUS,
     "ouroboros": CAT_OUROBOROS,
+    "phantas": CAT_PHANTAS,
     "siren": CAT_SIREN,
 }

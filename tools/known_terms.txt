@@ -58,3 +58,8 @@ z_image_turbo
 
 # --- the README's own description of this very check ---
 snake_case
+
+# --- core conditioning mechanics Phantas drives, named where the docs explain them ---
+reference_latents
+attn_bias
+align_frame_count

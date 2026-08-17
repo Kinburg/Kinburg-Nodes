@@ -324,4 +324,150 @@ or hand-edit it before it is written up.
 
 ---
 
+## 🎞 `phantas/` — Phantas Suite 🎞
+
+> **System Purpose & Overview**  
+> Keyframe storyboard writer and multi-frame sampler: a brief becomes a chain of consistent stills,
+> and that chain becomes the boundaries Morpheus dreams between.
+
+Phantasos is Morpheus' brother, and in the myth he is the one who appears as still things. That is
+the division here too: Morpheus makes motion, Phantas makes the pictures the motion runs between.
+
+A Morpheus keyframe sits **between** shots — frame *k* ends shot *k−1* and starts shot *k* — so a
+board of N pictures is a chain of N−1 shots, and the two numbers are always one apart. Everything
+below follows from that one fact.
+
+The pipeline is two nodes plus the two you already have:
+
+```
+Phantas Storyboard 🎞  →  Phantas 🎞  →  Morpheus Storyboard 🌙  →  Morpheus 🌙
+   writes the states      renders them      writes the video prompts    renders the video
+```
+
+**The arc is planned once.** `Phantas Storyboard` already has to work out what happens between each
+pair of pictures, so it emits those lines as `beats` in exactly the format `Morpheus Storyboard`
+takes — and that node skips its own planning call when `beats` is filled. Wire them together and one
+plan governs both halves; leave them apart and two LLM calls get independent authority over the same
+story, which is a good way to watch them disagree.
+
+### `Phantas Storyboard 🎞` — the brief becomes states and beats
+
+Morpheus writes *shots*; this writes *states*. Three LLM calls, all of them streaming into a
+`Kinburg Live Log` node:
+
+1. a **style bible** — `[STYLE]`, `[CAST]`, `[SUBJECT]`, `[NEGATIVE]` — written once and stamped on
+   every frame byte-for-byte;
+2. a **plan**, GBNF-constrained to exactly N keyframes and N−1 transitions, so a model that
+   miscounts cannot even emit the wrong number of entries;
+3. one call **per frame**, shown the bible, its own framing and state, whoever is in it, and the
+   previous frame's prompt, so consecutive pictures are of the same world.
+
+**The `cast` is what decides whether a character survives the sequence.** An image model has no
+memory between calls: "the singer", or "the man from the previous shot", is a different human being
+in every picture. Identity has to be re-stated in full, *in the same literal words*, in every frame
+the person appears in — which is exactly why cover art comes out consistent across seeds and songs
+while a storyboard written from the same context does not. So:
+
+- Type (or wire) `cast` as one `Name — full description` line per person, at the length you would
+  describe them for cover art. Those lines are the authority: they replace whatever the bible call
+  wrote, and they are stamped **verbatim**.
+- The plan says who is `present` in each keyframe, and only those people's lines are stamped into
+  that keyframe's prompt. Pasting the whole cast into a shot of an empty room is how a picture grows
+  a person who should not be in it.
+- Leave `cast` empty and the bible call writes one itself — from the brief and from whatever the LLM
+  Settings' `context` holds, which is the other way a cast gets here: a `Context Collector` or a
+  `Card Presets` bundle on the settings node reaches every call. Leave it empty **also** when the
+  subject is supposed to change, since a fixed description would contradict the transformation.
+
+Two more rules are baked into the prompts and are the reason the output holds together:
+
+- **A frame prompt is a frozen moment.** "He begins to transform" asks an image model for a motion
+  smear. The change lives in the beat; the frame is the state it arrives at.
+- **The chain is one continuous take.** With no cuts, framing cannot jump, so a crop change has to
+  be a camera *move* — the plan assigns framings to the boundaries and each shot performs the move
+  between two of them.
+
+**Counting.** `count_mode` picks the unit, and the units are the same variable:
+
+| `count_mode` | you type | you get |
+|---|---|---|
+| `frames` | how many pictures | N pictures → N−1 shots |
+| `scenes` | how many shots | S shots → S+1 pictures |
+| `duration` | `target_length` in seconds | the shot count, from the clock |
+
+**The clock is integer arithmetic, and the LLM is kept out of it.** H3 runs `17k+5` frames at 24 fps
+and is trained on 124–362 of them, so a shot may be exactly one of **fifteen** lengths, 0.708 s
+apart, from 5.17 s to 15.08 s. The planner therefore never names seconds — it gives each transition
+a *weight* for how much visible change it carries, and those are laid onto the grid here. A model
+that writes "5.2 s" gets 5.88 s from the grid and the total drifts silently; a model that writes
+weights cannot be wrong about time.
+
+Two consequences worth knowing before you type a number:
+
+- Fill `durations` (`"5.17, 8"`, last value repeating) and your numbers win outright. Leave it empty
+  and the planner's weights decide, with `preferred_length` as the average shot.
+- `target_length` and the shot count **over-determine each other**: n shots can only add up to
+  between n×5.17 s and n×15.08 s. Twelve seconds of four scenes is not a preference to be clamped,
+  it is a contradiction, and it is raised as one — before a single token is generated. Inside the
+  band, any target is reachable to within ±0.35 s, because every shot moves in the same quantum.
+
+Everything written is cached on disk under a causal key, so re-running the graph does not rewrite
+the prompts and invalidate finished frames. Edit the `prompts` output, paste it back into
+`prompts_override` (frames separated by a line of `---`), and those frames are used verbatim without
+an LLM call — an empty entry means "write this one". The three system prompts are editable fields
+(`system_style`, `system_plan`, `system_frame`); the plan's JSON shape comes from the generated
+grammar, so editing them can change the writing but never break parsing.
+
+Give this node a **light text-only** model. It never looks at a picture, and on a small card the
+VRAM it does not take is VRAM the sampler gets.
+
+### `Phantas 🎞` — rendering the keyframes
+
+Walks the board once, one still per keyframe, and returns the `shots` chain with the prompts left
+empty — which is what tells `Morpheus Storyboard` "these are yours to write". Neighbouring shots get
+the **same tensor object** for the frame between them, because it is one picture playing two parts.
+
+**Consistency here is structural, not cosmetic.** A shot is generated as the movement from its first
+keyframe to its last, so two neighbours that disagree do not look "slightly different" — they
+describe a shot that morphs halfway through. A shared seed is the *weakest* lever (same starting
+noise, but the trajectories diverge within a few steps); it is the floor, not the mechanism. What
+actually holds a board together, in order: the stamped style block, then an **anchor**.
+
+`reference` picks the anchoring mechanism, and both are stock ComfyUI because they are what
+different model families actually offer:
+
+| `reference` | how | which models |
+|---|---|---|
+| `off` | text and seed only | anything |
+| `redux` | CLIP-Vision → `StyleModelApply` | the Flux dev family, Krea included |
+| `edit` | the anchor VAE-encoded as a `reference_latents` entry | Kontext, Qwen-Image-Edit |
+
+`redux` is applied as an `attn_bias`, which is what `reference_strength` dials: at 1.0 Redux tends to
+redraw its reference and every frame comes out the same picture, so below 1.0 keeps the identity
+while leaving the prompt in charge of the shot. It needs `style_model` and `clip_vision` wired.
+`edit` needs no extra inputs but does mean running an edit model.
+
+`anchor` picks *which* picture: `first frame` holds global identity but lets neighbours drift,
+`previous frame` holds the seam but accumulates drift down a long chain, `first + previous` does
+both for one more encode. A wired `reference_image` is added on top of all of them and is the only
+anchor frame 1 can have. Wire `first_frame` to use a picture you already have *as* keyframe 1 — a
+photo, an earlier render, something out of a chat — and everything after it is anchored to that.
+
+Rendered frames are cached on disk under a causal key, and that is not only a speed feature:
+**ComfyUI's Cancel raises inside the sampler and discards the run**, so without a cache a stopped
+board loses every frame it had finished. With one, Cancel *is* the stop button — cancel, re-run, and
+the finished frames come straight back. It is also what makes `redo` cheap: name the frames you want
+re-rolled (`"3"`, `"2-4"`, `"1,4-6"`) and they are generated again with their seed shifted by
+`redo_seed_offset`, since the same seed and the same prompt would only hand back the same picture.
+The frames *after* a re-rolled one render too — they were anchored to the picture it used to be —
+while the ones before it stay cached.
+
+`sampler_settings` is the shared `Sampler Settings` bundle, so chaining two of them gives every frame
+a draft-then-polish pass, exactly as in Chimera and Ouroboros. `width` and `height` live on this node
+rather than on the bundle: match the aspect ratio you will render the video at, since these pictures
+are also what the video model's writer looks at. `captions` and `settings_data` go straight into
+`Image Compare`, and each keyframe is pushed to a `Kinburg Live Log` node the moment it decodes.
+
+---
+
 [← back to the node index](../README.md#-node-index)

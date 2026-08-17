@@ -1,9 +1,9 @@
 # 🎨 Kinburg-Nodes
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
-[![version](https://img.shields.io/badge/version-3.1.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-91-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-814%20checks-brightgreen.svg)](#-tests)
+[![version](https://img.shields.io/badge/version-3.2.0-blue.svg)](pyproject.toml)
+[![nodes](https://img.shields.io/badge/nodes-93-orange.svg)](#-node-index)
+[![tests](https://img.shields.io/badge/tests-1072%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
@@ -16,7 +16,7 @@ A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **91** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **93** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -59,6 +59,7 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 | Package | Nodes |
 |---|---|
 | [`morpheus/` — Morpheus Suite 🌙](docs/video.md#-morpheus--morpheus-suite-) | `Morpheus (Video Sampler) 🌙`, `Morpheus Dream Board 🌙`, `Morpheus Dream 🌙`, `Morpheus Storyboard 🌙` |
+| [`phantas/` — Phantas Suite 🎞](docs/video.md#-phantas--phantas-suite-) | `Phantas Storyboard 🎞`, `Phantas 🎞` |
 
 ### 🎛️ Presets & Asset Management
 
@@ -159,6 +160,8 @@ All **91** nodes, grouped by the package they live in. Every package links to it
 | Ouroboros (Self-Correcting Sampler) 🐍 | `KinburgOuroboros` | `Kinburg-Nodes/Bestiary/Ouroboros` |
 | Ouroboros Critic Settings 🐍 | `KinburgCriticSettings` | `Kinburg-Nodes/Bestiary/Ouroboros` |
 | Ouroboros Live Log 🐍📜 | `KinburgOuroborosLog` | `Kinburg-Nodes/Bestiary/Ouroboros` |
+| Phantas Storyboard 🎞 | `KinburgPhantasStoryboard` | `Kinburg-Nodes/Bestiary/Phantas` |
+| Phantas 🎞 | `KinburgPhantas` | `Kinburg-Nodes/Bestiary/Phantas` |
 | Prompt Presets | `PromptPresets` | `Kinburg-Nodes/prompt` |
 | Prompt Variations | `PromptVariations` | `Kinburg-Nodes/prompt` |
 | Repeat (Close) | `KinburgRepeatClose` | `Kinburg-Nodes/flow/loops` |
