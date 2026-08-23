@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import json
+import functools
 import gc
 import glob
 import ctypes
@@ -227,6 +228,30 @@ def _build_template_handler(llm, req):
         return None
 
 
+def _bind_template_kwargs(handler, llm, req):
+    """Bind this request's chat-template variables (enable_thinking / reasoning_effort) onto the
+    chat handler, and hand back what belongs in `llm.chat_handler`.
+
+    `Llama.create_chat_completion` has a fixed signature with nowhere to put template variables —
+    but the handler it calls takes `**kwargs` and passes them straight into the Jinja render (both
+    the text formatter and the multimodal MTMD one do). So a `functools.partial` over the handler
+    is the whole mechanism, and it costs nothing: no reload, no re-render of anything else.
+
+    `handler` may be None, which is the *default* text case — then llama-cpp resolves the embedded
+    template through `llm.chat_format`, so resolve it here exactly the way it would and wrap that.
+    The raw handler is returned unwrapped when there is nothing to bind, so `_free_handler` still
+    sees the real vision handler (a partial has no `_exit_stack`)."""
+    tkw = req.get("template_kwargs") or {}
+    if not tkw:
+        return handler
+    base = handler
+    if base is None:
+        from llama_cpp import llama_chat_format as cf
+        base = (getattr(llm, "_chat_handlers", {}).get(llm.chat_format)
+                or cf.get_chat_completion_handler(llm.chat_format))
+    return functools.partial(base, **tkw)
+
+
 def _free_handler(handler):
     """Let a vision projector's clip go, and hand back None so callers can just assign the result.
 
@@ -265,10 +290,13 @@ def _continue_prompt(llm, req, messages, cont_text):
 
     fmt = Jinja2ChatFormatter(template=tmpl, eos_token=eos, bos_token=bos,
                               stop_token_ids=[eos_id] if eos_id != -1 else None)
+    # The same template variables the live path binds onto the handler — a resumed reply has to be
+    # rendered against the prompt it was originally generated from, or the prefix won't line up.
+    tkw = req.get("template_kwargs") or {}
     try:
-        rendered = fmt(messages=messages).prompt
+        rendered = fmt(messages=messages, **tkw).prompt
     except TypeError:  # older signatures want the llama handle too
-        rendered = fmt(llama=llm, messages=messages).prompt
+        rendered = fmt(llama=llm, messages=messages, **tkw).prompt
 
     text = rendered + cont_text
     add_bos = not (bos and text.startswith(bos))
@@ -467,7 +495,8 @@ def main():
                 vision_handler = _free_handler(vision_handler)
                 vision_handler = _make_chat_handler(req)
                 vision_sig = vsig
-            llm.chat_handler = vision_handler if vision_handler is not None else text_handler
+            llm.chat_handler = _bind_template_kwargs(
+                vision_handler if vision_handler is not None else text_handler, llm, req)
 
             messages = []
             sys_prompt = (req.get("system_prompt") or "").strip()

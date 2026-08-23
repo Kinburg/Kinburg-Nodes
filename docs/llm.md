@@ -59,6 +59,29 @@ run (e.g. a card via `grammar_override`) takes the worker's non-stream path, so 
 in the log once it finishes rather than token by token. Same websocket mechanism as the Chat node's
 live reply.
 
+**`Send Image to Live Log 📜`** — the log fills itself from the LLM nodes and the samplers; this node
+lets *any* branch put a picture in it. Wire an `IMAGE` in — it passes straight through, so the node
+sits inline as a tap — and the picture appears as its own block, headed by the node's title plus
+**`label`**, the moment execution reaches it, with **`note`** as the block's text for whatever you
+want to read beside it later (the seed, which branch this was, what you were testing). There is no
+wire to the log: it has no inputs, and a canvas without one simply has nobody listening.
+
+- **`frames`** decides what a batch sends: *all* — capped at 32 evenly spaced frames, because a
+  300-frame video batch is 300 JPEGs down the websocket and then held in the log's memory — *first*,
+  *last*, *first & last*, or 4 / 8 / 16 evenly spaced. The header always says which frames of how
+  many it is showing (`4 of 120 frames`, `frame 120 of 120`), so a thinned batch never reads as the
+  whole thing.
+- **`always_run`** (on by default) re-emits on every Run, so the log fills even when the branch above
+  is entirely cached — which is what a second Run at the same seed is. Turn it off when the passed
+  through `image` feeds something expensive: a node that always re-runs makes everything downstream
+  of it re-run too.
+- **`max_side`** is the thumbnail's longest side (320 by default; the log shows it at most 180px
+  tall). Same encoder the samplers' frames go through.
+
+Why not a preview node: a preview shows the picture where the node sits, so a dozen taps are a dozen
+places to look. The log is one place, in run order, with the text the LLM nodes wrote interleaved —
+which is what answers "what did this run actually do".
+
 A **`chat_template_path`** field (also advanced) points to a `chat_template.jinja` file that
 **overrides the model's built-in chat template**. Leave it empty (the default) and llama.cpp uses
 the template embedded in the GGUF — correct for almost every model, so you normally need nothing
@@ -69,6 +92,34 @@ it is ignored while an `mmproj` (vision) is active, since the vision path does i
 formatting. Surrounding quotes are stripped and changing it reloads the model. Tip: if you're not
 sure whether a downloaded `chat_template.jinja` differs from the one already inside the GGUF, it
 usually doesn't — well-packaged models embed the right one.
+
+### Reasoning control: `enable_thinking` / `reasoning_effort`
+
+Modern reasoning models are switched **inside the chat template**, not by anything you can say in
+the prompt. **`enable_thinking`** (`model default` · `on` · `off`) and **`reasoning_effort`**
+(`model default` · `xhigh` · `medium` · `low` · `custom`, with the value for `custom` in
+**`reasoning_effort_custom`**) are handed to the model's own Jinja template as variables, so the
+model cannot ignore them the way it ignores a stray `/no_think` in the text. A template that has
+never heard of a variable simply doesn't use it, so leaving them set costs nothing.
+
+**`model default` is not `off`.** It means *don't define the variable at all*, and every family
+reads an undefined one differently — Qwen3.5 / 3.8 take it as thinking **ON** (effort `xhigh`),
+Gemma-4 as **OFF**. That is why it is the default: it keeps every existing workflow generating
+exactly what it generated before.
+
+Effort values are the model's, not ours. Qwen3.5 / 3.8 accept **`xhigh` / `medium` / `low`** and
+their template raises an error on anything else (you'll see it as a worker error naming the value),
+so gpt-oss's `high` goes in `reasoning_effort_custom` instead. On Qwen `medium` is the neutral one;
+`xhigh` and `low` each prepend a sentence of instruction to the system turn. Effort is ignored
+while thinking is off.
+
+The older **`thinking_directive`** appends `/no_think` or `/think` to the **prompt text**. Only
+original Qwen3 was trained to obey that — Qwen3.5 / 3.8, Gemma-4 and gpt-oss all ignore it. It is
+kept for the models where it does work; for everything else reach for `enable_thinking` first.
+
+One consequence worth knowing: Qwen3.5 / 3.8 end the *prompt* with an open `<think>`, so the model
+writes only the closing tag. The reasoning split (and the live log's) puts the missing opener back,
+so `text` / `thoughts` come out right either way.
 
 The single **`Local LLM (GGUF)`** node runs it: wire a `config`, type a `user_prompt`, and read
 the outputs. **Vision** is built in — connect the optional **`image`** input and add a **`Vision
@@ -98,7 +149,8 @@ optional row of **persona chips**, and the **Send / Approve / Clear** buttons. E
 *how* to generate comes through the **`persona_1`** input.
 
 **`Local LLM Settings (GGUF)`** is that config node: it holds the options — model, system prompt,
-sampling, loader (`n_ctx` / `n_gpu_layers` / …), reasoning split, `output_format` / grammar,
+sampling, loader (`n_ctx` / `n_gpu_layers` / …), reasoning split, reasoning control
+(`enable_thinking` / `reasoning_effort` — see above), `output_format` / grammar,
 `extra_load_args`, `chat_template_path` (optional chat-template override — see above), unload
 toggles — plus two connect-only inputs: **`context`** (reference material
 appended to the system prompt — e.g. Character Card / Context Collector) and **`vision`** (from a
@@ -233,7 +285,8 @@ hide by hand is a third, separate thing and comes back with the **👁** button 
 Two caveats on those: a no-user-message turn asks the model for a second `assistant` block in a row,
 which a few chat templates (mistral-family) reject outright — the trigger field is the way out. And
 continuing a reply uses a raw prefill, so it needs a chat template and doesn't work on the vision
-path. Both modes also skip `thinking_directive`, since it would have to *become* the user turn.
+path. Both modes also skip `thinking_directive`, since it would have to *become* the user turn —
+`enable_thinking` and `reasoning_effort` are template variables and still apply in all three.
 
 **Context meter.** A thin row under the chat shows the KV-cache fill after the last turn —
 `ctx 3 412 / 8 192 · 42% · 120 out · 4.2s` — from the same worker numbers `Kinburg Live Log` reports.

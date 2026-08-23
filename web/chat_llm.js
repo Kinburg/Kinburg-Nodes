@@ -618,6 +618,12 @@ function toBottom(node) {
 // <think> mid-stream. (Models using a plain marker instead of tags stream as answer text; the
 // final, authoritative split comes from the backend on completion.)
 function parseThink(raw) {
+  // Newer templates (Qwen3.5/3.8) PREFILL the opening tag into the prompt, so the reply carries
+  // only the closing one — put the opener back, exactly as _split_reasoning does, or the whole
+  // reasoning phase reads as the answer. Until </think> streams in there is nothing to detect, so
+  // that text shows as the answer and hops into the reasoning block when the tag lands.
+  const o = raw.indexOf("<think>"), c = raw.indexOf("</think>");
+  if (c !== -1 && (o === -1 || c < o)) raw = "<think>" + raw;
   const open = raw.indexOf("<think>");
   if (open === -1) return { thinking: "", answer: raw };
   const before = raw.slice(0, open);

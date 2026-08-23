@@ -24,8 +24,16 @@ work is one voice at a time, which is what per-line markers inside a section exp
     ЯКЩО Я ЗНИКНУ?!
 
 Those inner markers SPLIT the section, one sub-section per voice, so the plan alternates instead of
-blending. A header duet with no inner markers to split on becomes a lead voice plus a short "with
-male backing harmonies" note — one clear timbre, and the harmonies said in words.
+blending. They do so in **every** mode: a marker naming a member is an explicit instruction, and
+`duets` has authority only over a header naming several singers with nothing under it to split on.
+Such a header becomes a lead voice plus a short backing note carrying the other singer's own timbre
+— one clear timbre, and the harmonies said in words — or, with `duets` set to pass both names on,
+goes to `Siren Cast` for its `duet_mode` to render, which is where a genuine unison chorus lives.
+
+(The two used to be one switch, and that was a design mistake rather than a simplification: turning
+`duets` off to reach the unison path also turned off splitting, so a song could have an exchange in
+its bridge or a unison chorus but never both, and nothing said so — an inner marker that stops
+splitting degrades quietly into an ordinary annotation.)
 
 **Lengths run from the target backwards, not from a rate forwards.** `pad_to_seconds` says how long
 the song is, `tail_bars` takes its slice off the end, instrumental sections take a fixed count each,
@@ -41,7 +49,8 @@ slack can only go where it is asked for — the tail — and if there is too muc
 import re
 
 from .cast import (
-    _bar_seconds, _beats, _mmss, _num, _resolve_voice, _roster, _voices_in_order,
+    _bar_seconds, _beats, _gender_of, _mmss, _num, _resolve_voice, _roster, _short_voice,
+    _voices_in_order,
 )
 from ..context.character_card import VOICE_TYPE
 from ..categories import CAT_SIREN
@@ -120,10 +129,6 @@ _VOCAL_WORDS = ("vocal", "voice", "scream", "belt", "whisper", "rap", "sung", "s
                 "choir", "harmon", "falsetto", "growl", "shout", "chant", "ad-lib", "adlib",
                 "вокал", "голос", "шепот", "шепіт", "крик")
 
-# 'female' contains 'male', so male is matched with a lookbehind and female is tested first.
-_FEMALE_RE = re.compile(r"female|woman|women|girl|жен|жіно|жино", re.I)
-_MALE_RE = re.compile(r"(?<!fe)male|\bman\b|\bmen\b|\bboy\b|муж|чолов", re.I)
-
 _BRACKETED = re.compile(r"^\[(.+)\]\s*$")
 # A line wholly inside round brackets. Two kinds live in there and NEITHER adds duration:
 # production notes ("(Distorted bassline, haunting atmospheric guitar)") are not sung at all, and
@@ -140,16 +145,6 @@ _JOINERS = {"and", "with", "together", "both", "plus", "feat", "ft", "duet", "vs
 
 
 # -------------------------------------------------------------------------------- text inspection
-def _gender_of(text):
-    """'female' / 'male' / None. Female first — 'female' contains 'male'."""
-    t = str(text or "")
-    if _FEMALE_RE.search(t):
-        return "female"
-    if _MALE_RE.search(t):
-        return "male"
-    return None
-
-
 _VOWELS = re.compile(r"[aeiouyаеёиоуыэюяіїєAEIOUYАЕЁИОУЫЭЮЯІЇЄ]+")
 _LETTERS = re.compile(r"[^\W\d_]+", re.UNICODE)
 
@@ -191,6 +186,42 @@ def _canon_label(head):
     return None, head
 
 
+def _near_miss(head, limit=3):
+    """`(label, corrected_line)` for a bracketed line that probably meant to be a section — or None.
+
+    The correction is handed back ready to paste rather than described, because the fix is a
+    re-ordering and describing a re-ordering takes longer to read than doing it: the words standing
+    in front of the section name are not noise, they are the description, so they move behind it.
+    "Final Chorus - Layered harmonies" is `[Chorus - final, Layered harmonies]`, and "Guitar Solo"
+    is `[Solo - guitar]`.
+
+    The prefix test is deliberately strict: only "starts with" tells `[Chorus - massive wall of
+    guitars]` (a section) from `[wall of guitars, no chorus pad]` (an annotation). The cost is that
+    a qualifier in front of the name makes a whole section vanish into the previous one's notes, in
+    silence — and the forms that do it are exactly the ones that read most naturally. ACE-Step's own
+    shipped templates are full of them: `[Final Chorus - Layered harmonies]` and `[Final Verse - …]`
+    are not sections to this parser, and neither is `[Guitar Solo]`.
+
+    So this changes nothing about parsing and only makes the loss audible. It looks at the OPENING
+    few words alone, because the trap is always a qualifier or two in front of the name; a warning
+    that also fired on "no chorus pad" would be one you learn to scroll past.
+    """
+    raw = str(head or "").strip()
+    words = _WORD.findall(raw.lower())[:max(1, int(limit))]
+    if not words:
+        return None
+    for syns, label in CANON:
+        for w in syns:
+            if " " in w or w not in words:
+                continue
+            m = re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", raw, re.I)
+            before = [x.lower() for x in _WORD.findall(raw[:m.start()])]
+            after = raw[m.end():].strip().lstrip("-–—:,;").strip()
+            desc = ", ".join([x for x in before if x] + ([after] if after else []))
+            return label, f"[{label}{' - ' + desc if desc else ''}]"
+    return None
+
+
 def _keys_of(name):
     """The forms a member can be referred to by: the full name, and the first name on its own."""
     parts = str(name or "").strip().split()
@@ -227,14 +258,24 @@ def _new(label, marker, sub=False, names=(), inherit=()):
             "text": []}
 
 
-def _split_sections(lyrics, voices=(), split=True):
+def _split_sections(lyrics, voices=()):
     """Lyrics → [{label, marker, notes, lines, sub, names, inherit}] in order, plus notes.
 
     A bracketed line whose text starts with a section word opens a section. A bracketed line that
     NAMES a member opens a sub-section of the current one (that is the alternation the model can
     actually sing). Any other bracketed line is an annotation of whatever is open — which is where
     the voice often hides, under a header that describes only the drums. Everything else is a sung
-    line, and sung lines are what a section's length is computed from."""
+    line, and sung lines are what a section's length is computed from.
+
+    Splitting is **unconditional**, and used not to be: it was switched off whenever `duets` was set
+    to anything but the default, which quietly made the two settings one setting. A song could have
+    alternation or it could have a unison chorus, never both — and the failure was silent, because
+    an inner marker that stops splitting does not disappear, it degrades into an ordinary annotation
+    and the exchange is simply sung by one voice. The two questions are genuinely separate: a marker
+    naming a member is an explicit instruction and always means "this voice, from here", while
+    `duets` only ever had authority over a header naming several singers with nothing under it to
+    split on.
+    """
     out, notes, stray = [], [], 0
     for raw in str(lyrics or "").splitlines():
         line = raw.strip()
@@ -264,7 +305,7 @@ def _split_sections(lyrics, voices=(), split=True):
             if label:
                 out.append(_new(label, rest))
                 continue
-            named = _names_in(inner, voices) if (split and voices) else []
+            named = _names_in(inner, voices) if voices else []
             if named and out:
                 prev = out[-1]
                 if prev["lines"] == 0 and not prev["sub"]:
@@ -280,6 +321,13 @@ def _split_sections(lyrics, voices=(), split=True):
                 else:
                     out.append(_new(prev["label"], inner, sub=True, names=named))
                 continue
+            missed = _near_miss(inner)
+            if missed:
+                label, fixed = missed
+                where = f"folded into {out[-1]['label']}" if out else "dropped, as nothing is open yet"
+                notes.append(f"'[{inner.strip()[:60]}]' looks like a {label} header, but the section "
+                             f"name is not the FIRST word, so it was read as an annotation and "
+                             f"{where}. Write it as {fixed}")
             if out:
                 out[-1]["notes"].append(inner.strip())
             continue
@@ -520,15 +568,28 @@ def _voice_for(sec, voices, roster):
 
 
 def _backing(names, voices):
-    """The short note that stands in for the voices a lead is singing over. Deliberately short and
-    in words: the plan has ONE timbre per moment, so the harmonies can only be described, and a long
-    description is what made a duet come back as a single indistinct voice."""
-    genders = []
+    """The short note that stands in for the voices a lead is singing over.
+
+    Short and in words, because the plan has ONE timbre per moment: the harmonies can only be
+    described, and a long description is what made a duet come back as a single indistinct voice.
+
+    But short is not the same as anonymous. This used to say only the gender — "with male backing
+    harmonies" — which is the least identifying thing a card knows, and in a band with two men it
+    picks out neither. A single backing singer now keeps two words of their own timbre as well
+    ("with deep aggressive male backing harmonies"), which is the same budget and an actual
+    identity. Two or more fall back to the gender, and then to nothing: at that point the words
+    would be describing a crowd."""
+    genders, tags = [], []
     for name in names:
         v = next((x for x in voices if (x.get("name") or "").strip() == name), None)
         g = _gender_of((v or {}).get("tags")) or _gender_of((v or {}).get("gender"))
         if g and g not in genders:
             genders.append(g)
+        tags.append(((v or {}).get("tags") or "").strip())
+    if len(names) == 1 and tags[0]:
+        short = _short_voice(tags[0])
+        if short:
+            return f"with {short} backing harmonies"
     if len(genders) == 1:
         return f"with {genders[0]} backing harmonies"
     return "with backing harmonies"
@@ -550,7 +611,7 @@ class KinburgSirenScore:
                 "pad_block_bars": ("INT", {"default": 16, "min": 2, "max": 64, "advanced": True, "tooltip": "Longest instrumental section the padding may use. The tail is split into as FEW rows as it takes, each at most this, sharing the bars out evenly — 40 bars at 16 becomes 14 + 13 + 13, not twenty rows of 2.\n\nWhy it matters: every row is its own LM decode with its own caption, so a tail chopped into 2-bar rows is a restart every ten audio codes — no room for the model to develop anything, and a seam at each one. Merging them by hand was the first thing that sounded better, so this does it by default. Raise it for one long jam, lower it for a tail that changes character more often."}),
                 "min_bars": ("INT", {"default": 4, "min": 2, "max": 32, "advanced": True, "tooltip": "Floor for a whole section. Below about 4 bars a section is too short for a voice to establish itself.\n\nSub-sections made by inner markers are exempt — an exchange of single shouted lines is meant to be short, and they get a floor of 2 bars instead."}),
                 "instrumental_bars": ("INT", {"default": 4, "min": 2, "max": 32, "advanced": True, "tooltip": "Length for a section with no sung lines at all (an instrumental intro, a solo, a break). There is no line count to derive it from, so it is simply this."}),
-                "duets": (DUETS, {"default": DUET_SPLIT, "advanced": True, "tooltip": "What to do when a section names more than one singer. The plan carries ONE audio code per 200 ms and the caption is one description, so two timbres over the same frames come back as their average — measured once as 'two female vocals' where a man and a woman were asked for.\n\n• lead + split on inner markers (recommended) — a bracketed line naming a member starts a sub-section, so the voices ALTERNATE, which the model can do. A header duet with nothing to split on becomes the first-named singer plus a short 'with male backing harmonies' note.\n\n• both names in one section — writes both names in one cell, i.e. asks for the blend. Here to A/B against, not because it works."}),
+                "duets": (DUETS, {"default": DUET_SPLIT, "advanced": True, "tooltip": "What to do with a section header that names more than one singer AND has no inner markers to split on. The plan carries ONE audio code per 200 ms and the caption is one description, so two timbres over the same frames come back as their average — measured once as 'two female vocals' where a man and a woman were asked for.\n\nThis does NOT govern inner markers. A bracketed line naming a member always starts a sub-section, in every mode, so the voices ALTERNATE — that is an explicit instruction in the lyrics and the one form of duet the model genuinely does well. It used to be switched off by this setting, which meant a song could have alternation or a unison chorus but never both, and the loss was silent.\n\n• lead + split on inner markers (recommended) — an unsplittable header duet becomes the first-named singer plus a short backing note carrying the other's own timbre.\n\n• both names in one section — both names go into the cell and 'Siren Cast' decides what to do with them, which is where the unison mode lives. Use this when a section is meant to be sung TOGETHER."}),
                 "arrangement_notes": ("BOOLEAN", {"default": False, "advanced": True, "tooltip": "Put the non-vocal part of a marker into the plan's 4th column, which appends it to that section's caption — '[Chorus - massive explosion of sound, wall of distorted guitars]' is a real instruction about the chorus and this is the only place it fits.\n\nEverything here lands inside Siren Cast's cfg delta, so it is guided as hard as the voice is: at most " + str(MAX_CLAUSES) + " clauses per section are kept and the rest is reported. If a take comes back muddy or sung by one indistinct voice, turning this OFF is the cheapest thing to try."}),
                 "verbose": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Print the report to the console. The same text is always on the 'report' output."}),
             },
@@ -581,7 +642,7 @@ class KinburgSirenScore:
         bar = _bar_seconds(bpm, beats) or 0.0
         voices = _voices_in_order(kwargs)
         roster, notes = _roster(voices)
-        secs, split_notes = _split_sections(lyrics, voices, split=duets == DUET_SPLIT)
+        secs, split_notes = _split_sections(lyrics, voices)
         notes.extend(split_notes)
         if not secs:
             raise RuntimeError(

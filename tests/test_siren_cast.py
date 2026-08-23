@@ -156,6 +156,73 @@ r = cast._resolve_voice("Bob", roster)
 check("a member with no voice_tags contributes nothing, and is reported",
       r["add"] == "" and r["silent"] == ["Bob"], r)
 
+# --------------------------------------------------------------- shortening a voice to a few words
+check("gender is read out of a description", cast._gender_of("airy alto female vocal") == "female")
+check("...female is tested before male, since 'female' contains it",
+      cast._gender_of("female") == "female" and cast._gender_of("male growl") == "male")
+check("Cyrillic gender words are read too", cast._gender_of("чоловічий вокал") == "male")
+check("no gender means None", cast._gender_of("airy, close-mic") is None)
+
+check("timbre words are the first describing ones, in order",
+      cast._timbre_words("deep aggressive male growls, gritty") == ["deep", "aggressive"])
+check("...head nouns that carry no timbre are skipped",
+      cast._timbre_words("male vocal, soaring") == ["soaring"])
+# a card written the natural way opens with what the singer IS, so the distinguishing words are in
+# the second clause — stopping at the first comma returned nothing at all for 'male lead vocal, …'
+check("...so the search does not stop at the first comma",
+      cast._timbre_words(ALEX["tags"]) == ["raspy", "baritone"], cast._timbre_words(ALEX["tags"]))
+check("...and so is the gender word itself",
+      "male" not in cast._timbre_words("gritty male shouty"))
+check("the limit is honoured", len(cast._timbre_words("a b c d e f", limit=3)) == 3)
+check("no tags, no words", cast._timbre_words("") == [] and cast._timbre_words(None) == [])
+
+check("a voice shortens to timbre plus gender",
+      cast._short_voice("deep aggressive male growls, gritty") == "deep aggressive male")
+check("...gender alone when there is nothing else",
+      cast._short_voice("female vocal") == "female")
+check("...and nothing at all is survivable", cast._short_voice("") == "")
+
+# ------------------------------------------------------------------------- a row naming two singers
+# The plan carries one timbre per 200 ms code, so all three modes say ONE thing where two were
+# asked for. What must never happen is saying two — that was measured as 'two female vocals' where
+# a man and a woman were asked for, and until now a hand-typed 'Nina + Alex' went straight to it.
+lead = cast._collapse_duet(["Nina", "Alex Kin"], roster, cast.DUET_LEAD)
+check("lead mode keeps the first singer's own words",
+      lead["add"].startswith(NINA["tags"]), lead["add"])
+check("...and adds the other as a SHORT phrase, not their whole description",
+      "backing harmonies" in lead["add"] and ALEX["tags"] not in lead["add"], lead["add"])
+check("...carrying the other's timbre, not only their gender",
+      "raspy" in lead["add"] or "baritone" in lead["add"], lead["add"])
+check("...and it explains itself in the report", "leads" in lead["note"] or "lead" in lead["note"])
+
+uni = cast._collapse_duet(["Nina", "Alex Kin"], roster, cast.DUET_UNISON)
+check("unison mode names the pair as ONE sound", "unison" in uni["add"], uni["add"])
+check("...mentioning both singers, shortened", uni["add"].count(" and ") >= 1, uni["add"])
+check("...and neither full description survives whole",
+      NINA["tags"] not in uni["add"] and ALEX["tags"] not in uni["add"], uni["add"])
+check("...and it is flagged as the mode to A/B, not the safe one",
+      "A/B" in uni["note"] or "not the safe" in uni["note"], uni["note"])
+
+check("the voices that lost their place are handed back for the GLOBAL caption",
+      lead["others"] == [ALEX["tags"]] and uni["others"] == [ALEX["tags"]],
+      (lead["others"], uni["others"]))
+check("blend mode collapses nothing — its whole point is the absence of a collapse",
+      cast._collapse_duet(["Nina", "Alex Kin"], roster, cast.DUET_BLEND) is None)
+check("one singer is not a duet", cast._collapse_duet(["Nina"], roster, cast.DUET_LEAD) is None)
+check("a singer with no tags cannot be collapsed against",
+      cast._collapse_duet(["Nina", "Bob"], roster, cast.DUET_LEAD) is None)
+check("an unknown name is not a duet either",
+      cast._collapse_duet(["Nina", "Nobody"], roster, cast.DUET_LEAD) is None)
+
+check("three modes are offered, blend last",
+      cast.DUET_MODES == [cast.DUET_LEAD, cast.DUET_UNISON, cast.DUET_BLEND], cast.DUET_MODES)
+opts = Cast.INPUT_TYPES()["required"]
+check("duet_mode is the LAST widget, so saved workflows keep their values",
+      list(opts)[-1] == "duet_mode", list(opts)[-3:])
+check("...and defaults to lead + backing", opts["duet_mode"][1]["default"] == cast.DUET_LEAD)
+check("run() takes it with a default, so an old graph still calls",
+      inspect.signature(Cast.run).parameters["duet_mode"].default == cast.DUET_LEAD)
+
 # -------------------------------------------------------------------------------- caption delta
 BASE = "Warm 90s alt-rock, live drums, tape saturation"
 pos = cast._join_caption(BASE, ALEX["tags"], "")

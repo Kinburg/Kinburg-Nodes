@@ -23,8 +23,10 @@ Non-zero exit on any failure, so this drops into a pre-commit hook as-is.
 | suite | covers |
 |---|---|
 | `test_chat.py` | `LocalLLMChatGGUF.run()` — personas 1..6, the Approve gate, attachment refs and the `[image]` markers that stand in for them, path resolution and its traversal guard |
-| `test_worker.py` | the real `gguf_worker` main loop over a **stubbed `llama_cpp`** — the projector attach/release swap, load-signature stability, chat-template handling, grammar streaming, and ⏹ stopping a reply mid-stream (the stdin reader thread, the partial text it keeps, no bleed into the next request) |
+| `test_worker.py` | the real `gguf_worker` main loop over a **stubbed `llama_cpp`** — the projector attach/release swap, load-signature stability, chat-template handling (incl. the reasoning variables bound onto the handler on the text, override, vision and resume paths), grammar streaming, and ⏹ stopping a reply mid-stream (the stdin reader thread, the partial text it keeps, no bleed into the next request) |
+| `test_llm_reasoning.py` | the Settings node's `enable_thinking` / `reasoning_effort` — what each option puts in the request (and that `model default` puts nothing), that neither touches the load signature, that they are appended last so saved workflows keep their widget values, and the reasoning split for templates that prefill the opening `<think>` |
 | `test_send_image.py` | `Send Image to Chat` — megapixel downscale, the content-hash filename, the payload, and `attachments.discard()` including everything it must refuse to delete |
+| `test_send_image_log.py` | `Send Image to Live Log 📜` — which frames of a batch go over the websocket (and that `all` is capped), the block label it builds, the encoder-refused warning, and the channel + node id the event carries |
 | `test_dream_board.py` | `Dream Board` — the whole "pictures define the shots" rule, the outputs, the `MORPHEUS_SHOT` chain |
 | `test_storyboard.py` | `Morpheus Storyboard.write()` over a **faked LLM** — filling a wired chain in place vs appending, per-shot keyframes/durations/links, the beats override |
 | `test_phantas_timing.py` | Phantas' clock — the fifteen legal shot lengths (checked against ComfyUI's own `align_frame_count`), the three counting units, and laying a target length onto shots by weight to within half a grid step |

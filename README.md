@@ -2,8 +2,8 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.2.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-94-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-1072%20checks-brightgreen.svg)](#-tests)
+[![nodes](https://img.shields.io/badge/nodes-95-orange.svg)](#-node-index)
+[![tests](https://img.shields.io/badge/tests-1395%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
@@ -16,7 +16,7 @@ A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **94** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **95** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -24,7 +24,7 @@ All **94** nodes, grouped by the package they live in. Every package links to it
 
 | Package | Nodes |
 |---|---|
-| [`local_llm/` — Local LLM (GGUF) & Live Logging](docs/llm.md#-local_llm--local-llm-gguf--live-logging) | `Context Sizer (GGUF)`, `Kinburg Live Log 📜`, `LLM Live Log (old id)`, `Local LLM (GGUF)`, `Local LLM Chat (GGUF)`, `Local LLM Settings (GGUF)`, `Send Image to Chat`, `Token Counter (GGUF)`, `Vision Settings (GGUF)` |
+| [`local_llm/` — Local LLM (GGUF) & Live Logging](docs/llm.md#-local_llm--local-llm-gguf--live-logging) | `Context Sizer (GGUF)`, `Kinburg Live Log 📜`, `LLM Live Log (old id)`, `Local LLM (GGUF)`, `Local LLM Chat (GGUF)`, `Local LLM Settings (GGUF)`, `Send Image to Chat`, `Send Image to Live Log 📜`, `Token Counter (GGUF)`, `Vision Settings (GGUF)` |
 | [`llm_server/` — Local LLM (server client, text)](docs/llm.md#-llm_server--local-llm-server-client-text) | `Local LLM (server client, text)` |
 | [`context/` — Character Card, Entity Card, Context Collector](docs/llm.md#-context--character-card-entity-card-context-collector) | `Character Card`, `Context Collector`, `Entity Card` |
 | [`vision_judge/` — Vision LLM Judge & Criteria Builder](docs/llm.md#-vision_judge--vision-llm-judge--criteria-builder) | `Criteria Builder 📋`, `Vision LLM Judge` |
@@ -172,6 +172,7 @@ All **94** nodes, grouped by the package they live in. Every package links to it
 | Sampler Settings | `KinburgSamplerSettings` | `Kinburg-Nodes/Bestiary` |
 | Save Song | `KinburgSaveSong` | `Kinburg-Nodes/audio` |
 | Send Image to Chat | `LocalLLMChatSendImage` | `Kinburg-Nodes/LLM` |
+| Send Image to Live Log 📜 | `KinburgSendImageToLog` | `Kinburg-Nodes/LLM` |
 | Set Accumulator (audio) | `SetAccumAudio` | `Kinburg-Nodes/flow/accumulators` |
 | Set Accumulator (captions) | `SetAccumCaptions` | `Kinburg-Nodes/flow/accumulators` |
 | Set Accumulator (gen info) | `SetAccumGenInfo` | `Kinburg-Nodes/flow/accumulators` |
@@ -234,12 +235,14 @@ Each node's parameters are documented in their tooltips. The Local LLM node also
 python tests/run.py
 ```
 
-with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). **814 checks in 14 suites, about a
-minute** — over `local_llm/` (chat, worker, send-image, lazy guard), `morpheus/` (storyboard, dream
-board), `siren/` (cast, score), `audio_sr/`, `lora/`, three of the `web/*.js` extensions (chat,
-dream board, group control), and the docs audit below. Nothing real is loaded (llama.cpp, H3 and the
-browser are all stubbed), so it is a regression net for those paths and **not** a substitute for
-trying a change in the app. `tests/README.md` says exactly what is and is not covered.
+with ComfyUI's own interpreter (`.venv/Scripts/python.exe`). **1395 checks in 23 suites, about two
+and a half minutes** — over `local_llm/` (chat, worker, both send-image nodes, lazy guard),
+`morpheus/` (storyboard, dream board, trims), `phantas/` (timing, board, render), `orpheus/`
+(timing, detect, node), `siren/` (cast, score), `audio_sr/`, `lora/`, `util/diskcache.py`, three of
+the `web/*.js` extensions (chat, dream board, group control), and the docs audit below. Nothing real
+is loaded (llama.cpp, H3 and the browser are all stubbed), so it is a regression net for those paths
+and **not** a substitute for trying a change in the app. `tests/README.md` says exactly what is and
+is not covered.
 
 ### 📑 Keeping the docs honest
 

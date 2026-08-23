@@ -26,11 +26,15 @@ from .send_image_node import (
     NODE_CLASS_MAPPINGS as _SEND_NODES,
     NODE_DISPLAY_NAME_MAPPINGS as _SEND_NAMES,
 )
+from .send_image_log_node import (
+    NODE_CLASS_MAPPINGS as _SENDLOG_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _SENDLOG_NAMES,
+)
 from . import attachments as _attachments   # registers /kinburg/chat/discard
 
 NODE_CLASS_MAPPINGS = {**_LLM_NODES, **_SET_NODES, **_CHAT_NODES, **_TOK_NODES, **_CSZ_NODES,
-                       **_LLOG_NODES, **_SEND_NODES}
+                       **_LLOG_NODES, **_SEND_NODES, **_SENDLOG_NODES}
 NODE_DISPLAY_NAME_MAPPINGS = {**_LLM_NAMES, **_SET_NAMES, **_CHAT_NAMES, **_TOK_NAMES,
-                              **_CSZ_NAMES, **_LLOG_NAMES, **_SEND_NAMES}
+                              **_CSZ_NAMES, **_LLOG_NAMES, **_SEND_NAMES, **_SENDLOG_NAMES}
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

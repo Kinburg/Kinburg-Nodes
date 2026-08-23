@@ -36,7 +36,7 @@ ask for brevity in the prompt by *words/sentences*, not tokens.
 
 ## Sampling presets
 - **Creative / RP:** temp 0.7–0.9, min_p 0.05, top_p 0.95, top_k 40, repeat_penalty 1.1
-- **Instruct / Qwen3:** temp 0.7, top_p 0.8, top_k 20, min_p 0 (+ thinking_directive = /no_think)
+- **Instruct / Qwen3:** temp 0.7, top_p 0.8, top_k 20, min_p 0 (+ enable_thinking = off)
 - **Deterministic (JSON / extraction):** temp 0.0, fixed seed
 - Using min_p as the main filter? Set top_p 1.0, top_k 0 and you can raise temperature.
 
@@ -46,7 +46,12 @@ ask for brevity in the prompt by *words/sentences*, not tokens.
 - All layers on GPU: `n_gpu_layers = -1`. To free VRAM for image gen keep both unload toggles ON.
 
 ## Reasoning models
-- **thinking_directive = /no_think (Qwen3)** to skip the `<think>` phase (faster, fewer tokens).
+- **enable_thinking = off** skips the reasoning phase (faster, fewer tokens). It is a chat-template
+  variable, so it works where a prompt directive doesn't — Qwen3.5/3.8, Gemma-4, gpt-oss.
+  `model default` (undefined) is NOT the same as `off`: Qwen3.5/3.8 read it as ON, Gemma-4 as OFF.
+- **reasoning_effort** = how hard to think. Qwen3.5/3.8: xhigh (their default) / medium / low —
+  anything else is an error from the template; other families go in `reasoning_effort_custom`.
+- **thinking_directive = /no_think** is the old prompt-text route. Original Qwen3 only.
 - **strip_think** keeps reasoning out of `text` (it still goes to `thoughts`).
 - **answer_marker** — for models that reason WITHOUT `<think>` tags (e.g. a "Thinking
   Process:" preamble): set a marker (say `===PROMPT===`) and tell the model to print it
@@ -145,7 +150,7 @@ def _split_reasoning(raw, marker=""):
        Use this for models that reason WITHOUT <think> tags (e.g. a "Thinking Process:"
        preamble): tell the model to print the marker on its own line before the answer.
     2) Otherwise extract <think>...</think> blocks (also handles an unclosed one
-       left by truncation)."""
+       left by truncation, and one whose OPENING tag the chat template prefilled)."""
     m = (marker or "").strip()
     if m:
         lines = raw.split("\n")
@@ -155,6 +160,12 @@ def _split_reasoning(raw, marker=""):
                 last = idx
         if last != -1:
             return "\n".join(lines[last + 1:]).strip(), "\n".join(lines[:last]).strip()
+    # Newer reasoning templates (Qwen3.5/3.8) end the PROMPT with "<think>\n", so generation starts
+    # inside the block and the model only ever writes the closing tag. Put the opener back, or the
+    # entire reasoning phase reads as the answer. A dangling `</think>` cannot mean anything else.
+    o, c = raw.find("<think>"), raw.find("</think>")
+    if c != -1 and (o == -1 or c < o):
+        raw = "<think>" + raw
     parts = re.findall(r"<think>(.*?)</think>", raw, flags=re.DOTALL)
     answer = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
     if "<think>" in answer:                      # opened but never closed
@@ -440,8 +451,42 @@ def _err(msg, help_text=HELP_TEXT):
     return (f"[ERROR] {msg}", "", "error", 0, 0, 0, 0.0, help_text, 0, 0)
 
 
+# Reasoning knobs that are CHAT-TEMPLATE VARIABLES rather than prompt text. `model default` means
+# "don't define the variable at all", which is never the same as passing False: Qwen3.5/3.8 treat an
+# undefined `enable_thinking` as ON, Gemma-4 treats it as OFF. So the neutral option has to exist,
+# and it has to be the default, or adding these widgets would silently retune every saved workflow.
+REASONING_DEFAULT = "model default"
+THINKING_MODES = [REASONING_DEFAULT, "on", "off"]
+# Qwen3.5/3.8 accept exactly xhigh (their default) / medium / low and `raise_exception` on anything
+# else, so the list is theirs; `custom` is the way to type another family's value (gpt-oss: high).
+REASONING_EFFORTS = [REASONING_DEFAULT, "xhigh", "medium", "low", "custom"]
+
+
+def _template_kwargs(g):
+    """The chat-template variables this config asks for, as a dict (empty = touch nothing).
+
+    They are rendered INTO the prompt by the model's own Jinja template, which is why they reach
+    models `/no_think` never could — and why an unknown key costs nothing: a template that does not
+    mention it simply ignores it."""
+    out = {}
+    think = g("enable_thinking", REASONING_DEFAULT)
+    if think in ("on", "off"):
+        out["enable_thinking"] = (think == "on")
+    effort = g("reasoning_effort", REASONING_DEFAULT)
+    if effort == "custom":
+        effort = (g("reasoning_effort_custom", "") or "").strip()
+    if effort and effort != REASONING_DEFAULT:
+        out["reasoning_effort"] = effort
+    return out
+
+
 def _apply_directive(user_prompt, thinking_directive, custom_directive):
-    """Append a Qwen3-style reasoning directive to the prompt; return (prompt, directive)."""
+    """Append a Qwen3-style reasoning directive to the prompt; return (prompt, directive).
+
+    Prompt-level, and therefore model-specific: Qwen3 was trained to obey a trailing `/no_think`,
+    Qwen3.5/3.8 and Gemma-4 were not (they read the template variables above instead). Kept for the
+    models it does work on — and because dropping a widget would shift every saved workflow's
+    values by one — but `enable_thinking` is the control to reach for first."""
     directive = {
         "/no_think (Qwen3)": "/no_think",
         "/think (Qwen3)": "/think",
@@ -644,12 +689,18 @@ def _base_config_widgets():
         "unload_llm_after_run": ("BOOLEAN", {"default": False, "tooltip": "Free the LLM from VRAM after each run. Off (default) keeps it loaded for fast repeated runs / chat; turn ON in image workflows to free VRAM."}),
         "strip_think": ("BOOLEAN", {"default": True, "tooltip": "Keep reasoning out of the 'text' output (it still goes to the 'thoughts' output). Off = leave raw reasoning in 'text'"}),
         "answer_marker": ("STRING", {"default": "", "tooltip": "For models that print reasoning WITHOUT <think> tags: the answer is taken after the LAST occurrence of this marker, everything before goes to 'thoughts'. Empty = use <think> tags."}),
-        "thinking_directive": (["model default", "/no_think (Qwen3)", "/think (Qwen3)", "custom"], {"default": "model default", "tooltip": "Append a reasoning-control directive to the prompt. /no_think makes Qwen3-style models skip the <think> phase; 'custom' uses the field below."}),
+        "thinking_directive": (["model default", "/no_think (Qwen3)", "/think (Qwen3)", "custom"], {"default": "model default", "tooltip": "Append a reasoning-control directive to the PROMPT. Only original-Qwen3 models were trained to obey it — for Qwen3.5/3.8, Gemma-4 and gpt-oss use enable_thinking / reasoning_effort below instead. 'custom' uses the field below."}),
         "custom_directive": ("STRING", {"default": "", "tooltip": "Directive text appended to the prompt when thinking_directive = custom (e.g. /no_think)"}),
         "output_format": (["text", "json_object", "gbnf_grammar", "ideogram4_json"], {"default": "text", "tooltip": "Output: free text · valid JSON · custom GBNF grammar (field below) · ideogram4_json. Grammar modes run without the live progress bar"}),
         "grammar": ("STRING", {"multiline": True, "default": "", "tooltip": "GBNF grammar text, used when output_format = gbnf_grammar"}),
         "extra_load_args": ("STRING", {"multiline": True, "default": "", "tooltip": "Advanced: extra keyword args for llama-cpp-python's Llama() loader. One per line as key=value or a JSON object. These are Python-binding args, NOT llama.cpp CLI flags. Unknown keys are ignored. Changing this reloads the model."}),
         "chat_template_path": ("STRING", {"default": "", "tooltip": "Advanced: path to a chat_template.jinja file that OVERRIDES the model's built-in chat template. Empty (default) = use the template embedded in the GGUF, which is correct for almost every model. Only needed when a model ships a broken/missing embedded template, or you want a specific template variant. TEXT models only — ignored when an mmproj (vision) is active, since vision uses its own formatting. Surrounding quotes are stripped. Changing this reloads the model."}),
+        # Appended rather than filed next to thinking_directive on purpose: ComfyUI stores
+        # widgets_values POSITIONALLY, so inserting mid-list would shift every value in every
+        # saved workflow from that point on.
+        "enable_thinking": (THINKING_MODES, {"default": REASONING_DEFAULT, "tooltip": "Reasoning switch passed to the model's chat template (Qwen3.5/3.8, Gemma-4, gpt-oss…) — unlike thinking_directive this is not prompt text, so the model cannot ignore it. 'model default' leaves the variable undefined, which each family reads its own way (Qwen3.5/3.8: thinking ON, Gemma-4: OFF). Templates that don't know the variable ignore it."}),
+        "reasoning_effort": (REASONING_EFFORTS, {"default": REASONING_DEFAULT, "tooltip": "How hard the model should think, as a chat-template variable. Qwen3.5/3.8 accept xhigh (their default) / medium / low and ERROR on anything else; use 'custom' for other families (gpt-oss: high). Ignored while thinking is off. 'model default' sends nothing."}),
+        "reasoning_effort_custom": ("STRING", {"default": "", "tooltip": "Effort value sent when reasoning_effort = custom (e.g. 'high' for gpt-oss). Empty = send nothing."}),
     }
 
 
@@ -752,9 +803,18 @@ def build_llm_request(cfg, user_prompt, image=None, history=None,
         req["vision_handler"] = handler_key
         req["images"] = images
 
+    # Chat-template variables (enable_thinking / reasoning_effort). llama-cpp-python's
+    # create_chat_completion has no slot for them, so the worker binds them onto the chat handler
+    # instead — the one hook that reaches the Jinja render.
+    tkw = _template_kwargs(g)
+    if tkw:
+        req["template_kwargs"] = tkw
+
     # What a change here costs: the whole worker PROCESS is killed and restarted (_ensure_worker).
     # The projector is deliberately absent — the worker attaches and releases it per request, so a
     # picture in the middle of a text chat no longer restarts anything. Mirrors _load_sig there.
+    # `template_kwargs` is absent for the same kind of reason: it changes how the prompt is
+    # RENDERED, not how the model is loaded, so changing your mind about reasoning is free.
     load_sig = (resolved, req["n_ctx"], req["n_gpu_layers"], req["n_batch"], req["flash_attn"],
                 req["kv_cache_type"],
                 json.dumps(extra, sort_keys=True, default=str),

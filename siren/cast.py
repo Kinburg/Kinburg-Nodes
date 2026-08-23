@@ -65,6 +65,13 @@ TIMESIGS = ['2', '3', '4', '6']
 
 GUID_DELTA = "voice delta"
 GUID_TAGS = "negative tags"
+
+# What a row naming several singers becomes. The plan carries one timbre per 200 ms code, so all
+# three are ways of saying one thing where two were asked for — they differ in WHICH one thing.
+DUET_LEAD = "lead + backing note"
+DUET_UNISON = "one unison duet"
+DUET_BLEND = "both descriptions (old behaviour)"
+DUET_MODES = [DUET_LEAD, DUET_UNISON, DUET_BLEND]
 GUID_CORE = "metas only (core behaviour)"
 GUIDANCE = [GUID_DELTA, GUID_TAGS, GUID_CORE]
 
@@ -253,6 +260,65 @@ def _parse_plan(plan, bpm, beats_per_bar):
     return rows, notes
 
 
+# 'female' contains 'male', so male is matched with a lookbehind and female is tested first. These
+# live here rather than in `score.py` because both nodes need them and score imports from cast, not
+# the other way round — a second copy is how the two would start disagreeing about who is a man.
+_FEMALE_RE = re.compile(r"female|woman|women|girl|жен|жіно|жино", re.I)
+_MALE_RE = re.compile(r"(?<!fe)male|\bman\b|\bmen\b|\bboy\b|муж|чолов", re.I)
+_WORD_RE = re.compile(r"[0-9a-zA-Zа-яёА-ЯЁіїєґІЇЄҐ]+")
+
+#: Head nouns that carry no timbre of their own. Dropped when a voice is being shortened, because
+#: "gritty growls male backing harmonies" is a worse sentence than "gritty male backing harmonies"
+#: and the budget is only a few words.
+_NOT_TIMBRE = {"vocal", "vocals", "voice", "voices", "singing", "sung", "singer", "sings",
+               "backing", "harmony", "harmonies", "lead", "and", "with", "a", "an", "the",
+               "in", "of", "on"}
+
+
+def _gender_of(text):
+    """'female' / 'male' / None. Female first — 'female' contains 'male'."""
+    t = str(text or "")
+    if _FEMALE_RE.search(t):
+        return "female"
+    if _MALE_RE.search(t):
+        return "male"
+    return None
+
+
+def _timbre_words(tags, limit=2):
+    """Up to `limit` describing words from a voice's tags, in the order they were written.
+
+    Only a couple of words, because length is what breaks this: a full voice description standing
+    next to another one is what made a duet come back as a single indistinct voice. Two adjectives
+    tell one singer from another and are short enough not to compete with the lead.
+
+    The whole string is scanned, not just the first clause. A card written the natural way opens
+    with what the singer *is* — "male lead vocal, raspy baritone, close-mic" — so the first clause is
+    often nothing but the words this deliberately skips, and stopping at the comma would hand back
+    an empty list for a card that describes its singer perfectly well.
+    """
+    out = []
+    for w in _WORD_RE.findall(str(tags or "")):
+        lw = w.lower()
+        if lw in _NOT_TIMBRE or _gender_of(lw):
+            continue
+        out.append(lw)
+        if len(out) >= max(0, int(limit)):
+            break
+    return out
+
+
+def _short_voice(tags, limit=2):
+    """A voice in three or four words: what it sounds like, then who it is — 'gritty male'.
+
+    The alternative, and what this replaces, is naming only the gender. That is short but it is not
+    an identity: a pack that learned in Phantas that a character survives only when re-stated in the
+    same literal words should not reduce its second singer to 'male'."""
+    words = _timbre_words(tags, limit)
+    g = _gender_of(tags)
+    return " ".join(words + ([g] if g else []))
+
+
 def _resolve_voice(voice_raw, voices):
     """A plan row's voice cell → the caption fragment for that section.
 
@@ -278,6 +344,59 @@ def _resolve_voice(voice_raw, voices):
     out["silent"] = [v["name"] or "(unnamed)" for v in found if not v.get("tags")]
     out["add"] = ", ".join(v["tags"] for v in found if v.get("tags"))
     return out
+
+
+def _collapse_duet(names, voices, mode):
+    """A row naming several singers → ONE caption fragment, or None when there is nothing to do.
+
+    This lives in **Cast** rather than only in `Siren Score` because the reason for it is a fact
+    about the model, not about who filled the table in. The plan is one audio code per 200 ms and a
+    section's caption is one description, so two full voice descriptions side by side ask for one
+    caption to hold two contradictory timbres — measured once as "two female vocals" where a man and
+    a woman were asked for. Score protects a plan it wrote; a plan typed by hand into the widget went
+    straight to that failure with no warning at all, which is the case this closes.
+
+    Returns `others` as well: the voices that lost their place in the section caption. They still
+    belong in the GLOBAL one, or a singer who only ever appears in duets never reaches the model at
+    all — and the global list is, per `cast_in_caption`, the only route by which a second timbre can
+    colour those frames.
+    """
+    if mode == DUET_BLEND:
+        return None            # the old behaviour IS the absence of a collapse
+    pairs = []
+    for n in names:
+        key = str(n).strip().lower()
+        v = voices.get(key) or voices.get(key.split()[0] if key.split() else "")
+        tags = ((v or {}).get("tags") or "").strip()
+        if tags:
+            pairs.append((n, tags))
+    if len(pairs) < 2:
+        return None
+    lead_name, lead_tags = pairs[0]
+    others = pairs[1:]
+    both = " + ".join(n for n, _ in pairs)
+
+    if mode == DUET_UNISON:
+        shorts = [s for s in (_short_voice(t) for _, t in pairs) if s]
+        if len(shorts) < 2:
+            return None
+        add = "two voices singing together in close unison harmony, " + " and ".join(shorts)
+        why = (f"{both} were written as ONE unison duet — '{add}' — instead of a lead with backing. "
+               f"This asks the model for a duet as a single sound rather than for two singers at "
+               f"once; it is the mode to A/B, not the safe one.")
+    else:
+        genders = []
+        for _, t in others:
+            g = _gender_of(t)
+            if g and g not in genders:
+                genders.append(g)
+        short = (_short_voice(others[0][1]) if len(others) == 1
+                 else (genders[0] if len(genders) == 1 else ""))
+        back = f"with {short} backing harmonies" if short else "with backing harmonies"
+        add = f"{lead_tags}, {back}" if lead_tags else back
+        why = (f"{both} sing together — {lead_name} was made the lead and the rest became "
+               f"'{back}'.")
+    return {"add": add, "note": why, "others": [t for _, t in others]}
 
 
 def _voices_in_order(kwargs):
@@ -467,7 +586,7 @@ class KinburgSirenCast:
                 "timesignature": ("STRING", {"default": "4", "tooltip": "Beats per bar, into the metas — and what 'N bars' in the plan is measured with. A plain field rather than a dropdown because a combo input cannot accept the STRING a text parser hands it; anything with a digit in it is read (4, '4', '4/4')."}),
                 "language": ("STRING", {"default": "en", "tooltip": "Language of the lyrics, prepended to the lyrics embedding. A plain field so the song config can wire straight in, with the usual slips corrected: Ukrainian is 'uk' (not 'ua'), Chinese 'zh' (not 'cn'), Japanese 'ja'. An unknown code is reported and falls back to 'en'."}),
                 "keyscale": ("STRING", {"default": "C major", "tooltip": "Key and mode, into the metas. A plain field so the song config can wire straight in: 'C major', 'c# minor', 'C sharp minor' and 'Am' are all read. AceStep's list carries both spellings of every black key (C# and Db), so whichever was written is kept; anything it cannot express is reported and falls back to 'C major'."}),
-                "guidance": (GUIDANCE, {"default": GUID_DELTA, "advanced": True, "tooltip": "What the plan LM's 'cfg_scale' is actually pushing against. This is the fix for 'the model ignores my tags'.\n\n• voice delta (recommended) — the negative is this section's caption WITHOUT its voice line, so cfg_scale amplifies exactly the difference between 'someone sings this' and 'SHE sings this'. Sections with no voice fall back to core behaviour.\n\n• negative tags — the negative is the 'negative_tags' text below. General prompt adherence rather than per-section vocals.\n\n• metas only (core behaviour) — what TextEncodeAceStepAudio1.5 does: the negative repeats the same caption and the same lyrics, with only the metas block emptied. So cfg_scale guides bpm/duration/key and NOTHING about the caption. Here for A/B only.\n\nIn the first two modes the metas are copied into the negative as well, so the two prompts differ in the caption alone."}),
+                "guidance": (GUIDANCE, {"default": GUID_DELTA, "advanced": True, "tooltip": "What the plan LM's 'cfg_scale' is actually pushing against. This is the fix for 'the model ignores my tags'.\n\n• voice delta (recommended) — the negative is the SHARED caption, so cfg_scale amplifies whatever this section ADDS to it: the difference between 'someone sings this' and 'SHE sings this'. Note that a section's 4th column rides the same delta, which is right for a duet's 'with male backing harmonies' and is worth knowing for an arrangement note like 'drums drop out'. Sections that add nothing fall back to core behaviour.\n\n• negative tags — the negative is the 'negative_tags' text below. General prompt adherence rather than per-section vocals.\n\n• metas only (core behaviour) — what TextEncodeAceStepAudio1.5 does: the negative repeats the same caption and the same lyrics, with only the metas block emptied. So cfg_scale guides bpm/duration/key and NOTHING about the caption. Here for A/B only.\n\nIn the first two modes the metas are copied into the negative as well, so the two prompts differ in the caption alone."}),
                 "negative_tags": ("STRING", {"multiline": True, "default": "", "advanced": True, "tooltip": "The caption to guide AWAY from ('spoken word, off-key, muddy mix, drum machine'). Used by the 'negative tags' mode; in 'voice delta' mode it is appended to that section's negative, so it stacks.\n\nNOTE this is not the sampler's negative — that one must stay a ConditioningZeroOut. This text never reaches the DiT; it only shapes the plan."}),
                 "cast_in_caption": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Append the distinct voices used by the plan to the GLOBAL caption — the one that reaches the DiT through cross-attention for the whole track.\n\nWhat it actually governs, from listening: whether a SECOND voice can appear inside a section — the backing lines in round brackets. A section's own caption names one singer, so the only route by which another timbre can reach those frames is this global list. Off, and the brackets tend to be sung by the section's own voice.\n\nIt is not the accuracy dial (that is 'lyrics_in_negative'), and neither setting is reliable enough to call correct — it depends on the song, so it is worth trying both ways on a new one."}),
                 "lyrics_in_negative": ("BOOLEAN", {"default": False, "advanced": True, "tooltip": "Keep the lyrics in the LM's negative prompt. True is what the core node does; OFF is the default here, and it is the single most important setting on this node.\n\nWith the lyrics dropped from the negative, cfg_scale guides the LYRICS as well as the caption — including the '[Verse 1 - Nina]' markers inside them, which is why the voices then land where the text says. Measured across many takes of one song on a fixed seed and sampler: near-perfect assignment with this off, unreliable with it on.\n\nTurn it back on only to reproduce the core node's behaviour, or if diction comes out over-articulated."}),
@@ -478,6 +597,9 @@ class KinburgSirenCast:
                 "top_k": ("INT", {"default": 0, "min": 0, "max": 100, "advanced": True, "tooltip": "Keep only the k most likely codes per step. 0 = off, which is the core default."}),
                 "min_p": ("FLOAT", {"default": 0.000, "min": 0.0, "max": 1.0, "step": 0.001, "advanced": True, "tooltip": "Drop codes less likely than min_p x the top code. 0 = off. 0.02-0.05 is a gentler way to tighten the plan than lowering temperature, because it only cuts the tail."}),
                 "verbose": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Print the timeline and the warnings to the console. The same text is always on the outputs."}),
+                # APPENDED, and it has to stay last: ComfyUI maps a saved workflow's widget values by
+                # POSITION, so a new widget anywhere earlier would shift every value after it.
+                "duet_mode": (DUET_MODES, {"default": DUET_LEAD, "advanced": True, "tooltip": "What a plan row naming SEVERAL singers ('Nina + Alex') becomes.\n\nThe plan carries one audio code per 200 ms and a section's caption is one description, so two timbres over the same frames come back as their average — measured once as 'two female vocals' where a man and a woman were asked for. All three modes therefore say ONE thing where two were asked for; they differ in which one.\n\n• lead + backing note (default) — the first name leads and the rest become a short phrase in words ('with gritty male backing harmonies'). What Siren Score already writes into the plan, applied here too so a hand-typed row behaves the same.\n\n• one unison duet — names the pair as a SINGLE sound ('two voices singing together in close unison harmony, airy female and gritty male') instead of a lead with backing. Worth A/B-ing on a fixed seed: the measurement above was taken on two full descriptions pasted side by side, which is a contradictory caption rather than a description of a duet, and AceStep has certainly heard duets. Untested — that is what it is here for.\n\n• both descriptions — the old behaviour, both voices' full tags joined. Here to A/B against.\n\nEither way the singers who lose their place in the SECTION caption still reach the global one, so a member who only ever appears in duets is not invisible to the model.\n\nRows naming one singer, or free text, are untouched. Per-line markers in the lyrics remain the only way to make voices genuinely ALTERNATE."}),
             },
             "optional": {
                 "plan": ("STRING", {"forceInput": True, "tooltip": "WHO sings WHERE — one section per line:\n\n  Intro    | -           | 8\n  Verse 1  | Alex        | 24\n  Chorus   | Nina        | 8 bars\n  Verse 2  | Mike        | 0:24\n  Chorus   | Nina + Alex | 8 bars\n  Outro    | -           | 8\n\n• column 1 — the label, only for the report\n• column 2 — a wired voice's name (several joined by '+'), or free text used as-is, or '-' for no vocal\n• column 3 — the length: seconds, '24s', 'm:ss', or 'N bars' (needs bpm)\n• column 4 — OPTIONAL, appended to this section's caption ('drums drop out')\n\nBlank lines, '#' comments and a pasted table header are ignored, so this can come straight out of an LLM. The lengths add up to the 'seconds' output — wire that into Empty Ace Step 1.5 Latent Audio and the two can never disagree.\n\nEMPTY = one caption for the whole song, i.e. the core node's behaviour plus the guidance fix below. Start there."}),
@@ -559,9 +681,13 @@ class KinburgSirenCast:
         for i, row in enumerate(rows):
             caption = _join_caption(base_caption, row["add"], row["extra"])
             if guidance == GUID_DELTA:
-                # The negative is this section's caption minus its voice line, so the only thing
-                # cfg_scale can amplify is the voice. A section with no voice has no delta, so it
-                # falls back to core behaviour unless negative_tags gives it something to push on.
+                # The negative is the SHARED caption, so what cfg_scale amplifies is everything this
+                # section adds to it: its voice line and its 4th column both. Worth being exact
+                # about, because it cuts two ways — a duet's 'with gritty male backing harmonies'
+                # gets guided, which is what you want, and so does an arrangement note like 'drums
+                # drop out', which rides a dial named after the voice. A section that adds nothing
+                # has no delta and falls back to core behaviour unless negative_tags gives it
+                # something to push on.
                 neg = (_join_caption(base_caption, negative_tags)
                        if (row["add"] or negative_tags) else None)
             elif guidance == GUID_TAGS:
@@ -604,7 +730,8 @@ class KinburgSirenCast:
     # --------------------------------------------------------------------------------------- run
     def run(self, clip, tags, lyrics, seed, bpm, duration, timesignature, language, keyscale,
             guidance, negative_tags, cast_in_caption, lyrics_in_negative, generate_audio_codes,
-            cfg_scale, temperature, top_p, top_k, min_p, verbose=True, plan=None, **kwargs):
+            cfg_scale, temperature, top_p, top_k, min_p, verbose=True, duet_mode=DUET_LEAD,
+            plan=None, **kwargs):
         import node_helpers
 
         notes, lines, timeline = [], [], []
@@ -625,6 +752,17 @@ class KinburgSirenCast:
         notes.extend(plan_notes)
         for row in rows:
             row.update(_resolve_voice(row["voice_raw"], roster))
+            row["cast_extra"] = []
+            # A row naming several singers cannot be sung by several singers. Free text is left
+            # alone — somebody who typed a whole description into the cell meant it literally.
+            if len(row["names"]) > 1 and not row["verbatim"] and duet_mode != DUET_BLEND:
+                col = _collapse_duet(row["names"], roster, duet_mode)
+                if col:
+                    row["add"] = col["add"]
+                    row["cast_extra"] = col["others"]
+                    notes.append(f"{row['label']}: {col['note']} Per-line markers inside the "
+                                 f"section in the LYRICS are the only way to have them alternate "
+                                 f"instead — see 'Siren Score'.")
             if row["unknown"] and roster:
                 notes.append(f"{row['label']}: {', '.join(repr(u) for u in row['unknown'])} is not "
                              f"a wired voice — the whole cell was used as plain text instead. "
@@ -644,10 +782,16 @@ class KinburgSirenCast:
 
         # The cast summary goes only into the GLOBAL caption (cross-attention), never into a
         # section's — a section's own line is what makes its part of the plan different.
+        #
+        # `cast_extra` is why the voices a duet collapsed are listed here too. Built from the section
+        # captions alone, this list only ever held singers who lead somewhere, so a member who
+        # appears exclusively in duets reached the model nowhere at all — and per `cast_in_caption`
+        # this list is the only route by which a second timbre can colour a section's frames.
         cast = []
         for row in rows:
-            if row["add"] and row["add"] not in cast:
-                cast.append(row["add"])
+            for frag in [row["add"]] + list(row.get("cast_extra") or []):
+                if frag and frag not in cast:
+                    cast.append(frag)
         global_caption = _join_caption(tags, *(cast if (cast_in_caption and rows) else []))
 
         if rows:

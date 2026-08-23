@@ -12,6 +12,7 @@ from _env import COMFY, PACK, comfy_on_path, fake_package, load_module, load_pac
 
 comfy_on_path()
 
+import functools
 import importlib.util
 import io
 import json
@@ -34,7 +35,16 @@ class FakeExitStack:
         pass
 
 
-class FakeMTMD:
+class _Handler:
+    """Real chat handlers are callables, and `functools.partial` insists on that — so the fakes the
+    worker may wrap have to be callable too. Nothing ever invokes them: this FakeLlama answers
+    `create_chat_completion` itself and only records WHICH handler was attached."""
+
+    def __call__(self, **kw):
+        raise AssertionError("the fake Llama answers directly; handlers are never invoked")
+
+
+class FakeMTMD(_Handler):
     def __init__(self, clip_model_path, verbose=False, use_gpu=True):
         self.clip_model_path = clip_model_path
         self.use_gpu = use_gpu
@@ -42,7 +52,7 @@ class FakeMTMD:
         EVENTS.append(("clip-load", clip_model_path))
 
 
-class FakeTemplateHandler:
+class FakeTemplateHandler(_Handler):
     pass
 
 
@@ -59,6 +69,7 @@ class FakeJinja2ChatFormatter:
         return FakeTemplateHandler()
 
     def __call__(self, messages=None, llama=None, **kw):
+        EVENTS.append(("render", json.dumps(kw, sort_keys=True)))
         return _Rendered("RENDERED")
 
 
@@ -67,9 +78,16 @@ class FakeModel:
         return "<t>"
 
 
+class FakeRegistryHandler(_Handler):
+    """What llama-cpp's registry hands back for a named chat_format — the base the template-kwargs
+    partial wraps when there is no override handler and no projector."""
+
+
 def _hname(h):
     if h is None:
         return None
+    if isinstance(h, functools.partial):
+        return "partial(%s, %s)" % (_hname(h.func), json.dumps(h.keywords, sort_keys=True))
     return type(h).__name__
 
 
@@ -140,6 +158,7 @@ class FakeGrammar:
 cf = types.ModuleType("llama_cpp.llama_chat_format")
 cf.MTMDChatHandler = FakeMTMD
 cf.Jinja2ChatFormatter = FakeJinja2ChatFormatter
+cf.get_chat_completion_handler = lambda name: FakeRegistryHandler()
 lc = types.ModuleType("llama_cpp")
 lc.Llama = FakeLlama
 lc.LlamaGrammar = FakeGrammar
@@ -201,6 +220,8 @@ check("a text turn and a vision turn share one load signature",
 check("changing n_ctx still reloads", gw._load_sig(rq(n_ctx=8192)) != gw._load_sig(t))
 check("changing the model still reloads", gw._load_sig(rq(model="other.gguf")) != gw._load_sig(t))
 check("a chat template still reloads", gw._load_sig(rq(chat_template="{{x}}")) != gw._load_sig(t))
+check("template kwargs are free — reasoning knobs must NOT reload the model",
+      gw._load_sig(rq(template_kwargs={"enable_thinking": False})) == gw._load_sig(t))
 check("_vision_sig is None for text", gw._vision_sig(t) is None)
 check("_vision_sig names the projector", gw._vision_sig(v)[0] == "clip.gguf", gw._vision_sig(v))
 check("a different projector is a different sig",
@@ -335,6 +356,48 @@ check("a stale press is cleared before the next request runs",
       resp8[0]["output"] == "one two three four" and resp8[0]["finish_reason"] == "stop",
       (resp8[0]["output"], resp8[0]["finish_reason"]))
 PIECES = ['{"a"', ":1}"]
+
+# ── chat-template kwargs (enable_thinking / reasoning_effort) ───────────────────────────────
+# create_chat_completion has no slot for them, so the worker binds them onto the handler. What
+# matters is that they arrive on EVERY path — plain text, a template override, and vision — and
+# that the raw projector is still what _free_handler sees.
+TK = {"enable_thinking": False, "reasoning_effort": "low"}
+TKJ = json.dumps(TK, sort_keys=True)
+ev9, resp9, _ = drive([rq(), rq(template_kwargs=TK), rq(template_kwargs=TK, chat_template="{{t}}"),
+                       rq(template_kwargs=TK, mmproj="clip.gguf"), rq()])
+chats9 = [e[1] for e in ev9 if e[0] == "chat"]
+check("without template kwargs the handler is left exactly as it was",
+      chats9[0] is None and chats9[4] is None, chats9)
+check("a plain text turn binds them onto the model's own resolved handler",
+      chats9[1] == "partial(FakeRegistryHandler, %s)" % TKJ, chats9[1])
+check("a chat-template override keeps its handler and gets them too",
+      chats9[2] == "partial(FakeTemplateHandler, %s)" % TKJ, chats9[2])
+check("the vision path gets them as well (MTMD renders the template itself)",
+      chats9[3] == "partial(FakeMTMD, %s)" % TKJ, chats9[3])
+check("the projector is still released — the partial never hid it from _free_handler",
+      len([e for e in ev9 if e[0] == "clip-free"]) == 1,
+      [e for e in ev9 if e[0] == "clip-free"])
+
+# The point of binding at call time rather than at load time: changing your mind about reasoning
+# mid-graph must not cost a process kill and a re-read of the weights. (ev9 above reloads twice
+# because its chat_template comes and goes — that one IS in the load signature.)
+ev10, resp10, _ = drive([rq(), rq(template_kwargs=TK),
+                         rq(template_kwargs={"reasoning_effort": "xhigh"}), rq()])
+check("switching the reasoning knobs between runs costs no model reload",
+      len([e for e in ev10 if e[0] == "model-load"]) == 1,
+      [e for e in ev10 if e[0] == "model-load"])
+check("...and each run carries its own kwargs, with the last one back to none",
+      [e[1] for e in ev10 if e[0] == "chat"]
+      == [None, "partial(FakeRegistryHandler, %s)" % TKJ,
+          'partial(FakeRegistryHandler, {"reasoning_effort": "xhigh"})', None],
+      [e[1] for e in ev10 if e[0] == "chat"])
+
+# Resuming a truncated reply renders the prompt by hand, so it needs the same variables — render it
+# without them and the prefix would not match the one the reply was generated from.
+ev11, resp11, _ = drive([rq(continue_text="half a sentence", template_kwargs=TK)])
+check("a resumed reply re-renders the prompt with the same template kwargs",
+      [e[1] for e in ev11 if e[0] == "render"] == [TKJ],
+      [e for e in ev11 if e[0] == "render"])
 
 print("\n" + ("ALL PASS" if not fails else "FAILED: " + ", ".join(fails)))
 sys.exit(1 if fails else 0)

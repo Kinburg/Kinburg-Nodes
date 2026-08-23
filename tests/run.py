@@ -18,7 +18,9 @@ from _env import COMFY, TESTS  # noqa: E402
 SUITES = [
     ("chat", "py", TESTS / "test_chat.py"),
     ("worker", "py", TESTS / "test_worker.py"),
+    ("llm_reasoning", "py", TESTS / "test_llm_reasoning.py"),
     ("send_image", "py", TESTS / "test_send_image.py"),
+    ("send_image_log", "py", TESTS / "test_send_image_log.py"),
     ("dream_board", "py", TESTS / "test_dream_board.py"),
     ("storyboard", "py", TESTS / "test_storyboard.py"),
     ("phantas_timing", "py", TESTS / "test_phantas_timing.py"),

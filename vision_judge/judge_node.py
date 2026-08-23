@@ -333,6 +333,11 @@ class VisionLLMJudge:
         judge_cfg["output_format"] = "gbnf_grammar"
         judge_cfg["grammar"] = _build_multi_grammar(keys) if multi else JUDGE_GRAMMAR
         judge_cfg["thinking_directive"] = "model default"
+        # Same reset for the template-level knobs: a grammar-forced verdict can't reason anyway,
+        # so a Settings node parked on reasoning_effort = xhigh would only prepend its
+        # "think carefully…" paragraph to the judge's system prompt for nothing.
+        judge_cfg["enable_thinking"] = "model default"
+        judge_cfg["reasoning_effort"] = "model default"
         judge_cfg["strip_think"] = True
         # Multi-criteria needs headroom for the extra fields.
         floor = 128 + (24 * len(keys) if multi else 0)

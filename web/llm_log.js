@@ -9,7 +9,8 @@ import { api } from "../../scripts/api.js";
 //
 // Blocks can carry IMAGES: the frames a vision call was actually shown, or a `frames` event on its
 // own (Morpheus sends each shot's last frame after decoding it, which makes the log a live
-// storyboard of the run). Thumbnails have a hover copy-to-clipboard button.
+// storyboard of the run; `Send Image to Live Log 📜` posts whatever a graph taps, with an optional
+// `text` note to read beside it). Thumbnails have a hover copy-to-clipboard button.
 //
 // Scrolling follows the newest text ONLY while you are already parked at the bottom. Scroll up
 // and the view stays put while generation continues; a "↓ latest" pill takes you back.
@@ -116,7 +117,9 @@ function makeThumb(src) {
 // log calls "the answer" is what the node's `text` output will be. With an answer_marker the split
 // only happens once the marker line has actually streamed in (before that the backend would treat
 // everything as the answer too) — so mid-stream text can hop into the reasoning block when the
-// marker lands. <think> tags split live, including an unclosed one left by truncation.
+// marker lands. <think> tags split live, including an unclosed one left by truncation and one whose
+// opening tag the chat template prefilled (Qwen3.5/3.8) — that one only resolves once `</think>`
+// streams in, so its reasoning hops out of the answer at the same moment the backend's would.
 function splitReasoning(raw, marker) {
   const m = (marker || "").trim();
   if (m) {
@@ -128,6 +131,8 @@ function splitReasoning(raw, marker) {
     }
   }
   const parts = [];
+  const o = raw.indexOf("<think>"), c = raw.indexOf("</think>");
+  if (c !== -1 && (o === -1 || c < o)) raw = "<think>" + raw;
   let answer = raw.replace(/<think>([\s\S]*?)<\/think>/g, (_, p) => { parts.push(p); return ""; });
   const open = answer.indexOf("<think>");
   if (open !== -1) { parts.push(answer.slice(open + 7)); answer = answer.slice(0, open); }
@@ -272,7 +277,9 @@ function updateBlockDom(block) {
   const rate = rateOf(block);
   if (rate) bits.push(`${rate.toFixed(1)} tok/s`);
   if (block.done) {
-    bits.push(`${block.seconds ?? "?"}s`);
+    // A pictures-only block never generated anything, so there is no duration to report — the "?s"
+    // it used to show was the absence of a figure, not a figure.
+    if (!block.imagesOnly) bits.push(`${block.seconds ?? "?"}s`);
     if (block.finish && block.finish !== "stop") bits.push(block.finish);
   } else {
     bits.push("…");
@@ -311,7 +318,11 @@ function updateBlockDom(block) {
     block._think.wrap.style.display = "none";
   }
 
-  block._body.textContent = answer || (block.done ? "(no text)" : "");
+  // "(no text)" is a statement about a generation that produced none. A block that is only pictures
+  // (plus, maybe, a note) has nothing missing, so it gets no body at all rather than an empty row.
+  const bodyTxt = answer || (block.done && !block.imagesOnly ? "(no text)" : "");
+  block._body.textContent = bodyTxt;
+  block._body.style.display = bodyTxt ? "" : "none";
 
   const ctx = ctxLine(block);
   if (ctx) {
@@ -386,7 +397,7 @@ function pushBlock(node, srcId, d) {
     hadDelta: false, tokens: 0, maxTokens: Number(d?.max_tokens) || 0, outTokens: null,
     promptTokens: 0, ctxUsed: 0, nCtx: Number(d?.n_ctx) || 0, t0: 0, tEnd: 0,
     marker: d?.answer_marker || "", thinkOpen: true, thinkTouched: false, thinkStart: 0, thinkEnd: 0,
-    images: [],
+    images: [], imagesOnly: false,
   };
   snap.push(block);
   while (snap.length > MAX_BLOCKS) { const rm = snap.shift(); if (rm._el) rm._el.remove(); }
@@ -401,9 +412,13 @@ function handle(node, d) {
   // the pack lands in the same block model.
   const ev = d.event || (d.delta != null ? "delta" : null);
   if (ev === "frames") {
-    // Images with no generation behind them: a finished block that is only pictures.
+    // Images with no generation behind them: a finished block that is only pictures. A `text` on
+    // this event is a note to read beside them (`Send Image to Live Log 📜`), not model output —
+    // nothing generated it, so the block reports no tokens, no rate and no duration.
     const block = pushBlock(node, src, d);
     block.done = true;
+    block.imagesOnly = true;
+    if (typeof d.text === "string") block.text = d.text;
     addImages(block, d.images);
     updateBlockDom(block);
     setStatus(node, block.title);

@@ -40,9 +40,11 @@ amplifies "with bpm/duration/key" against "without them", and the caption gets n
 The tokenizer already accepts `caption_negative` / `lyrics_negative` / `*_negative` metas; the core
 node just never passes them. Cast does, and **mirrors the metas into the negative** so the two
 prompts differ in the caption alone. `guidance`:
-- **`voice delta`** (default) — the negative is that section's caption **minus its voice line**, so
-  `cfg_scale` amplifies precisely the difference between *"someone sings this"* and *"**she** sings
-  this"*. A section with no voice has no delta and falls back to core behaviour.
+- **`voice delta`** (default) — the negative is the **shared** caption, so `cfg_scale` amplifies
+  whatever that section *adds* to it: the difference between *"someone sings this"* and *"**she**
+  sings this"*. Note that a section's column 4 rides the same delta — right for a duet's backing
+  note, worth knowing for an arrangement note. A section that adds nothing has no delta and falls
+  back to core behaviour.
 - **`negative tags`** — the negative is the `negative_tags` text. General prompt adherence.
 - **`metas only (core behaviour)`** — what the core node does, for honest A/B.
 
@@ -59,7 +61,25 @@ Outro    | -           | 4
 
 Column 2 is a wired **`voice`** name (several joined by `+`), or free text used verbatim, or `-` for
 no vocal; column 3 takes seconds / `24s` / `m:ss` / `N bars`; an optional column 4 is appended to that
-section's caption. Voices come from **Character Card**'s `voice` output (or **Card Presets**), so a
+section's caption.
+
+**A row naming two singers cannot be sung by two singers**, for the reason in Siren Score below: one
+timbre per 200 ms code. `duet_mode` decides which single thing gets said instead, and it applies
+however the plan was written — Score protects a table it wrote, but a `Nina + Alex` typed straight
+into the widget used to go to the failing case with no warning at all.
+- **`lead + backing note`** (default) — the first name leads, the rest become a short phrase carrying
+  their own timbre. The same collapse Score performs, now done here too.
+- **`one unison duet`** — names the pair as a **single sound** ("two voices singing together in close
+  unison harmony, airy alto female and raspy baritone male") rather than as a lead with backing.
+  Worth an A/B on a fixed seed: the "two timbres average out" measurement was taken on two full
+  descriptions pasted side by side, which is a *contradictory caption* rather than a description of a
+  duet, and AceStep has certainly heard duets. Untested — that is what the mode is for.
+- **`both descriptions`** — the old behaviour, to A/B against.
+
+Whichever is chosen, the singers who lose their place in the *section* caption are still listed in
+the **global** one, so a member who appears only in duets is not invisible to the model — that list
+is, per `cast_in_caption`, the only route by which a second timbre can colour a section's frames.
+Per-line markers in the lyrics remain the only way to make voices genuinely **alternate**. Voices come from **Character Card**'s `voice` output (or **Card Presets**), so a
 band member is described once for the lyrics LLM, the cover art and the song. Lengths are rounded to
 whole codes (0.2 s) and add up to the **`seconds`** output — wire that into `Empty Ace Step 1.5 Latent
 Audio` and the plan and the latent can never disagree, which is the classic AceStep mistake. An
@@ -85,6 +105,14 @@ marker, and how long a section should be is a function of how many lines it has.
   map onto the canonical labels, including `Bridge/Chaos` → Bridge and `Hook`/`Refrain` → Chorus.
   Other bracketed lines are annotations of the current section — which is where the voice often hides,
   under a header that describes only the drums.
+- **The section name must be the FIRST word in the marker.** The test is a prefix, not a search, and
+  it has to be: only "starts with" tells `[Chorus - massive wall of guitars]` from
+  `[wall of guitars, no chorus pad]`. The cost is that a qualifier in front of the name folds a whole
+  section into the previous one's notes — and the natural-sounding forms are exactly the ones that do
+  it. ACE-Step's own shipped templates are full of them: `[Final Chorus - …]`, `[Final Verse - …]` and
+  `[Guitar Solo]` are none of them sections here. That loss used to be silent; now the report catches
+  the near miss and hands back the corrected line, with the qualifier moved behind the name where it
+  belongs (`[Chorus - final, Layered harmonies]`, `[Solo - guitar]`).
 - **Voice**, most certain first: a member's name in the marker (`Keen Burg`, or a duet with `+`); a
   name buried in its prose; `MALE`/`FEMALE` matched against the wired cards' `voice_tags` and
   `gender`; failing all that, the marker's own vocal wording used verbatim, which is why this works on
@@ -93,10 +121,19 @@ marker, and how long a section should be is a function of how many lines it has.
   code per 200 ms and the caption is one description, so two timbres over the same frames come back as
   their average (measured once as "two female vocals" where a man and a woman were asked for). A
   bracketed line that **names** a member therefore *splits* the section — one sub-section per voice,
-  so they **alternate**, which the model does well. Sub-sections are floored at 2 bars rather than
+  so they **alternate**, which the model does well. It does so in **every** mode: a marker naming a
+  member is an explicit instruction, and `duets` has authority only over a header naming several
+  singers with nothing under it to split on. (The two used to be one switch, so reaching the unison
+  path also turned alternation off for the whole song — an exchange in the bridge or a unison chorus,
+  never both, and the loss was silent because an inner marker that stops splitting degrades into an
+  ordinary annotation rather than disappearing.) Sub-sections are floored at 2 bars rather than
   `min_bars`, because an exchange of single shouted lines is meant to be short. A header duet with
-  nothing to split on becomes the first-named singer plus a short `with male backing harmonies` note,
-  and the report says so and shows what to write instead.
+  nothing to split on becomes the first-named singer plus a short backing note in words — and that
+  note carries the other singer's **own timbre**, two words of it, not merely their gender
+  ("with aggressive deep male backing harmonies"). Gender alone is the least identifying thing a card
+  knows and picks out neither man in a band with two; the budget is the same either way, and short is
+  what mattered. Two or more backing singers fall back to the gender, and a mixed group to nothing —
+  past that the words are describing a crowd. The report says what happened and what to write instead.
 - **Lengths run backwards from the target, not forwards from a rate.** `pad_to_seconds` says how long
   the song is; `tail_bars` takes its slice off the end; a section with no sung lines takes
   `instrumental_bars`; everything left is shared among the sung sections **in proportion to their

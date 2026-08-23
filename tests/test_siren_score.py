@@ -125,6 +125,70 @@ check("'both names' mode keeps the duet as written, in the marker's order",
                                    voice_1=GRU, voice_2=KEEN,
                                    **{**ARGS, "duets": score.DUET_ASIS})[0],
                        145, 4)[0][0]["voice_raw"] == "Keen Burg + Gru BNik")
+# The point of separating `split` from `duets`: an inner marker is an explicit instruction and now
+# splits in EVERY mode. It used to split only in the default one, so reaching the unison path also
+# silently turned alternation off — a song could have an exchange or a unison chorus, never both.
+MIXED = ("[Bridge - Keen Burg + Gru BNik - traded lines]\n"
+         "[Gru BNik - deep growls]\nодин\n[Keen Burg - piercing]\nдва\n\n"
+         "[Chorus - Keen Burg + Gru BNik - sung together]\nтри\nчотири\n")
+def _mixed(mode):
+    return cast._parse_plan(Score().run(lyrics=MIXED, voice_1=GRU, voice_2=KEEN,
+                                        **{**ARGS, "duets": mode})[0], 145, 4)[0]
+
+
+for _mode, _what in ((score.DUET_SPLIT, "lead + split"), (score.DUET_ASIS, "both names")):
+    _sung = [r for r in _mixed(_mode) if r["voice_raw"] != "-"]
+    check(f"{_what}: the exchange still splits into one row per voice",
+          [r["voice_raw"] for r in _sung[:2]] == ["Gru BNik", "Keen Burg"],
+          [r["voice_raw"] for r in _sung])
+    check(f"{_what}: …and the unison chorus stays a single row",
+          len([r for r in _sung if r["label"].startswith("Chorus")]) == 1,
+          [r["label"] for r in _sung])
+# …and the unsplittable header is the ONLY thing `duets` still decides
+_chorus = next(r for r in _mixed(score.DUET_ASIS) if r["label"].startswith("Chorus"))
+check("both-names mode hands the unison chorus to Cast with both singers in the cell",
+      _chorus["voice_raw"] == "Keen Burg + Gru BNik", _chorus["voice_raw"])
+_chorus = next(r for r in _mixed(score.DUET_SPLIT) if r["label"].startswith("Chorus"))
+check("...while the default still collapses it to a lead plus a backing note",
+      _chorus["voice_raw"] == "Keen Burg" and "backing harmonies" in _chorus["extra"],
+      (_chorus["voice_raw"], _chorus["extra"]))
+
+# ------------------------------------------------- a section name that is not first goes missing
+# The prefix test is strict on purpose, and the cost is that a qualifier in front of the name folds
+# a whole section into the previous one's notes — silently, until now. ACE-Step's own templates are
+# full of the forms that do it.
+check("'Final Chorus' is not a section to the parser", score._canon_label("Final Chorus - big")[0] is None)
+# the correction is handed back ready to paste: the qualifier is not noise, it is the description,
+# so it moves behind the name rather than being thrown away
+check("...but it is caught, and rewritten with the name first",
+      score._near_miss("Final Chorus - Layered harmonies")
+      == ("Chorus", "[Chorus - final, Layered harmonies]"),
+      score._near_miss("Final Chorus - Layered harmonies"))
+check("'Guitar Solo' keeps the guitar", score._near_miss("Guitar Solo") == ("Solo", "[Solo - guitar]"),
+      score._near_miss("Guitar Solo"))
+check("'Final Verse' too", score._near_miss("Final Verse - softest delivery")
+      == ("Verse", "[Verse - final, softest delivery]"), score._near_miss("Final Verse - softest delivery"))
+check("the rewrite is a header the parser then accepts",
+      score._canon_label(score._near_miss("Final Chorus - big")[1].strip("[]"))[0] == "Chorus")
+# …and the strictness it protects must NOT trip it: these are annotations and meant to be
+check("a real annotation is not flagged", score._near_miss("wall of guitars, no chorus pad") is None)
+check("...nor an arrangement note", score._near_miss("Distorted bassline, haunting guitar") is None)
+check("...nor an inner voice marker", score._near_miss("Gru BNik - deep growls") is None)
+check("an empty head is survivable", score._near_miss("") is None and score._near_miss(None) is None)
+
+_miss = score._split_sections("[Verse 1 - Gru BNik]\nline\n[Final Chorus - Layered harmonies]\nmore\n",
+                              [GRU])[1]
+check("the loss is reported, naming the section it meant",
+      any("looks like a Chorus header" in n for n in _miss), _miss)
+check("...and says where the lines went", any("folded into Verse 1" in n for n in _miss), _miss)
+check("...and hands back the corrected line",
+      any("[Chorus - final, Layered harmonies]" in n for n in _miss), _miss)
+check("a near miss before any section says so instead",
+      any("nothing is open yet" in n for n in score._split_sections("[Final Chorus - x]\nline\n")[1]))
+check("a correctly written header is silent",
+      not any("looks like" in n for n in
+              score._split_sections("[Chorus - final, layered harmonies]\nline\n")[1]))
+
 check("with nobody wired, the marker's own words become the vocal description",
       "spoken word" in cast._parse_plan(Score().run(lyrics=LYRICS, **ARGS)[0], 145,
                                         4)[0][0]["voice_raw"], )
@@ -189,9 +253,14 @@ check("the parent's arrangement note goes to the FIRST sub-section only, not all
 check("no band member's name reaches any caption, not even the one that isn't singing there",
       not any(n in r["extra"] for r in ex_rows for n in ("Gru", "Keen", "BNik", "Burg")),
       [r["extra"] for r in ex_rows])
-check("'both names' mode does not split at all — it is the A/B baseline",
-      len(cast._parse_plan(Score().run(lyrics=EXCHANGE, voice_1=GRU, voice_2=KEEN,
-                                       **{**ARGS, "duets": score.DUET_ASIS})[0], 145, 4)[0]) == 1)
+# This used to assert the opposite — that 'both names' mode did not split at all. That was the bug:
+# the only way to reach the unison path also switched alternation off for the whole song.
+check("'both names' mode splits an exchange exactly as the default does",
+      [r["voice_raw"] for r in cast._parse_plan(
+          Score().run(lyrics=EXCHANGE, voice_1=GRU, voice_2=KEEN,
+                      **{**ARGS, "duets": score.DUET_ASIS})[0], 145, 4)[0]]
+      == [r["voice_raw"] for r in ex_rows],
+      [r["voice_raw"] for r in ex_rows])
 
 duet_plan, duet_rep = Score().run(lyrics="[Chorus - Keen Burg + Gru BNik - powerful harmonies]\n"
                                          "l1\nl2\nl3\nl4\n", voice_1=GRU, voice_2=KEEN, **ARGS)
@@ -199,14 +268,30 @@ duet_row = cast._parse_plan(duet_plan, 145, 4)[0][0]
 check("a header duet with nothing to split on gives the FIRST-named singer the lead",
       duet_row["voice_raw"] == "Keen Burg", duet_row["voice_raw"])
 check("...and the others become a short note, in words, about the harmonies",
-      "with male backing harmonies" in duet_row["extra"], duet_row["extra"])
+      "backing harmonies" in duet_row["extra"], duet_row["extra"])
+# It used to say only the gender — "with male backing harmonies" — which is the least identifying
+# thing a card knows and picks out neither man in a band with two. A single backing singer now
+# keeps two words of their own timbre for the same budget.
+check("...naming the singer's timbre, not just their gender",
+      duet_row["extra"].startswith("with aggressive deep male backing harmonies"), duet_row["extra"])
+check("...and it stays short — that is what the note is FOR",
+      len("with aggressive deep male backing harmonies".split()) <= 7)
 check("...and it is said out loud, with what to write instead",
       any("come back as a blend" in n and "alternate" in n for n in duet_rep.splitlines()),
       [n for n in duet_rep.splitlines() if "⚠" in n])
 check("the backing note survives even with arrangement_notes off — it is not decoration",
-      "with male backing harmonies" in cast._parse_plan(
+      "backing harmonies" in cast._parse_plan(
           Score().run(lyrics="[Chorus - Keen Burg + Gru BNik]\nl1\nl2\n", voice_1=GRU, voice_2=KEEN,
                       **{**ARGS, "arrangement_notes": False})[0], 145, 4)[0][0]["extra"])
+# two or more backing singers have no single timbre to name, so it falls back to the gender, and
+# then to nothing — at that point the words would be describing a crowd
+check("two backing singers of one gender fall back to the gender",
+      score._backing(["Gru BNik", "Ada"], [GRU, {"name": "Ada", "tags": "male vocal, thin"}])
+      == "with male backing harmonies")
+check("a mixed group gets no gender at all",
+      score._backing(["Gru BNik", "Keen Burg"], [GRU, KEEN]) == "with backing harmonies")
+check("an unknown backing singer is survivable",
+      score._backing(["Nobody"], []) == "with backing harmonies")
 
 # ------------------------------------------------------------- a long caption is not a detailed one
 LONG = ("[Chorus - Keen Burg - powerful female vocal]\n[one, two, three, four, five, six]\n"
@@ -404,7 +489,7 @@ check("a duet marker keeps only what describes the sound — the backing note pl
       cast._parse_plan(Score().run(lyrics="[Chorus - Keen Burg + Gru BNik - powerful harmonies]\n"
                                           "l1\nl2\nl3\nl4\n", voice_1=GRU, voice_2=KEEN,
                                    **ARGS)[0], 145, 4)[0][0]["extra"]
-      == "with male backing harmonies, powerful harmonies")
+      == "with aggressive deep male backing harmonies, powerful harmonies")
 check("words that only glue names together go with them",
       score._trim_redundant("Keen Burg and Gru BNik together", "female vocal",
                             ["Keen Burg", "Gru BNik"]) == "")

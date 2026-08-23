@@ -11,7 +11,8 @@ source at once, each block labelled by its node plus, when the source says so, t
 Blocks can also carry **images**: the frames a vision call was actually shown, and a ``frames``
 event on its own — Morpheus sends each shot's last frame right after decoding it, which turns the
 log into a live storyboard of the run and answers "what did this shot actually get?" by eye instead
-of by digging through the cache. Thumbnails have a hover copy-to-clipboard button.
+of by digging through the cache. ``Send Image to Live Log 📜`` puts any branch's picture into the same
+stream, with an optional note beside it. Thumbnails have a hover copy-to-clipboard button.
 
 Each block's header counts the generated tokens against the run's ``max_tokens`` ceiling and the
 generation rate; on finish it adds the context fill (prompt + gen vs ``n_ctx``). Reasoning
@@ -31,8 +32,9 @@ _SHARED_DESCRIPTION = (
     "'live_preview' toggle, drop this node anywhere (no wiring needed), and watch the text stream "
     "in with a tokens-used / max_tokens counter, budget bar and tok/s per block (plus the context "
     "fill when it finishes). Vision calls show the frames they were given, and Morpheus posts each "
-    "shot's last frame as it is decoded, so the log doubles as a live storyboard — thumbnails have "
-    "a copy-to-clipboard button. Reasoning folds into its own dim, collapsible section. Scroll up "
+    "shot's last frame as it is decoded, so the log doubles as a live storyboard — 'Send Image to "
+    "Live Log 📜' adds any branch's picture to the same stream; thumbnails have a copy-to-clipboard "
+    "button. Reasoning folds into its own dim, collapsible section. Scroll up "
     "and the view stays put while it keeps writing — the '↓ latest' pill jumps back.")
 
 
