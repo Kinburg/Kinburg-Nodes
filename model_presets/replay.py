@@ -248,6 +248,27 @@ def check(recipe):
     return problems
 
 
+def is_cached(recipe):
+    """True when replay() would build NOTHING — every output slot's node is already in the cache.
+
+    A merkle key folds in everything upstream, so a hit on the output nodes means the whole bundle
+    is resident. Model Select uses this to decide whether it has anything to make room for: freeing
+    VRAM before a rebuild is the point, freeing it before handing back the very objects that are
+    already loaded is just a reload for nothing (and with a prompt wired in, that would happen on
+    every edit of the text).
+    """
+    graph = (recipe or {}).get("nodes") or {}
+    outputs = (recipe or {}).get("outputs") or {}
+    if not graph or not outputs:
+        return False
+    try:
+        keys = recipe_keys(graph)
+    except ValueError:
+        return False
+    return all(keys.get(str(ref[0])) in _CACHE
+               for ref in outputs.values() if is_link(ref))
+
+
 def purge(keep=()):
     """Drop cached results, keeping the given merkle keys. Releases the previous model's weights so
     only what the current bundle needs stays referenced."""

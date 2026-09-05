@@ -13,6 +13,21 @@ so N frame prompts and N-1 beats come out of one plan. The beats are emitted in 
 is filled — which is the point: **the arc is planned once.** Planning it again downstream would give
 two LLM calls independent authority over the same story, and they would disagree.
 
+`write_beats` turns that half off. A board whose keyframes go to `Save Clip` as slides never reaches
+a video model, so the directions between them would be written for nobody — and it is the GRAMMAR
+that stops them rather than an instruction: with the `transitions` array gone from the shape, the
+model cannot spend a token deciding whether to obey. The board still carries one blank shot per gap,
+so it stays a chain; the switch is the only thing between a slideshow and a film.
+
+It also swaps the planner's system prompt, and that is the half that changes the pictures rather
+than the clock. The continuous-take rule exists because a video model has to *travel* from one
+framing to the next, so a crop change must be a camera move. Nothing travels between two slides:
+the cut is free, and a slideshow planned under the video rules comes out as thirty variations on one
+camera position. `PLAN_SYSTEM_STILLS` therefore asks for an edit instead — scale alternating, no two
+neighbours framed alike, and some frames with nobody in them at all, because a slideshow needs air
+the way a take does not. Both shipped prompts are treated as "the default", so the `system_plan`
+widget picks up whichever the mode needs; text somebody typed there is theirs and is used in both.
+
 Three things shape the prompts, all of them learned the hard way elsewhere in this pack:
 
   * **The bible is stamped, not rewritten.** Look, subject invariants and negatives are written once
@@ -104,6 +119,25 @@ Spend the whole brief across the sequence: the last keyframe lands on the brief'
 
 Answer with JSON only."""
 
+PLAN_SYSTEM_STILLS = """You are a director breaking a brief into a sequence of STILL IMAGES — a slideshow. There is no video anywhere in it: each keyframe is shown on its own, one after another, and the audience never sees anything between two of them.
+
+Because nothing is generated between two pictures, THE CUT IS FREE. From one frame to the next you may change shot size, angle, lens and distance as sharply as you like — and you should. A run of near-identical framings reads as a contact sheet rather than as an edited sequence. What may NOT change is the world: the same place, the same time of day, the same weather and light, the same people in the same wardrobe, unless the brief itself changes them.
+
+For each keyframe give:
+- "framing": the shot size and camera angle of that picture (e.g. "extreme wide high-angle", "medium two-shot at eye level", "macro insert on the hands"). Vary it deliberately down the sequence, and never give a frame the same framing as the one before it.
+- "present": the names of the cast members visible in that frame, exactly as the cast block spells them. An empty list if the frame shows nobody. Never name anyone who is not in the cast, and never leave someone out who is on screen — this list decides whose description gets attached to the picture.
+- "state": what is on screen in that picture — position, pose, form, what the light is doing. A description of a STILL. Never write a change, never write "begins to", "starts to" or "is about to".
+
+Cut the sequence the way an editor would:
+- Open on a frame wide enough to say where we are, and close on the brief's endpoint.
+- Alternate scale. A close-up lands because a wide came before it.
+- Not every picture needs a person in it. Empty rooms, landscapes, hands, objects and weather are what give a slideshow air — give some frames an empty "present" list on purpose.
+- Every picture has to be worth stopping on. A frame whose only job is to get from one picture to the next has nothing to do here: in a slideshow there is no "between".
+
+Spend the whole brief across the sequence: the last keyframe lands on the brief's endpoint and no earlier one may get there first. If a transformation completes at keyframe 2 of 6, the plan is wrong.
+
+Answer with JSON only, and with the "frames" array alone — a slideshow has no transitions."""
+
 FRAME_SYSTEM = """You are writing the prompt for ONE still image: a single keyframe of a video sequence.
 
 You are given the style bible, this frame's framing and state, and — when there is one — the prompt of the frame immediately before it, so the two pictures can be of the same world.
@@ -121,29 +155,55 @@ Rules:
 - Plain descriptive English, one paragraph, no headings, no markdown, no commentary."""
 
 
-def _plan_grammar(n_frames):
+def _plan_system(text, with_beats):
+    """The plan call's system prompt: the mode's default, unless something was typed over it.
+
+    The widget ships PRE-FILLED with `PLAN_SYSTEM`, so blank is not the only way of saying "use the
+    default" — a node nobody has touched hands back that exact text. Both of the shipped prompts are
+    therefore read as "default" and answered with whichever one the mode needs, which is also what
+    stops the incoherent combination: the stills prompt asks for frames alone while the beats
+    grammar demands transitions. Anything else is the user's, and the user's wins in both modes."""
+    txt = (text or "").strip()
+    if not txt or txt in (PLAN_SYSTEM.strip(), PLAN_SYSTEM_STILLS.strip()):
+        return PLAN_SYSTEM if with_beats else PLAN_SYSTEM_STILLS
+    return txt
+
+
+def _plan_grammar(n_frames, with_transitions=True):
     """A GBNF grammar forcing exactly `n_frames` keyframes and `n_frames - 1` transitions.
 
     The counts are baked in by repeating the productions rather than using a repetition operator:
     the shape is then certain on any llama.cpp build, and a model that miscounts cannot even emit
     the wrong number of entries. String/char/int/ws productions are the ones the Vision Judge
-    grammar has been using in production, escapes and all."""
+    grammar has been using in production, escapes and all.
+
+    `with_transitions=False` is the slideshow board: the whole `transitions` array goes, and the
+    `trans`/`int`/`digit` productions go with it rather than being left defined and unreachable. A
+    grammar is the only reliable way to stop that writing — an instruction not to write beats still
+    costs the tokens the model spends deciding to obey it, while a rule it cannot reach costs none.
+    """
     n_frames = max(2, int(n_frames))
     frames = " ws \",\" ws ".join(["frame"] * n_frames)
-    trans = " ws \",\" ws ".join(["trans"] * (n_frames - 1))
-    return (
-        'root ::= ws "{" ws "\\"frames\\"" ws ":" ws "[" ws ' + frames + ' ws "]" ws "," ws '
-        '"\\"transitions\\"" ws ":" ws "[" ws ' + trans + ' ws "]" ws "}" ws\n'
+    root = 'root ::= ws "{" ws "\\"frames\\"" ws ":" ws "[" ws ' + frames + ' ws "]"'
+    if with_transitions:
+        trans = " ws \",\" ws ".join(["trans"] * (n_frames - 1))
+        root += ' ws "," ws "\\"transitions\\"" ws ":" ws "[" ws ' + trans + ' ws "]"'
+    out = (
+        root + ' ws "}" ws\n'
         'frame ::= "{" ws "\\"framing\\"" ws ":" ws string ws "," ws "\\"present\\"" ws ":" ws names '
-        'ws "," ws "\\"state\\"" ws ":" ws string ws "}"\n'
-        'trans ::= "{" ws "\\"beat\\"" ws ":" ws string ws "," ws "\\"weight\\"" ws ":" ws int ws "}"\n'
+        'ws "," ws "\\"state\\"" ws ":" ws string ws "}"\n')
+    if with_transitions:
+        out += ('trans ::= "{" ws "\\"beat\\"" ws ":" ws string ws "," ws "\\"weight\\"" ws ":" ws '
+                'int ws "}"\n')
+    out += (
         'names ::= "[" ws (string (ws "," ws string)*)? ws "]"\n'
         'string ::= "\\"" char* "\\""\n'
         'char ::= [^"\\\\\\x7F\\x00-\\x1F] | "\\\\" (["\\\\bfnrt/] | "u" hex hex hex hex)\n'
-        'hex ::= [0-9a-fA-F]\n'
-        'int ::= digit digit?\n'
-        'digit ::= [0-9]\n'
-        'ws ::= [ \\t\\n]*\n')
+        'hex ::= [0-9a-fA-F]\n')
+    if with_transitions:
+        out += ('int ::= digit digit?\n'
+                'digit ::= [0-9]\n')
+    return out + 'ws ::= [ \\t\\n]*\n'
 
 
 _LABELS = ("STYLE", "CAST", "SUBJECT", "NEGATIVE")
@@ -223,12 +283,17 @@ def parse_bible(text, cast_override=""):
     }
 
 
-def parse_plan(text, n_frames):
+def parse_plan(text, n_frames, with_transitions=True):
     """`(frames, transitions, notes)` from the plan reply.
 
     The grammar makes the shape certain when it is honoured, but a worker that fell back, a cached
     answer from an older version or a hand-edited plan must not take the run down — anything missing
-    is filled and named in `notes`, and the board still renders."""
+    is filled and named in `notes`, and the board still renders.
+
+    With `with_transitions=False` the reply carries no transitions and none are looked for, but
+    `n_frames - 1` BLANK ones still come back: a board keeps one shot per gap whatever mode wrote
+    it, so it stays a chain `Phantas` can pack and `Morpheus Storyboard` can fill in later. A
+    slideshow that turns out to want video is then one checkbox away rather than a re-plan."""
     notes = []
     obj = None
     try:
@@ -248,7 +313,7 @@ def parse_plan(text, n_frames):
     raw_t = obj.get("transitions") if isinstance(obj.get("transitions"), list) else []
     if len(raw_f) != n_frames:
         notes.append(f"the plan gave {len(raw_f)} keyframes, not {n_frames}")
-    if len(raw_t) != n_frames - 1:
+    if with_transitions and len(raw_t) != n_frames - 1:
         notes.append(f"the plan gave {len(raw_t)} transitions, not {n_frames - 1}")
 
     frames = []
@@ -261,7 +326,8 @@ def parse_plan(text, n_frames):
                        "state": str(d.get("state", "") or "").strip()})
     trans = []
     for i in range(n_frames - 1):
-        d = raw_t[i] if i < len(raw_t) and isinstance(raw_t[i], dict) else {}
+        d = (raw_t[i] if with_transitions and i < len(raw_t) and isinstance(raw_t[i], dict)
+             else {})
         try:
             w = float(d.get("weight", 1))
         except (TypeError, ValueError):
@@ -389,11 +455,12 @@ class KinburgPhantasStoryboard:
                 "style_notes": ("STRING", {"multiline": True, "default": "", "tooltip": "Extra instructions for the look only — reference films, lens, grade, era. Goes to the style-bible call, not to the plan."}),
                 "prompts_override": ("STRING", {"multiline": True, "default": "", "tooltip": "Paste the 'prompts' output back here after editing it, and those frames are used verbatim instead of being written again. Frames are separated by a line of '---'; an empty entry means 'write this one'."}),
                 "preferred_length": ("FLOAT", {"default": timing.DEFAULT_SECONDS, "min": timing.MIN_SECONDS, "max": timing.MAX_SECONDS, "step": 0.1, "tooltip": "How long an average shot should run. Sets the shot count in 'duration' mode, and the average length when no target is given."}),
+                "write_beats": ("BOOLEAN", {"default": True, "tooltip": "Write the beats — what visibly HAPPENS between each pair of keyframes — and the weights that give each shot its length.\n\nON (the default) is the video path. The beats come out on the 'beats' output in exactly the format 'Morpheus Storyboard' takes, so the arc is planned once instead of twice.\n\nOFF is the slideshow path: use it when the keyframes are going to 'Save Clip' as slides and no video is being rendered. The planning grammar drops the transitions array altogether, so the model cannot spend tokens on directions nobody will read.\n\nOff also swaps the planner's own system prompt for the slideshow one, which is the half that changes what the pictures look like: with no video between them the CUT IS FREE, so the plan stops being one continuous take and starts being an edit — shot sizes jump, scale alternates, and some frames are given nobody at all. Type your own text into 'system_plan' and yours is used in both modes instead.\n\nThe board still carries one shot per gap (blank beat, even length), so it stays a valid chain: turn this back on later, or wire the board to Morpheus anyway and its Storyboard writes the beats itself from the brief."}),
                 "cache": (CACHE_MODES, {"default": "disk", "tooltip": "Cache the LLM's answers on disk, keyed causally, so re-running the graph does not rewrite the prompts and invalidate finished frames. Editing the brief re-rolls everything; editing one frame re-rolls that frame and the ones after it."}),
                 "live_preview": ("BOOLEAN", {"default": True, "tooltip": "Stream every call to a 'Kinburg Live Log' node as it is written, one labelled block per call ('style bible', 'plan', 'frame 2/7'). Drop a Kinburg Live Log anywhere on the canvas — no wiring. The plan streams too, grammar and all."}),
                 "unload_after_run": (UNLOAD_MODES, {"default": "config default", "tooltip": "Whether to free the LLM's VRAM when this node finishes. On a small card set this to 'unload after run': the sampler needs the room, and the writer has nothing left to do."}),
                 "system_style": ("STRING", {"multiline": True, "default": STYLE_SYSTEM, "tooltip": "System prompt for the style-bible call. Blank = the built-in default."}),
-                "system_plan": ("STRING", {"multiline": True, "default": PLAN_SYSTEM, "tooltip": "System prompt for the planning call. The JSON shape is forced by a grammar built from the frame count, so editing this can change the writing but can never break parsing."}),
+                "system_plan": ("STRING", {"multiline": True, "default": PLAN_SYSTEM, "tooltip": "System prompt for the planning call. The JSON shape is forced by a grammar built from the frame count, so editing this can change the writing but can never break parsing.\n\nThere are TWO shipped defaults and 'write_beats' picks between them: the continuous-take prompt (shown here) when beats are on, and a slideshow prompt that cuts freely between shot sizes when they are off. Leave this field as it came — or blank — and the right one is used. Type anything of your own and yours is used in both modes."}),
                 "system_frame": ("STRING", {"multiline": True, "default": FRAME_SYSTEM, "tooltip": "System prompt for the per-frame prompt calls. Blank = the built-in default."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
@@ -403,7 +470,7 @@ class KinburgPhantasStoryboard:
     RETURN_NAMES = ("board", "prompts", "beats", "durations", "style", "report")
     OUTPUT_TOOLTIPS = ("The board — wire it into 'Phantas'.",
                        "One prompt per keyframe, separated by '---'. Edit a frame and paste the whole thing back into 'prompts_override' to keep it.",
-                       "One direction line per shot, in exactly the format 'Morpheus Storyboard' takes for its own `beats` — wire it there and the arc is planned once, not twice.",
+                       "One direction line per shot, in exactly the format 'Morpheus Storyboard' takes for its own `beats` — wire it there and the arc is planned once, not twice. Empty when 'write_beats' is off.",
                        "The shot lengths this board settled on, in the format Morpheus takes.",
                        "The style bible, as written.",
                        "What was written, what came from cache, and what the clock worked out.")
@@ -415,13 +482,21 @@ class KinburgPhantasStoryboard:
 
     def write(self, config, brief, count_mode, count, target_length, durations, cast="",
               style_notes="", prompts_override="", preferred_length=timing.DEFAULT_SECONDS,
-              cache="disk", live_preview=True, unload_after_run="config default",
-              system_style="", system_plan="", system_frame="", unique_id=None):
+              write_beats=True, cache="disk", live_preview=True,
+              unload_after_run="config default", system_style="", system_plan="",
+              system_frame="", unique_id=None):
         cfg = dict(config or {})
+        with_beats = bool(write_beats)
         sys_style = (system_style or "").strip() or STYLE_SYSTEM
-        sys_plan = (system_plan or "").strip() or PLAN_SYSTEM
+        sys_plan = _plan_system(system_plan, with_beats)
         sys_frame = (system_frame or "").strip() or FRAME_SYSTEM
         use_cache = cache == "disk"
+        # What the SHARED key folds in, as it always has — deliberately the video prompt rather
+        # than the one this run uses. The bible does not depend on the plan prompt at all, so
+        # toggling write_beats must not re-roll it: a re-rolled bible is a new [CAST] block, and a
+        # new cast block is new faces in both versions of the same board. The prompt that was
+        # actually used goes on the plan's own key below, where it belongs.
+        plan_stamp = (system_plan or "").strip() or PLAN_SYSTEM
         unload_comfy = bool(cfg.get("unload_comfy_models"))
         unload_llm = resolve_unload(unload_after_run, cfg)
 
@@ -456,7 +531,7 @@ class KinburgPhantasStoryboard:
 
         try:
             env = diskcache.key(_cfg_fingerprint(cfg), brief, cast, style_notes, sys_style,
-                                sys_plan, sys_frame, n_frames)
+                                plan_stamp, sys_frame, n_frames)
 
             # ------------------------------------------------------------------------- the bible
             bkey = diskcache.key(env, "bible")
@@ -483,7 +558,7 @@ class KinburgPhantasStoryboard:
                           + (" — " + ", ".join(n for n, _ in roster) if roster else ""))
 
             # -------------------------------------------------------------------------- the plan
-            pkey = diskcache.key(env, "plan", n_frames)
+            pkey = diskcache.key(env, "plan", n_frames, with_beats, sys_plan)
             hit = _store.load_json(pkey) if use_cache else None
             if hit:
                 plan_text = hit.get("text", "")
@@ -494,15 +569,24 @@ class KinburgPhantasStoryboard:
                     f"STYLE BIBLE (context — do not repeat it):\n{bible_text}\n\n"
                     + (f"THE CAST — refer to these people by exactly these names in 'present':\n"
                        + "\n".join(n for n, _ in roster) + "\n\n" if roster else "")
-                    + f"Plan exactly {n_frames} keyframes and exactly {n_shots} transitions between "
-                    f"them. Keyframe 1 is the sequence's first image and keyframe {n_frames} is its "
+                    + (f"Plan exactly {n_frames} keyframes and exactly {n_shots} transitions "
+                       f"between them. " if with_beats else
+                       f"Plan exactly {n_frames} keyframes and NO transitions: these pictures are "
+                       f"shown one after another as stills, with no video running between them, so "
+                       f"answer with the 'frames' array alone. The whole brief is still spent "
+                       f"across the keyframes — the change lives in their states. ")
+                    + f"Keyframe 1 is the sequence's first image and keyframe {n_frames} is its "
                     f"last.")
-                plan_text = ask(sys_plan, plan_user, "plan", grammar=_plan_grammar(n_frames))
+                plan_text = ask(sys_plan, plan_user, "plan",
+                                grammar=_plan_grammar(n_frames, with_beats))
                 if use_cache:
                     _store.save_json(pkey, {"text": plan_text})
                 report.append("plan: written")
-            frames_plan, trans, notes = parse_plan(plan_text, n_frames)
+            frames_plan, trans, notes = parse_plan(plan_text, n_frames, with_beats)
             report.extend("⚠ " + n for n in notes)
+            if not with_beats:
+                report.append("beats: off — stills only. The shots are still there, blank, so the "
+                              "board stays a chain Morpheus can be given later.")
 
             # ------------------------------------------------------------------------- the clock
             if typed is not None:
@@ -511,7 +595,8 @@ class KinburgPhantasStoryboard:
             else:
                 shot_frames = timing.plan_frames(n_shots, [t["weight"] for t in trans],
                                                  target_length, preferred_length)
-                report.append("lengths: weighted by the planner "
+                report.append("lengths: even — no beats to weight them" if not with_beats else
+                              "lengths: weighted by the planner "
                               f"({', '.join(str(int(t['weight'])) for t in trans)})")
             report.append(timing.describe(shot_frames))
             report.extend("⚠ " + w for w in timing.range_warnings(shot_frames))
@@ -573,7 +658,8 @@ class KinburgPhantasStoryboard:
         if use_cache:
             _store.prune()
 
-        beats = "\n".join(f"{i + 1}. {t['beat']}" for i, t in enumerate(trans))
+        beats = ("\n".join(f"{i + 1}. {t['beat']}" for i, t in enumerate(trans))
+                 if with_beats else "")
         durs = ", ".join(f"{timing.seconds_for(n):.2f}" for n in shot_frames)
         style = "\n\n".join(f"[{k.upper()}]: {v}" for k, v in bible.items() if v)
         return (board, PROMPT_SEP.join(prompts), beats, durs, style, "\n".join(report))

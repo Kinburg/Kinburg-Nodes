@@ -37,13 +37,48 @@ as the model's **recipe**. Then those loaders can be deleted from the workflow.
 * **It refuses what it can't rebuild**, by node name and reason: anything needing execution context
   (hidden inputs), list in/out, subgraph expansion, or an output node. Those stay in the graph and
   go into Model Select's override inputs instead (below).
+* **`sampler_settings` + `preset_name`** (optional) store a first preset in the same run that
+  registers the model — one node for the whole "set this model up" moment. The many *later* saves
+  still go through Settings Save: it sits inline and carries the measured score and time, neither
+  of which exists before the model has ever run.
 
-**Model Select 🎛** rebuilds the chosen model from its recipe and emits its preset. Outputs:
-`model`, `model_negative` (present when the bundle has an unconditional-pass model — wire it into
-Chimera's `model_negative`), `clip`, `vae`, `sampler_settings`, `width`, `height`, `info`,
-`gen_extra_info` and `model_id`. Because `sampler_settings` is a `SAMPLER_CFG` **chain**, a saved
-multi-stage preset drops straight into Chimera's `stage_a` (it flattens chains into stages) or into
-Ouroboros.
+**LoRAs are part of a bundle, and so are their trigger words.** A LoRA loader is a pure function of
+its inputs like any other node, so a `Load Diffusion Model → Lora Trigger Loader → Lora Unlim
+Accumulator` stack captures and replays whole — one registered model *is* "this checkpoint with
+these two LoRAs at these strengths". What used to fall out of that was the words: Capture now reads
+them out of the captured recipe, where `Lora Trigger Loader` left them as plain literals, and stores
+them on the model.
+
+Read out of the recipe, not taken from an input, and that is not a shortcut. Capture's inputs are
+`lazy` — that is what makes registering a 40 GB assembly free — and a lazy input never executes its
+upstream, so a `triggers` wire would arrive empty. Making it eager would mean *running* the
+accumulator, which needs the MODEL, which is the entire loader stack. The literals are already in
+the graph Capture copies, so wiring `model` and `clip` as always is enough. A LoRA at strength 0
+contributes nothing (the same rule the accumulator applies), and a word two LoRAs share appears
+once. If the bundle uses a plain `LoraLoader`, which carries no word to find, the report says so and
+the 🗂 Library dialog has a field for typing them — re-capturing won't wipe what you typed there.
+
+**Model Select 🎛** rebuilds the chosen model from its recipe and emits its preset. Outputs, in
+order: `model`, `model_negative` (present when the bundle has an unconditional-pass model — wire it
+into Chimera's `model_negative`), `positive`, `negative`, `clip`, `vae`, `sampler_settings`,
+`prompt`, `triggers`, `info`, `gen_extra_info` and `model_id` — what the sampler needs first, then
+the rest of the bundle, then the text, then the reporting. Because `sampler_settings` is a
+`SAMPLER_CFG` **chain**, a saved multi-stage preset drops straight into Chimera's `stage_a` (it
+flattens chains into stages) or into Ouroboros.
+
+* **The prompt side.** Wire a `prompt` in (connect-only — prompts live in prompt/LLM nodes) and it
+  comes back out with the bundle's trigger words appended in their own paragraph, exactly the layout
+  Lora Unlim Accumulator uses. `triggers` is the words on their own: that is the one to wire into
+  Ouroboros' `trigger_words`, so they survive the LLM rewriting the prompt. And since the CLIP is
+  already here, `positive` / `negative` come out encoded and ready for the sampler — no CLIP Text
+  Encode node, no second place for the model's CLIP to be wired to.
+* **`negative_prompt` is optional**, and leaving it unwired is a real choice rather than a blank:
+  `negative` is then the positive conditioning **zeroed out**, which is what the flow models want —
+  not the encoding of an empty string, which is a different thing that people reach for by mistake.
+* **Nothing is encoded unless a prompt is actually wired.** A node runs whole regardless of which
+  outputs anyone reads, so an unconditional encode would pull CLIP into VRAM for every graph that
+  only wanted a model. Unwired, `positive` / `negative` are empty and `clip` is there to encode with
+  as before — which is also the escape hatch for a model that needs its own encoder node.
 
 * A **`🏷 family` filter** sits above the model dropdown and narrows it to one family — with a dozen
   community finetunes per base model, a flat list of everything is unusable. Changing it **clears the
@@ -58,16 +93,21 @@ Ouroboros.
   model's **default** preset. Ordering puts the default first, then the best measured score.
 * **Only one model is ever loaded**, no matter how many are registered — the others are data, not
   nodes. `unload_others` (on by default) frees ComfyUI's resident models and the library's own
-  cache first, keeping the one-heavy-thing-at-a-time discipline the LLM nodes use.
+  cache first, keeping the one-heavy-thing-at-a-time discipline the LLM nodes use. It skips that
+  when the bundle it is about to hand back is *already* the resident one and there is nothing to
+  rebuild — otherwise every re-run of this node (a nudge of `width`, an edit of the wired `prompt`)
+  would unload the model only for ComfyUI to push the same weights straight back to VRAM.
 * `seed_override` `-1` keeps the seed the preset was measured with; anything else replaces it on
-  every stage. `width` / `height` are fallbacks — a preset saved with a latent carries the real size
-  and wins.
+  every stage. There is **no size here**, and none on Settings Select either: the latent's size
+  belongs to the latent, and a `width` / `height` pair on a model or settings node was one more
+  thing to keep in sync with it. A preset saved with a latent still *records* the size it was
+  measured at — `info` says `measured at 1024×1024` — it just isn't a wire any more.
 * **`model_override` / `clip_override` / `vae_override`** win over the library. That's the escape
   hatch for an assembly Capture refused: keep those loaders in the graph, wire them in, and presets
   keep working. There is no assembly this node can't serve, only ones it can't store.
 
 **Settings Select ⚙** is Model Select minus the loading: pick a preset, get its `sampler_settings`,
-`width`, `height`, `label`, `info` and `gen_extra_info` — and no model. That's the investigating
+`label`, `info` and `gen_extra_info` — and no model. That's the investigating
 case: **one model, several runs at different settings and seeds**, compared side by side, where two
 Model Selects would each want to own the model. `seed_override` is the field to sweep, and `label`
 ("`anc4+euler4 · seed 999`") is a ready-made caption for Image Compare via a Set/Get Accumulator.
@@ -81,7 +121,12 @@ jump to the model's default preset — choosing presets is the point of the node
 choice that isn't valid for the current model. If the preset carries bundle `overrides`, `info` says
 they don't apply here: overrides retune the model, and this node never builds one.
 
-Settings Select carries the same `🏷 family` filter. **Settings Save** doesn't need one: wire Model
+Settings Select carries the same `🏷 family` filter, and the same **🗂 Library** button — it is a
+node for picking presets, so it needs the place they are renamed, re-tagged, defaulted and deleted.
+Opened from either node the dialog puts the model that node currently has in effect **on top**,
+marked `this node`, instead of leaving you to find it among twenty; nothing is filtered out.
+
+**Settings Save** doesn't need a family filter: wire Model
 Select's `model_id` into it and the preset is filed under the model that actually ran — no second pick
 to keep in sync, and no way to file a preset under the wrong model by mistake.
 
@@ -105,6 +150,33 @@ to the (still comma-separated, still multi-value) `families` field; the Library 
 known family as a **click-to-toggle chip** per model, with a text box only for creating a new one.
 And if a family really is new, the report says so and suggests the closest existing name — creating
 one stays possible, mistaking one for it doesn't stay silent.
+
+Each model card in the dialog also has a **`triggers`** field — the LoRA words Model Select appends
+to the prompt. Capture fills it in by itself when the bundle holds a `Lora Trigger Loader`; the field
+is for a plain `LoraLoader`, which carries no word to find. What you type there survives a
+re-capture (Capture only overwrites when it actually harvested something).
+
+**Nothing in the library is out of reach.** Two things used to be, and both are now their own section
+in the dialog:
+
+* **🌐 Shared presets** are listed on their own, not only inside the model cards whose families
+  match. A shared preset whose family nothing declares — after clearing models out, or after a typo
+  — used to be invisible everywhere and impossible to delete. Each row carries its `families` field,
+  which is the field that decides which models see it at all, and says so out loud when it is empty.
+* **🏷 Families** get a section with a rename field and a delete button per family, plus a count of
+  what declares each one. A family is stored *nowhere* on its own — `all_families()` derives the
+  list from whoever declares one — so fixing a typo used to mean visiting every model and every
+  shared preset that carried it, and through the nodes there was no way at all. Rename and delete
+  rewrite every holder in a single write, matching case-insensitively (which is how `presets_for()`
+  compares them anyway). Deleting a family does **not** delete a shared preset left with none: that
+  is a separate decision, and the section above keeps it reachable either way.
+
+**A failed read can no longer become an erased library.** `_load()` used to hand back an empty
+library on *any* error, and the caller — always about to write — persisted that emptiness. Now a
+*missing* file is a legitimately empty library (first run), while a file that exists and won't parse
+makes every write path refuse to run and say so; reads stay lenient so the nodes still load. Every
+write also rolls a copy to `store.json.bak1` … `.bak5` next to the store. Recipes are captured from
+loader stacks that get deleted from the workflow afterwards, so a lost library exists nowhere else.
 
 **Editing a bundle without re-capturing it.** The 🗂 Library dialog's **🔧 Recipe** button opens an
 editor for the captured assembly's settings — every literal input of every node in it. Controls are

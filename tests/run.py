@@ -19,6 +19,7 @@ SUITES = [
     ("chat", "py", TESTS / "test_chat.py"),
     ("worker", "py", TESTS / "test_worker.py"),
     ("llm_reasoning", "py", TESTS / "test_llm_reasoning.py"),
+    ("gguf_info", "py", TESTS / "test_gguf_info.py"),
     ("send_image", "py", TESTS / "test_send_image.py"),
     ("send_image_log", "py", TESTS / "test_send_image_log.py"),
     ("dream_board", "py", TESTS / "test_dream_board.py"),
@@ -30,7 +31,10 @@ SUITES = [
     ("morpheus_trims", "py", TESTS / "test_morpheus_trims.py"),
     ("phantas_board", "py", TESTS / "test_phantas_board.py"),
     ("phantas", "py", TESTS / "test_phantas.py"),
+    ("card_presets", "py", TESTS / "test_card_presets.py"),
+    ("save_clip", "py", TESTS / "test_save_clip.py"),
     ("lora_triggers", "py", TESTS / "test_lora_triggers.py"),
+    ("model_triggers", "py", TESTS / "test_model_triggers.py"),
     ("siren_cast", "py", TESTS / "test_siren_cast.py"),
     ("siren_score", "py", TESTS / "test_siren_score.py"),
     ("lazy_guard", "py", TESTS / "test_lazy_guard.py"),
@@ -40,6 +44,8 @@ SUITES = [
     ("chat.js", "js", TESTS / "js" / "build_chat.mjs"),
     ("dream_board.js", "js", TESTS / "js" / "build_dream_board.mjs"),
     ("group_control.js", "js", TESTS / "js" / "build_group_control.mjs"),
+    ("model_presets.js", "js", TESTS / "js" / "build_model_presets.mjs"),
+    ("card_presets.js", "js", TESTS / "js" / "build_card_presets.mjs"),
 ]
 
 

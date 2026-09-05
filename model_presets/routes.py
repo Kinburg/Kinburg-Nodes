@@ -1,9 +1,12 @@
 """PromptServer routes for the Model Library.
 
   GET  /kinburg/models/data     -- models (label / families / slots / preset summaries) + shared pool
-  POST /kinburg/models/model    -- {id, label?, families?, tags?, notes?, rename?, delete?}
+  POST /kinburg/models/model    -- {id, label?, families?, tags?, notes?, triggers?, rename?,
+                                    delete?}
   POST /kinburg/models/preset   -- {model, name, shared?, tags?, families?, notes?, set_default?,
                                     delete?}  (metadata only — stages come from Settings Save)
+  POST /kinburg/models/family   -- {name, rename?} | {name, delete: true}  — a family is stored
+                                    nowhere on its own, so both rewrite every holder at once
   GET  /kinburg/models/recipe   -- ?id=<model_id>  the full recipe, for the Manage dialog's detail view
 
 Guarded so the package still imports without ComfyUI/aiohttp present (registry scan, tests).
@@ -87,12 +90,32 @@ try:
                 data = store.rename_model(mid, body["rename"])
             else:
                 data = store.upsert_model(mid, families=body.get("families"),
-                                          tags=body.get("tags"), notes=body.get("notes"))
+                                          tags=body.get("tags"), notes=body.get("notes"),
+                                          triggers=body.get("triggers"))
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=500)
         return web.json_response({"ok": True, **data})
+
+    @routes.post("/kinburg/models/family")
+    async def _family(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+        try:
+            name = body.get("name") or ""
+            if body.get("delete"):
+                touched, orphaned, data = store.delete_family(name)
+                return web.json_response({"ok": True, "touched": touched, "orphaned": orphaned,
+                                          **data})
+            touched, data = store.rename_family(name, body.get("rename") or "")
+            return web.json_response({"ok": True, "touched": touched, **data})
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
 
     @routes.post("/kinburg/models/preset")
     async def _preset(request):

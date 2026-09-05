@@ -367,8 +367,9 @@ Morpheus writes *shots*; this writes *states*. Three LLM calls, all of them stre
 
 1. a **style bible** — `[STYLE]`, `[CAST]`, `[SUBJECT]`, `[NEGATIVE]` — written once and stamped on
    every frame byte-for-byte;
-2. a **plan**, GBNF-constrained to exactly N keyframes and N−1 transitions, so a model that
-   miscounts cannot even emit the wrong number of entries;
+2. a **plan**, GBNF-constrained to exactly N keyframes and N−1 transitions — or to the keyframes
+   alone, see `write_beats` below — so a model that miscounts cannot even emit the wrong number of
+   entries;
 3. one call **per frame**, shown the bible, its own framing and state, whoever is in it, and the
    previous frame's prompt, so consecutive pictures are of the same world.
 
@@ -397,6 +398,25 @@ Two more rules are baked into the prompts and are the reason the output holds to
   be a camera *move* — the plan assigns framings to the boundaries and each shot performs the move
   between two of them.
 
+**Slideshow boards.** `write_beats` (on by default) is the video half of the plan: the beats and
+the weights that set the shot lengths. Turn it off when the keyframes are going to `Save Clip` as
+slides and nothing downstream renders video — those directions would be written for nobody. What
+saves the time is the grammar, not an instruction: the transitions array is simply gone from the
+shape the model may emit, so it cannot spend a token on it. On a thirty-keyframe board that is
+twenty-nine paragraphs the planner never writes. The `beats` output comes out empty and the shot
+lengths come out even, but the board still carries one blank shot per gap, so it stays a valid chain
+— switch it back on later, or hand the board to Morpheus anyway and `Morpheus Storyboard` writes
+the beats itself from the brief.
+
+The switch also **swaps the planner's system prompt**, and that is the half that changes what the
+pictures look like. The continuous-take rule exists because a video model has to *travel* from one
+framing to the next, so a crop change has to be a camera move. Nothing travels between two slides:
+the cut is free. Planned under the video rules, a slideshow comes out as thirty variations on one
+camera position, so the stills prompt asks for an edit instead — scale alternating, no two
+neighbours framed alike, and some frames deliberately given nobody at all, because a slideshow needs
+air the way a continuous take does not. Both shipped prompts count as "the default", so an untouched
+`system_plan` follows the mode; type your own text there and yours is used in both.
+
 **Counting.** `count_mode` picks the unit, and the units are the same variable:
 
 | `count_mode` | you type | you get |
@@ -424,9 +444,10 @@ Two consequences worth knowing before you type a number:
 Everything written is cached on disk under a causal key, so re-running the graph does not rewrite
 the prompts and invalidate finished frames. Edit the `prompts` output, paste it back into
 `prompts_override` (frames separated by a line of `---`), and those frames are used verbatim without
-an LLM call — an empty entry means "write this one". The three system prompts are editable fields
+an LLM call — an empty entry means "write this one". The system prompts are editable fields
 (`system_style`, `system_plan`, `system_frame`); the plan's JSON shape comes from the generated
-grammar, so editing them can change the writing but never break parsing.
+grammar, so editing them can change the writing but never break parsing. `system_plan` is the one
+with two defaults, picked by `write_beats` as described above.
 
 Give this node a **light text-only** model. It never looks at a picture, and on a small card the
 VRAM it does not take is VRAM the sampler gets.
@@ -556,6 +577,73 @@ is otherwise invisible until the video looks wrong.
 while the *whole* track is still analysed, because tempo and downbeat are measured far more reliably
 over three minutes than over twenty seconds. `trims` is the per-shot frame count to drop; wire it
 into Morpheus, or read it and trim at assembly.
+
+---
+
+## 🎬 `save_video/` — Save Clip
+
+> **System Purpose & Overview**  
+> Turn a picture (or a slideshow) plus a song into an mp4, with the pictures changing where the
+> music does.
+
+**`Save Clip`** is the video sibling of **Save Song**: same counter-based naming under
+`ComfyUI/output`, the same "quality in words, not codec flags" dropdown, the same `Song Tags` going
+into the file itself, and a player on the node when it is done. Required are an **`image`** (one
+frame, or a batch of slides) and an **`audio`**; it writes an **h264 + AAC mp4** and outputs the
+`video` object (so it also chains into ComfyUI's own video nodes), the saved `path` and a `report`.
+Category `Kinburg-Nodes/video`.
+
+**The batch is the list of pictures, not the list of frames.** A 4-image batch over a 3-minute song
+is four shots. This is also why the node exists at all rather than being `Create Video` + `Save
+Video`: those encode one frame per batch item, so the same song at 30 fps means a 5 400-frame
+batch — about 17 GB of tensor for a 1024×1024 picture, before the encoder has seen anything. Here
+at most a couple of prepared slides are alive at once and the encoder is fed frame by frame, so the
+memory needed is set by the frame *size* and never by the song's length.
+
+**Timing comes from the audio; the plan only supplies proportions.** A Siren plan is written in
+*bars*, and bars are only seconds once you know the tempo — which lives on other nodes, and the
+moment the two disagree the pictures slide off the music. The true length of the track, meanwhile, is
+right there in the `audio` input. So the plan is read for its **ratios** and scaled so the last slide
+ends on the last sample: no bpm to wire, no drift, and the stretch factor is printed in the `report`
+where a plan that came out 5% short is visible instead of silent. Two shapes are read — **Siren
+Score**'s / **Siren Cast**'s `plan` (`label | voice | 16 bars` rows, which is also where the section
+labels come from) and **Orpheus**'s `durations` (a plain comma list of seconds, already cut to the
+music). With nothing wired the song is split evenly.
+
+**`layout`** is how the slides are handed to the sections:
+
+* **one slide per section** — the picture changes on the section boundary. More slides than sections
+  and the extra ones subdivide the *longest* sections; fewer and they cycle.
+* **by section label** — every row called `Chorus` gets the **same** slide, so the chorus shot comes
+  back the way it does in a cut music video. It costs nothing, because the labels are already in the
+  plan.
+* **even** — the plan is ignored and the song is split equally.
+
+Neighbouring segments that end up on the same picture are **fused**, so a dissolve is never asked to
+blend a picture into a copy of itself.
+
+**`crossfade`** is seconds of dissolve at each change, centred **on** the cut — half before, half
+after, so the moment the two pictures are equal is the moment the music turns. It is clamped to 40%
+of the shorter neighbour, because a 1-second fade across a 1.5-second section is not a transition,
+it is the whole shot. **`ken_burns`** (off by default) is a slow zoom and drift over each slide, in
+and out alternately: a still held for three minutes reads as a broken video, and this is what makes
+it read as a shot. It is not free — every frame becomes unique, so file size and encode time grow
+several times over, and it wants 24 fps or more.
+
+**`fps`** defaults to **12** on purpose. Nothing moves in a slideshow, so this is almost entirely
+file size and encode time; raise it only when `crossfade` or `ken_burns` is on, since at 12 fps a
+dissolve steps rather than flows. **`frame_size`** takes the picture's own size or one of the
+platform shapes (16:9, 9:16, 1:1), always with even sides — `yuv420p` requires them, and an odd one
+fails inside libx264 rather than in the node. **`fit`** decides what happens when the picture is a
+different shape: padded onto a blurred enlargement of itself, padded onto black, or cropped to fill.
+
+Wire the **`lyrics`** (the same text that went to Siren) and each section's own lines are written to
+a **`.srt`** beside the video, timed to **the plan's section**, not to whatever picture happens to be
+on screen — one still over a whole song is one segment, and the song still has six sections with
+words in them. So subtitles need a `plan` wired, and they work under every `layout`, including
+`even`. Sections are matched to plan rows by **label**, not by position, because a plan carries rows
+the lyrics never had — the instrumental blocks Siren Score adds to reach the target length — and a
+section with no sung lines simply gets no cue rather than an empty one.
 
 ---
 

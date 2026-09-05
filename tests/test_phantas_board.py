@@ -31,14 +31,15 @@ CAST_TEXT = ("Mira — a woman of 30, shaved head, jade eyes, silver jacket\n"
 PRESENT = ["Mira"]
 
 
-def plan_json(n_frames, weights=None, present=None):
+def plan_json(n_frames, weights=None, present=None, with_trans=True):
     w = weights or [1] * (n_frames - 1)
     pres = PRESENT if present is None else present
-    return json.dumps({
-        "frames": [{"framing": f"framing {i + 1}", "present": list(pres),
-                    "state": f"state {i + 1}"} for i in range(n_frames)],
-        "transitions": [{"beat": f"beat {i + 1}", "weight": w[i]} for i in range(n_frames - 1)],
-    })
+    obj = {"frames": [{"framing": f"framing {i + 1}", "present": list(pres),
+                       "state": f"state {i + 1}"} for i in range(n_frames)]}
+    if with_trans:
+        obj["transitions"] = [{"beat": f"beat {i + 1}", "weight": w[i]}
+                              for i in range(n_frames - 1)]
+    return json.dumps(obj)
 
 
 PLAN = {"n": 4, "weights": None}
@@ -50,7 +51,9 @@ def fake_ask(cfg, system, user_prompt, unload_comfy, tag, emit=None, grammar="")
     if tag == "style bible":
         return BIBLE, None
     if tag == "plan":
-        return plan_json(PLAN["n"], PLAN["weights"]), None
+        # answer the shape the grammar allows, so every beats-off check below is also a check
+        # that the node handed the planner the right grammar
+        return plan_json(PLAN["n"], PLAN["weights"], with_trans="transitions" in grammar), None
     return f"body of {tag}", None
 
 
@@ -177,6 +180,73 @@ check("frame and trans have the fields the parser reads",
 check("a two-frame board is the smallest legal grammar", "trans" in bd._plan_grammar(2))
 check("the plan call is the only grammar call",
       [c["tag"] for c in CALLS if c["grammar"]] == ["plan"])
+
+# ------------------------------------------------------------------------ beats off (a slideshow)
+g_off = bd._plan_grammar(4, False)
+check("beats off drops the transitions array", "transitions" not in g_off)
+check("…and every production only it reached",
+      not any(f"\n{r} ::=" in "\n" + g_off
+              for r in ("trans", "int", "digit")))
+check("…while the keyframes are still forced",
+      g_off.count("frame ws") + g_off.count("ws frame") >= 4)
+check("beats on is byte-for-byte the grammar it always was",
+      bd._plan_grammar(4, True) == bd._plan_grammar(4))
+
+check("an untouched node gets the mode's own prompt",
+      bd._plan_system("", True) == bd.PLAN_SYSTEM
+      and bd._plan_system("", False) == bd.PLAN_SYSTEM_STILLS)
+check("…and so does one still holding the widget's pre-filled default",
+      bd._plan_system(bd.PLAN_SYSTEM, False) == bd.PLAN_SYSTEM_STILLS
+      and bd._plan_system(bd.PLAN_SYSTEM_STILLS, True) == bd.PLAN_SYSTEM)
+check("a prompt somebody typed wins in both modes",
+      bd._plan_system("mine", True) == "mine" and bd._plan_system("mine", False) == "mine")
+check("the stills prompt asks for the frames array alone",
+      "no transitions" in bd.PLAN_SYSTEM_STILLS and "CUT IS FREE" in bd.PLAN_SYSTEM_STILLS)
+check("…and drops the continuous-take rule the video prompt needs",
+      "ONE CONTINUOUS TAKE" in bd.PLAN_SYSTEM and "CONTINUOUS TAKE" not in bd.PLAN_SYSTEM_STILLS)
+check("both prompts still describe the same three keyframe fields",
+      all(f'"{k}"' in bd.PLAN_SYSTEM_STILLS for k in ("framing", "present", "state")))
+
+f, t, notes = bd.parse_plan(plan_json(4, with_trans=False), 4, with_transitions=False)
+check("a frames-only plan parses clean", len(f) == 4 and len(t) == 3 and not notes)
+check("…and still yields one blank, evenly weighted shot per gap",
+      all(x == {"beat": "", "weight": 1.0} for x in t), t)
+
+PLAN["n"] = 4
+board, prompts, beats, durs, style, report = run(write_beats=False)
+plan_call = [c for c in CALLS if c["tag"] == "plan"][0]
+check("the planner is told there is no video between the stills",
+      "NO transitions" in plan_call["prompt"])
+check("…and is given the slideshow system prompt", plan_call["system"] == bd.PLAN_SYSTEM_STILLS)
+check("…and is given a grammar that cannot emit any",
+      "transitions" not in plan_call["grammar"])
+check("the beats output is empty, so Morpheus Storyboard would plan its own", beats == "", repr(beats))
+check("the board still has a shot per gap", len(board["shots"]) == 3)
+check("…blank and evenly weighted",
+      all(s["beat"] == "" and s["weight"] == 1.0 for s in board["shots"]))
+check("…at legal lengths, so it is still a chain Morpheus can take",
+      all(s["frames"] in T.legal_frames() for s in board["shots"]))
+check("the keyframes are still written, one call each",
+      len([c for c in CALLS if c["tag"].startswith("frame ")]) == 4)
+check("the frames still carry the bible and the cast",
+      all("grainy 35mm anamorphic" in f and "shaved head" in f
+          for f in prompts.split(bd.PROMPT_SEP)))
+check("the report says the beats are off", "beats: off" in report, report)
+check("…and that nothing weighted the lengths", "lengths: even" in report, report)
+check("a plan with no transitions is not reported as a miscount",
+      "transitions, not" not in report, report)
+
+run(write_beats=True)
+keys_on = list(SAVED)
+run(write_beats=False)
+keys_off = list(SAVED)
+check("toggling beats re-rolls the plan", keys_off[1] != keys_on[1])
+check("…but not the bible, and not the frames it did not change",
+      keys_off[0] == keys_on[0] and keys_off[2:] == keys_on[2:])
+
+run(write_beats=True)
+check("beats on still gets the continuous-take prompt",
+      [c for c in CALLS if c["tag"] == "plan"][0]["system"] == bd.PLAN_SYSTEM)
 
 # ------------------------------------------------------------------------------- plan robustness
 f, t, notes = bd.parse_plan(plan_json(4), 4)

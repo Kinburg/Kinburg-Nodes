@@ -476,6 +476,41 @@ def _pair_ids(pos, neg, prefix, pad, audio_start, use_cfg):
     return [s + tail for s in seqs]
 
 
+def _graph_dropper():
+    """comfy's own end-of-node graph cleanup, to be run at every SECTION boundary instead.
+
+    Since comfy's `Prs/ace graphs` the ACE 1.5 audio-code LM runs its decode steps through a captured
+    CUDA graph (`ace15.py` turns on `graph_dynamic_vbar_blocks`), and the graph has the addresses of
+    that call's `FixedKV` key/value/position/seqlen baked into it. Comfy drops those graphs exactly
+    once, in `execution.py`'s `finally` — because comfy's own sampler is called exactly once per node
+    execution.
+
+    This node calls it once per section, and every call allocates a fresh KV cache. The graph cache
+    is keyed on weight residency alone and knows nothing about the cache it was captured against, so
+    from the second section on comfy replayed the first section's graph against buffers that had
+    already been freed and handed back out. `position` then held whatever the allocator had put
+    there, and the scatter into the cache (`llama.py`, `fixed_cache.key.scatter_(1, position, xk)`)
+    tripped a device-side assert — which takes the whole ComfyUI process down with it, not just the
+    prompt.
+
+    So the graphs go at every section boundary. The cost is a re-warm and a re-capture per section —
+    two decode steps — against a section that is dozens to hundreds of steps long.
+
+    Returns None on a comfy that has none of this, where there is nothing to drop."""
+    try:
+        import comfy.model_prefetch
+    except Exception:
+        return None
+    return getattr(comfy.model_prefetch, "cleanup_prefetch_queues", None)
+
+
+def _decode_is_graphed(lm):
+    """Whether comfy will capture a decode-step CUDA graph for this LM at all. Only used to decide
+    whether a missing `_graph_dropper` is worth warning about."""
+    model = getattr(getattr(lm, "transformer", None), "model", None)
+    return bool(getattr(model, "graph_dynamic_vbar_blocks", False))
+
+
 class _OnePlanBar:
     """One progress bar for the whole plan instead of one per section.
 
@@ -678,6 +713,14 @@ class KinburgSirenCast:
         if not bar.ok:
             notes.append("comfy.utils has moved ProgressBar or model_trange, so the plan's progress "
                          "is reported one section at a time again")
+        drop_graphs = _graph_dropper()
+        if drop_graphs is None and _decode_is_graphed(lm):
+            notes.append("comfy captures a CUDA graph for the LM's decode step, but "
+                         "comfy.model_prefetch.cleanup_prefetch_queues has moved — so the graph "
+                         "cannot be dropped between sections and it will be replayed against a KV "
+                         "cache that no longer exists. If this run dies on a 'scatter gather kernel "
+                         "index out of bounds' assert, that is why: start ComfyUI with "
+                         "--disable-cuda-graphs until this node catches up.")
         for i, row in enumerate(rows):
             caption = _join_caption(base_caption, row["add"], row["extra"])
             if guidance == GUID_DELTA:
@@ -715,6 +758,10 @@ class KinburgSirenCast:
                     top_k=(int(lm_params["top_k"]) or None), min_p=float(lm_params["min_p"]),
                     seed=int(seed) + i, min_tokens=n, max_new_tokens=n)
             secs = time.perf_counter() - t0
+            # The decode graph comfy just captured points at the KV cache THIS call allocated; the
+            # next section allocates its own, so the graph has to go with it. See `_graph_dropper`.
+            if drop_graphs is not None:
+                drop_graphs()
             if len(got) < n:
                 notes.append(f"{row['label']}: the LM stopped after {len(got)} of {n} codes — the "
                              f"rest was padded, so the tail of that section has no plan")

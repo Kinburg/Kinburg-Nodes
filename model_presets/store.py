@@ -25,6 +25,7 @@ import copy
 import difflib
 import json
 import os
+import shutil
 import threading
 
 NONE = "🚫 None"
@@ -100,17 +101,44 @@ def _norm_model(m):
         "families": _norm_list(m.get("families")) or [],
         "tags": _norm_list(m.get("tags")) or [],
         "notes": str(m.get("notes") or ""),
+        # LoRA trigger words this bundle needs in the prompt. A property of the ASSEMBLY (the
+        # recipe carries the LoRAs), not of a preset — a different LoRA set is a different model id.
+        "triggers": str(m.get("triggers") or ""),
         "recipe": {"nodes": recipe.get("nodes") or {}, "outputs": recipe.get("outputs") or {}},
         "presets": presets,
     }
 
 
-def _load():
-    try:
-        with open(_store_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
+BACKUPS = 5
+
+
+def _load(strict=False):
+    """Read the library. ``strict`` is for the WRITE paths and it is the whole safety story here.
+
+    A read that fails used to hand back an empty library, and the caller — always about to write —
+    then persisted that emptiness over the real thing. One unreadable moment and the whole library
+    was gone. So: a MISSING file is a legitimately empty library (first run), but a file that
+    exists and can't be read or parsed raises, and every writer refuses to run rather than replace
+    what it could not see. Readers keep the old lenient behaviour, loudly.
+    """
+    path = _store_path()
+    data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("the library file is not a JSON object")
+        except Exception as e:
+            if strict:
+                raise RuntimeError(
+                    f"[Kinburg ModelLibrary] refusing to write: '{path}' exists but could not be "
+                    f"read ({e}). Nothing was changed. Fix or restore the file first — "
+                    f"{_backup_path(1)} and its siblings are the last {BACKUPS} good versions."
+                ) from e
+            print(f"[Kinburg ModelLibrary] could not read '{path}' ({e}) — reporting an empty "
+                  f"library. NOTHING will be written until it reads again.")
+            data = {}
     models = {}
     for mid, m in (data.get("models") or {}).items():
         nm = _norm_model(m)
@@ -124,9 +152,34 @@ def _load():
     return {"models": models, "shared": shared}
 
 
+def _backup_path(n):
+    return _store_path() + f".bak{n}"
+
+
+def _rotate_backups():
+    """Keep the last BACKUPS versions next to the store: .bak1 is the newest.
+
+    Recipes are captured from loader stacks that get deleted from the workflow afterwards, so a
+    lost library is hours of work that exists nowhere else. A rolling copy per write is cheap
+    insurance — the file is kilobytes — and it is what makes any future accident survivable.
+    """
+    p = _store_path()
+    if not os.path.exists(p):
+        return
+    try:
+        for n in range(BACKUPS, 1, -1):
+            older, newer = _backup_path(n), _backup_path(n - 1)
+            if os.path.exists(newer):
+                os.replace(newer, older)
+        shutil.copy2(p, _backup_path(1))
+    except Exception as e:
+        print(f"[Kinburg ModelLibrary] could not roll a backup of '{p}': {e}")
+
+
 def _write(data):
     p = _store_path()
     os.makedirs(os.path.dirname(p), exist_ok=True)
+    _rotate_backups()
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -164,6 +217,26 @@ def all_families():
         for f in p.get("families") or []:
             seen.setdefault(f.lower(), f)
     return [seen[k] for k in sorted(seen)]
+
+
+def family_usage(data=None):
+    """``{family: {"models": [...], "shared": [...]}}`` — who declares each family.
+
+    The dialog needs this to say what a rename or a delete is about to touch. Keyed by the name as
+    first seen, since a family is only ever compared case-insensitively anyway.
+    """
+    data = data or _load()
+    out, seen = {}, {}
+    def bucket(name):
+        key = seen.setdefault(name.lower(), name)
+        return out.setdefault(key, {"models": [], "shared": []})
+    for mid, m in sorted(data["models"].items()):
+        for f in m.get("families") or []:
+            bucket(f)["models"].append(mid)
+    for name, p in sorted(data["shared"].items()):
+        for f in p.get("families") or []:
+            bucket(f)["shared"].append(name)
+    return out
 
 
 def family_warnings(families, exclude_model=None, exclude_preset=None):
@@ -250,6 +323,7 @@ def full_data():
             "families": m.get("families") or [],
             "tags": m.get("tags") or [],
             "notes": m.get("notes") or "",
+            "triggers": m.get("triggers") or "",
             "slots": sorted((recipe.get("outputs") or {}).keys()),
             "node_count": len(graph),
             "classes": sorted({n.get("class_type") for n in graph.values()
@@ -278,6 +352,7 @@ def full_data():
         "all_families": ALL_FAMILIES,
         "order": [NONE] + sorted(data["models"].keys()),
         "families": all_families(),
+        "family_usage": family_usage(data),
         "models": models,
         "shared": {name: {"families": p.get("families") or [], "tags": p.get("tags") or [],
                           "stages": len(p.get("stages") or []), "score": p.get("score"),
@@ -290,15 +365,17 @@ def full_data():
 
 
 # ------------------------------------------------------------------------------------ writing
-def upsert_model(model_id, recipe=None, families=None, tags=None, notes=None):
+def upsert_model(model_id, recipe=None, families=None, tags=None, notes=None, triggers=None):
     """Add or update a model. Everything except ``model_id`` is optional and ``None`` means "keep
     what's there" — so re-capturing a bundle can't wipe the presets, families or notes that were
-    added around it later."""
+    added around it later. ``triggers`` follows the same rule, which is why Capture passes it only
+    when it actually harvested something: words typed by hand for a stock LoraLoader (which carries
+    none) must survive a re-capture of the same bundle."""
     model_id = (model_id or "").strip()
     if not model_id or model_id == NONE:
         raise ValueError("model id is required")
     with _LOCK:
-        data = _load()
+        data = _load(strict=True)
         m = data["models"].get(model_id) or _norm_model({})
         if recipe is not None:
             if not isinstance(recipe, dict) or not (recipe.get("nodes") or {}):
@@ -307,6 +384,8 @@ def upsert_model(model_id, recipe=None, families=None, tags=None, notes=None):
                            "outputs": recipe.get("outputs") or {}}
         if notes is not None:
             m["notes"] = str(notes)
+        if triggers is not None:
+            m["triggers"] = str(triggers).strip()
         for key, val in (("families", families), ("tags", tags)):
             nv = _norm_list(val)
             if nv is not None:
@@ -318,10 +397,70 @@ def upsert_model(model_id, recipe=None, families=None, tags=None, notes=None):
 
 def delete_model(model_id):
     with _LOCK:
-        data = _load()
+        data = _load(strict=True)
         data["models"].pop((model_id or "").strip(), None)
         _write(data)
     return full_data()
+
+
+def _family_buckets(data):
+    """Every place a family name is written: the models and the shared presets, in one list."""
+    return list(data["models"].values()) + list(data["shared"].values())
+
+
+def rename_family(old, new):
+    """Rename a family everywhere it is declared — models and shared presets alike.
+
+    A family is not stored anywhere on its own: `all_families()` derives the list from whoever
+    declares one, which is why there was no way to fix a typo without visiting every holder by
+    hand. Matching is case-insensitive because that is how `presets_for` compares them.
+    """
+    old = (old or "").strip()
+    new = (new or "").strip()
+    if not old:
+        raise ValueError("family name is required")
+    if not new:
+        raise ValueError("new family name is required (use delete to remove one)")
+    lo = old.lower()
+    with _LOCK:
+        data = _load(strict=True)
+        touched = 0
+        for holder in _family_buckets(data):
+            fams = holder.get("families") or []
+            if not any(f.lower() == lo for f in fams):
+                continue
+            holder["families"] = _norm_list([new if f.lower() == lo else f for f in fams])
+            touched += 1
+        if touched:
+            _write(data)
+    return touched, full_data()
+
+
+def delete_family(name):
+    """Drop a family from every model and shared preset that declares it.
+
+    A shared preset left with NO families is invisible to every model — it isn't deleted here, on
+    purpose: that is the caller's separate decision, and the dialog lists shared presets whether
+    they match anything or not so it stays reachable.
+    """
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("family name is required")
+    lo = name.lower()
+    with _LOCK:
+        data = _load(strict=True)
+        touched, orphaned = 0, []
+        for key, holder in list(data["shared"].items()) + [(None, m) for m in data["models"].values()]:
+            fams = holder.get("families") or []
+            if not any(f.lower() == lo for f in fams):
+                continue
+            holder["families"] = [f for f in fams if f.lower() != lo]
+            touched += 1
+            if key is not None and not holder["families"]:
+                orphaned.append(key)
+        if touched:
+            _write(data)
+    return touched, orphaned, full_data()
 
 
 def rename_model(old, new):
@@ -331,7 +470,7 @@ def rename_model(old, new):
     if not old or not new:
         raise ValueError("both names are required")
     with _LOCK:
-        data = _load()
+        data = _load(strict=True)
         if old not in data["models"]:
             raise ValueError(f"no model '{old}'")
         if new in data["models"] and new != old:
@@ -349,7 +488,7 @@ def upsert_preset(model_id, name, preset, shared=False, delete=False):
     if not name or name == NONE:
         raise ValueError("preset name is required")
     with _LOCK:
-        data = _load()
+        data = _load(strict=True)
         if shared:
             bucket = data["shared"]
         else:
@@ -379,7 +518,7 @@ def retag_preset(model_id, name, tags=None, families=None, notes=None, set_defau
     """Edit a preset's metadata without touching its stages (the Manage dialog's job)."""
     name = (name or "").strip()
     with _LOCK:
-        data = _load()
+        data = _load(strict=True)
         bucket = data["shared"] if shared else (data["models"].get(model_id) or {}).get("presets")
         if not bucket or name not in bucket:
             raise ValueError(f"no preset '{name}'")
@@ -459,7 +598,7 @@ def update_recipe(model_id, values):
     model_id = (model_id or "").strip()
     applied, rejected = [], []
     with _LOCK:
-        data = _load()
+        data = _load(strict=True)
         model = data["models"].get(model_id)
         if not model:
             raise ValueError(f"no model '{model_id}'")
@@ -498,7 +637,7 @@ def set_overrides(model_id, name, overrides, shared=False):
             raise ValueError(f"'{key}' is not a '<class_type>.<input>' key")
         clean[f"{cls_name}.{field}"] = _coerce(cls_name, field, value)
     with _LOCK:
-        data = _load()
+        data = _load(strict=True)
         bucket = data["shared"] if shared else (data["models"].get(model_id) or {}).get("presets")
         if not bucket or name not in bucket:
             raise ValueError(f"no preset '{name}'")
@@ -524,6 +663,11 @@ def resolve(model_id, preset_name):
     if preset:
         apply_overrides(recipe, preset.get("overrides") or {})
     return model, preset, recipe
+
+
+def model_triggers(model_id):
+    """The bundle's trigger words, or "" — what Model Select appends to the prompt."""
+    return str((get_model(model_id) or {}).get("triggers") or "").strip()
 
 
 def apply_overrides(recipe, overrides):

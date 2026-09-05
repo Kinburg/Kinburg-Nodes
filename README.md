@@ -2,7 +2,7 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.2.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-95-orange.svg)](#-node-index)
+[![nodes](https://img.shields.io/badge/nodes-97-orange.svg)](#-node-index)
 [![tests](https://img.shields.io/badge/tests-1395%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -16,7 +16,7 @@ A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **95** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **97** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -24,7 +24,7 @@ All **95** nodes, grouped by the package they live in. Every package links to it
 
 | Package | Nodes |
 |---|---|
-| [`local_llm/` — Local LLM (GGUF) & Live Logging](docs/llm.md#-local_llm--local-llm-gguf--live-logging) | `Context Sizer (GGUF)`, `Kinburg Live Log 📜`, `LLM Live Log (old id)`, `Local LLM (GGUF)`, `Local LLM Chat (GGUF)`, `Local LLM Settings (GGUF)`, `Send Image to Chat`, `Send Image to Live Log 📜`, `Token Counter (GGUF)`, `Vision Settings (GGUF)` |
+| [`local_llm/` — Local LLM (GGUF) & Live Logging](docs/llm.md#-local_llm--local-llm-gguf--live-logging) | `Context Sizer (GGUF)`, `Kinburg Live Log 📜`, `LLM Live Log (old id)`, `Local LLM (GGUF)`, `Local LLM Chat (GGUF)`, `Local LLM Model Info 🔍`, `Local LLM Settings (GGUF)`, `Send Image to Chat`, `Send Image to Live Log 📜`, `Token Counter (GGUF)`, `Vision Settings (GGUF)` |
 | [`llm_server/` — Local LLM (server client, text)](docs/llm.md#-llm_server--local-llm-server-client-text) | `Local LLM (server client, text)` |
 | [`context/` — Character Card, Entity Card, Context Collector](docs/llm.md#-context--character-card-entity-card-context-collector) | `Character Card`, `Context Collector`, `Entity Card` |
 | [`vision_judge/` — Vision LLM Judge & Criteria Builder](docs/llm.md#-vision_judge--vision-llm-judge--criteria-builder) | `Criteria Builder 📋`, `Vision LLM Judge` |
@@ -61,6 +61,7 @@ All **95** nodes, grouped by the package they live in. Every package links to it
 | [`morpheus/` — Morpheus Suite 🌙](docs/video.md#-morpheus--morpheus-suite-) | `Morpheus (Video Sampler) 🌙`, `Morpheus Dream Board 🌙`, `Morpheus Dream 🌙`, `Morpheus Storyboard 🌙` |
 | [`phantas/` — Phantas Suite 🎞](docs/video.md#-phantas--phantas-suite-) | `Phantas Storyboard 🎞`, `Phantas 🎞` |
 | [`orpheus/` — Orpheus Suite 🎶](docs/video.md#-orpheus--orpheus-suite-) | `Orpheus (Audio → Shots) 🎶` |
+| [`save_video/` — Save Clip](docs/video.md#-save_video--save-clip) | `Save Clip` |
 
 ### 🎛️ Presets & Asset Management
 
@@ -149,6 +150,7 @@ All **95** nodes, grouped by the package they live in. Every package links to it
 | Local LLM (GGUF) | `LocalLLMGGUF` | `Kinburg-Nodes/LLM` |
 | Local LLM (server client, text) | `LocalLLMServerText` | `Kinburg-Nodes/LLM` |
 | Local LLM Chat (GGUF) | `LocalLLMChatGGUF` | `Kinburg-Nodes/LLM` |
+| Local LLM Model Info 🔍 | `LocalLLMModelInfo` | `Kinburg-Nodes/LLM` |
 | Local LLM Settings (GGUF) | `LocalLLMSettingsGGUF` | `Kinburg-Nodes/LLM` |
 | Lora Trigger Loader | `LoraTriggerLoader` | `Kinburg-Nodes/lora` |
 | Lora Unlim Accumulator | `LoraUnlimAccumulator` | `Kinburg-Nodes/lora` |
@@ -170,6 +172,7 @@ All **95** nodes, grouped by the package they live in. Every package links to it
 | Repeat (Open) | `KinburgRepeatOpen` | `Kinburg-Nodes/flow/loops` |
 | Safetensors -> GGUF (llama.cpp) | `SafetensorsToGGUF` | `Kinburg-Nodes/LLM/GGUF` |
 | Sampler Settings | `KinburgSamplerSettings` | `Kinburg-Nodes/Bestiary` |
+| Save Clip | `KinburgSaveClip` | `Kinburg-Nodes/video` |
 | Save Song | `KinburgSaveSong` | `Kinburg-Nodes/audio` |
 | Send Image to Chat | `LocalLLMChatSendImage` | `Kinburg-Nodes/LLM` |
 | Send Image to Live Log 📜 | `KinburgSendImageToLog` | `Kinburg-Nodes/LLM` |

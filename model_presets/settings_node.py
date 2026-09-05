@@ -32,8 +32,6 @@ class SettingsSelect:
                 "model": (store.model_names(), {"default": store.NONE, "tooltip": "Whose presets to offer. Ignored when 'model_id' is wired — then the list follows that Model Select's own pick."}),
                 "preset": (ModelSelect._all_preset_names(), {"default": store.NONE, "tooltip": "A saved preset for the model above (its own, plus any shared with its families). Save presets with Settings Save."}),
                 "seed_override": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff, "tooltip": "-1 = use the seed stored in the preset. Anything else replaces the seed on every stage — this is the field to sweep when you want the same settings at several seeds."}),
-                "width": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8, "tooltip": "Fallback size, used only when the chosen preset carries no size of its own."}),
-                "height": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8, "tooltip": "Fallback height — see 'width'."}),
             },
             "optional": {
                 "model_id": ("STRING", {"forceInput": True, "tooltip": "Wire Model Select's 'model_id' output here. It wins over the 'model' dropdown, and the preset list follows it — so the model is chosen in exactly one place."}),
@@ -61,8 +59,11 @@ class SettingsSelect:
         """
         return store.fingerprint()
 
-    RETURN_TYPES = (SAMPLER_CFG, "INT", "INT", "STRING", "STRING", "GEN_INFO")
-    RETURN_NAMES = ("sampler_settings", "width", "height", "label", "info", "gen_extra_info")
+    # No size here either, for the reason Model Select has none: the latent owns the resolution, and
+    # a width/height pair on a settings node is one more thing to keep in sync with it. What a
+    # preset was measured at is still recorded and still reported in `info`.
+    RETURN_TYPES = (SAMPLER_CFG, "STRING", "STRING", "GEN_INFO")
+    RETURN_NAMES = ("sampler_settings", "label", "info", "gen_extra_info")
     FUNCTION = "run"
     CATEGORY = CAT_MODEL
     DESCRIPTION = ("Emit a saved sampler preset without loading a model — for running one model at "
@@ -70,8 +71,7 @@ class SettingsSelect:
                    "and the preset list follows its pick. 'label' is a ready-made caption for "
                    "Image Compare.")
 
-    def run(self, model=None, preset=None, seed_override=-1, width=1024, height=1024,
-            model_id=None):
+    def run(self, model=None, preset=None, seed_override=-1, model_id=None):
         wired = isinstance(model_id, str) and model_id.strip() != ""
         mid = model_id.strip() if wired else model
         pname = preset if preset and preset != store.NONE else None
@@ -87,8 +87,9 @@ class SettingsSelect:
 
         stages = _seeded((pre or {}).get("stages") or [], seed_override)
         warnings += _stage_warnings(stages)
-        w = int((pre or {}).get("width") or 0) or int(width)
-        h = int((pre or {}).get("height") or 0) or int(height)
+        w = int((pre or {}).get("width") or 0)
+        h = int((pre or {}).get("height") or 0)
+        size = f" · measured at {w}×{h}" if w and h else ""
 
         label = pname or "no preset"
         if int(seed_override) >= 0:
@@ -96,7 +97,7 @@ class SettingsSelect:
 
         lines = [f"Settings Select — {mid or '(no model)'} · preset {pname or 'none'}"
                  + (" (model from wire)" if wired else "")]
-        lines.append(f"  settings: {len(stages)} stage(s) · {w}×{h}")
+        lines.append(f"  settings: {len(stages)} stage(s){size}")
         for i, s in enumerate(stages):
             lines.append(_stage_line(i, s))
         if int(seed_override) >= 0:
@@ -122,14 +123,14 @@ class SettingsSelect:
         info = "\n".join(lines)
         print("[Settings Select] " + info.replace("\n", "\n[Settings Select] "))
 
-        params = {"model": mid or "", "preset": pname or "none", "size": f"{w}×{h}"}
+        params = {"model": mid or "", "preset": pname or "none"}
         if int(seed_override) >= 0:
             params["seed_override"] = int(seed_override)
         if pre and pre.get("score") is not None:
             params["preset_score"] = pre["score"]
         gen_extra = json.dumps([{"class_type": "Settings Select", "ord": 1, "params": params}],
                                ensure_ascii=False)
-        return (stages, w, h, label, info, gen_extra)
+        return (stages, label, info, gen_extra)
 
 
 NODE_CLASS_MAPPINGS = {"KinburgSettingsSelect": SettingsSelect}

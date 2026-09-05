@@ -93,6 +93,50 @@ formatting. Surrounding quotes are stripped and changing it reloads the model. T
 sure whether a downloaded `chat_template.jinja` differs from the one already inside the GGUF, it
 usually doesn't — well-packaged models embed the right one.
 
+### The model answers these questions itself
+
+The reasoning controls below are chat-template variables, and the template ships **inside the
+`.gguf`** — so the file is the authority on which of them exist and what they accept. Nothing about
+that has to be remembered per family.
+
+**`Local LLM Model Info 🔍`** reads it. Pick a `model` (or type a `model_path`) and it reports the
+architecture, the context length the model was trained for, the sampling values its authors
+recommend when the file carries them, and — out of the embedded chat template — which reasoning
+controls the model actually honours. Outputs `report` (the text) and `json` (the same as data). It
+loads **no weights**: only the key/value block at the front of the file is read, which is
+milliseconds even on a 17 GB quant, so this works on a model you have no VRAM for.
+
+```
+Local LLM Model Info — Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf
+  qwen35 · 27B · 65 layers
+  trained context: 262 144 tokens  (n_ctx costs VRAM — raise it deliberately, not to the maximum)
+  the file's own recommended sampling: temperature 1 · top_p 0.95 · top_k 20 · min_p 0.0 · repeat_penalty 1
+  reasoning_effort: low, medium, xhigh  (its default: xhigh)
+  enable_thinking: read · leaving it unset means on
+```
+
+Two questions, two honest ways of asking:
+
+* **which variables the template reads** comes from its Jinja AST. If `reasoning_effort` is not in
+  it — every Gemma-4 — then the widget for it does nothing on that model, and the report says so
+  rather than letting you set something inert.
+* **which values it accepts** comes from *rendering* it with each candidate. Qwen3.5 / 3.8's template
+  validates the value itself and raises on anything outside its own list, so the accepted set falls
+  out of trying them; the candidate whose render matches a bare one is the model's default. No
+  regex, no guessing, and a family nobody has shipped yet works for free.
+
+The same reading drives the **Settings node** directly: pick a model and `reasoning_effort` narrows
+to the values that model takes (or says *not read by this model*), `enable_thinking` gets labelled
+with what leaving it unset actually means there, **🔍 Model info** shows the report, and **📋 Apply
+model defaults** writes the file's own `temperature` / `top_p` / `top_k` / `min_p` /
+`repeat_penalty` into the widgets. Narrowing a dropdown's option list is free, but those sampling
+values are part of ComfyUI's cache signature — writing them silently would re-run the graph behind
+your back, so it takes a click. `n_ctx` is reported and never applied: these files are trained for
+128k–1M tokens and setting that would exhaust VRAM instantly.
+
+An mmproj is called out as one, since picking a projector as the `model` is an easy mistake and an
+obscure failure.
+
 ### Reasoning control: `enable_thinking` / `reasoning_effort`
 
 Modern reasoning models are switched **inside the chat template**, not by anything you can say in
@@ -493,9 +537,26 @@ block comes out the `card` output (feed it into Context Collector). The optional
 dropdown narrows the list to one tag. Build the library with **Card Save** (photo → card) or the
 **Character Card** / **Entity Card** nodes' `save_preset_as` (+ `tags`) field (see above); presets
 are rendered back through the card nodes' own logic — so the format always matches — and persisted
-on disk. **🗑 Manage** edits tags / deletes entries, **🔄 Refresh** re-reads the list. Build a
-character once (by hand or by photo), then reuse it from the dropdown instead of re-describing the
-same photo every time. Category `Kinburg-Nodes/LLM/presets`.
+on disk. **🔄 Refresh** re-reads the list. Build a character once (by hand or by photo), then reuse
+it from the dropdown instead of re-describing the same photo every time.
+Category `Kinburg-Nodes/LLM/presets`.
+
+**🗂 Manage** opens the **card library** — the place a saved card is *changed*, so a wrong eye
+colour or a voice you keep re-typing is a two-click fix instead of a re-run of the node that wrote
+it. It opens on the card the node has selected, and each row can be retagged inline, **✏️ edited**,
+**⧉ duplicated** (as the base for the next character) or deleted (two clicks — a card is often
+twenty lines nothing else holds a copy of); a search box and the tag dropdown narrow a long library,
+and **➕ 👤 / ➕ 📦** write a card from scratch without a node on the canvas at all.
+
+The editor shows every field of the card node itself — it reads them off `CharacterCard` /
+`EntityCard`, so a field added there appears here too, labelled exactly as the rendered bullet — plus
+a **live preview** of the block the `card` output will emit, and two things that belong to the
+*preset* rather than the card: its **tags**, and the name it is **saved as**. That name is what the
+dropdown shows, and it is deliberately separate from the card's own `name` (a photo-derived card is
+often filed under a name the model could not read off the picture). Rename it and every **Card
+Presets** node that had picked it follows, so a rename can't quietly turn into an empty `card` on the
+next run. Switching a card between character and entity keeps both sets of fields — only the block
+changes.
 
 ---
 

@@ -39,6 +39,7 @@ CAT_LLM_GGUF = CAT_LLM + "/GGUF"
 CAT_AUDIO = ROOT + "/audio"
 CAT_IMAGE = ROOT + "/image"
 CAT_IMAGE_COMPARE = CAT_IMAGE + "/compare"
+CAT_VIDEO = ROOT + "/video"
 
 # --- assets & recipes ------------------------------------------------------------------------------
 CAT_MODEL = ROOT + "/model"

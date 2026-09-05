@@ -338,6 +338,15 @@ def _recorder(model, ids=None, cfg_scale=2.0, temperature=0.85, top_p=0.9, top_k
 ace15.sample_manual_loop_no_classes = _recorder
 mm.cuda_device_context = contextlib.nullcontext
 
+# comfy captures a CUDA graph for the LM's decode step and only drops it when the NODE finishes,
+# because its own sampler runs once per node. This one runs once per section, each with its own KV
+# cache, so a graph carried into the next section is replayed against freed buffers — a device-side
+# assert that kills the ComfyUI process outright. The drop is therefore load-bearing, not tidiness.
+import comfy.model_prefetch as prefetch        # noqa: E402
+
+DROPS = []
+prefetch.cleanup_prefetch_queues = lambda: DROPS.append(len(CALLS))
+
 
 class _FakeLM:
     special_tokens = {"pad": 7}
@@ -418,6 +427,8 @@ check("...and a section with no voice has no delta, so it falls back to core beh
       neg_lens[0] == 0, neg_lens)
 check("every section's LM pass has audio codes switched off — this node assembles them itself",
       all(s["generate_audio_codes"] is False for s in clip.seen))
+check("the decode-step CUDA graph is dropped after every section, never carried into the next",
+      DROPS == [1, 2, 3], DROPS)
 
 final = clip.seen[-1]
 check("the final encode uses the GLOBAL caption, with the cast listed on it",

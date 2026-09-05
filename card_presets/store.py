@@ -9,7 +9,7 @@ photo every time. Persisted to ``data/store.json``.
 Cards enter the library three ways, all funnelling through :func:`upsert`:
   * **Card Save** — parse an LLM's grammar-constrained JSON straight into a preset (photo→card).
   * **Character Card / Entity Card** — their ``save_preset_as`` field (typed or wired-in values).
-  * the Manage dialog — delete / retag existing entries.
+  * the Manage dialog — create / edit / rename / duplicate / retag / delete entries.
 
 Guarded so the package still imports without ComfyUI present (registry scan, tests).
 """
@@ -92,6 +92,41 @@ def get(name):
     return _load().get(name)
 
 
+# Fields the Manage dialog's editor draws, per card type. Read off the card nodes' OWN
+# INPUT_TYPES so the editor gains a field the day a card node does, in the same order the block
+# renders — and labelled exactly as the rendered bullet ("Eyes", not "eye_color").
+_EDITOR_SKIP = ("save_preset_as", "tags")   # saving IS the dialog; tags have their own box
+
+
+def _fields_of(cls, labels):
+    out = []
+    for key, spec in (cls.INPUT_TYPES().get("required") or {}).items():
+        if key in _EDITOR_SKIP:
+            continue
+        opts = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+        out.append({
+            "key": key,
+            "label": labels.get(key) or key.replace("_", " ").capitalize(),
+            "multiline": bool(opts.get("multiline")),
+            "tooltip": opts.get("tooltip") or "",
+        })
+    return out
+
+
+def field_schema():
+    """``{"character": [{key,label,multiline,tooltip}, …], "entity": [...]}`` for the editor."""
+    try:
+        from ..context.character_card import CharacterCard, _FIELDS, _VOICE_FIELDS
+        from ..context.entity_card import EntityCard
+    except Exception:  # pragma: no cover - import guard (registry scan without the pack)
+        return {"character": [], "entity": []}
+    char_labels = {"name": "Name", "notes": "Notes", **dict(_FIELDS), **dict(_VOICE_FIELDS)}
+    return {
+        "character": _fields_of(CharacterCard, char_labels),
+        "entity": _fields_of(EntityCard, {"name": "Name", "description": "Description"}),
+    }
+
+
 def render_values(card_type, values):
     """Render raw card *values* into their Markdown block, via the card nodes' own logic.
 
@@ -141,28 +176,38 @@ def full_data():
         "tags": all_tags(),
         "presets": {name: {"type": p.get("type", "character"), "tags": p.get("tags") or []}
                     for name, p in presets.items()},
+        # Values are deliberately NOT here: the dialog fetches the one card it is about to edit.
+        "schema": field_schema(),
     }
 
 
-def upsert(name, card_type, values, tags=None, delete=False):
+def upsert(name, card_type, values, tags=None, delete=False, old_name=None):
     """Add/update (or delete) a saved card preset.
 
     ``tags=None`` leaves an existing preset's tags untouched (and means "no tags" on create),
     so re-saving the same card from a node that doesn't set tags never wipes tags added later.
     Pass a list / comma-separated string to set them (``[]`` clears).
+
+    ``old_name`` renames: the entry is written under ``name`` and the old key dropped in the same
+    lock, inheriting its tags when none are given. One call, so a crash between two can't leave
+    the library holding both copies.
     """
     name = (name or "").strip()
     if not name or name == NONE:
         raise ValueError("preset name is required")
+    old_name = (old_name or "").strip()
     with _LOCK:
         presets = _load()
         if delete:
             presets.pop(name, None)
         else:
             ctype = "entity" if str(card_type).lower().startswith("entity") else "character"
+            prev = presets.get(name) or (presets.get(old_name) if old_name else None) or {}
+            if old_name and old_name != name:
+                presets.pop(old_name, None)
             new_tags = _norm_tags(tags)
             if new_tags is None:  # keep existing tags (or none for a brand-new preset)
-                new_tags = (presets.get(name) or {}).get("tags") or []
+                new_tags = prev.get("tags") or []
             presets[name] = {
                 "type": ctype,
                 "values": values if isinstance(values, dict) else {},

@@ -14,6 +14,9 @@ class El {
     this.textContent = ""; this.value = ""; this.placeholder = ""; this.title = "";
     this.alt = ""; this.src = ""; this.disabled = false; this.type = "";
     this.checked = false; this.selected = false;
+    // Real elements have one, and the shipping code uses it for the two-click "…— sure?" arming
+    // on every destructive button in the Model Library dialog.
+    this.dataset = {};
     this.scrollTop = 0; this.scrollHeight = 0; this.clientHeight = 0; this.offsetHeight = 20;
     this.classList = {
       add: (...c) => c.forEach((x) => this._cls.add(x)),

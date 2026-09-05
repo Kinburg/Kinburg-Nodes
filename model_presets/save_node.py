@@ -21,7 +21,7 @@ from . import store
 from ..categories import CAT_MODEL
 
 
-def _flatten(cfg):
+def flatten_stages(cfg):
     """A SAMPLER_CFG is a stage dict, a chain of them, or None → always a flat list. Same
     normalisation Chimera does, so what's saved is what the sampler would have run."""
     if isinstance(cfg, list):
@@ -79,7 +79,7 @@ class SettingsSave:
     def run(self, sampler_settings=None, model=None, preset_name="", shared=False, families="",
             tags="", set_default=False, notes="", score=None, seconds=None, latent=None,
             model_id=None):
-        stages = _flatten(sampler_settings)
+        stages = flatten_stages(sampler_settings)
         name = (preset_name or "").strip()
         wired = isinstance(model_id, str) and model_id.strip() != ""
         model = model_id.strip() if wired else model

@@ -15,12 +15,54 @@ drops straight into Chimera's ``stage_a`` (it flattens chains into stages) or in
 An assembly the library can't rebuild — Model Capture refuses those loudly — stays in the graph and
 is wired into ``model_override`` / ``clip_override`` / ``vae_override``, which win over the library.
 So there is no assembly this node can't serve, only ones it can't store.
+
+**The prompt side.** A bundle with LoRAs in it needs their trigger words in the text, and Capture
+already stored them — so wiring a ``prompt`` in gets it back with the words appended (``prompt``),
+the words on their own for Ouroboros' ``trigger_words`` (``triggers``), and, since the CLIP is
+right here, the finished ``positive`` / ``negative`` conditioning. Nothing is encoded unless a
+prompt is actually wired: a node runs whole, so an unconditional encode would load CLIP for every
+graph that only wanted a model.
 """
 import json
 
 from ..ouroboros.nodes import SAMPLER_CFG
 from . import replay, store
 from ..categories import CAT_MODEL
+
+
+def join_prompt(prompt, triggers):
+    """Prompt + the bundle's LoRA trigger words, laid out exactly as Lora Unlim Accumulator does
+    it: the words in their own paragraph after the prompt, comma-separated among themselves. CLIP
+    normalises newlines to token boundaries, so the blank line is for reading, not for the model."""
+    p = (prompt or "").strip()
+    t = (triggers or "").strip()
+    if p and t:
+        return p + "\n\n" + t
+    return p or t
+
+
+def _encode(clip, text):
+    """One CLIP text encode — the same two calls `CLIPTextEncode` makes (nodes.py:76)."""
+    return clip.encode_from_tokens_scheduled(clip.tokenize(text or ""))
+
+
+def _zero_out(conditioning):
+    """`ConditioningZeroOut` (nodes.py:283), inlined.
+
+    Encoding an empty string is NOT the same thing and is the usual mistake: the flow models want a
+    zeroed tensor for the unconditional pass, not the embedding of "". Every optional tensor the
+    core node zeroes is zeroed here too, so a conditioning that carries lyrics or a scale doesn't
+    smuggle them into the negative.
+    """
+    import torch
+    out = []
+    for t in conditioning:
+        d = t[1].copy()
+        for key in ("pooled_output", "conditioning_lyrics", "conditioning_scale"):
+            if d.get(key) is not None:
+                d[key] = torch.zeros_like(d[key])
+        out.append([torch.zeros_like(t[0]), d])
+    return out
 
 
 def _seeded(stages, seed_override):
@@ -74,14 +116,16 @@ class ModelSelect:
                 "model": (store.model_names(), {"default": store.NONE, "tooltip": "A model registered in the library. Build the library with Model Capture: wire a working loader stack into it once, then delete those loaders from the workflow."}),
                 "preset": (cls._all_preset_names(), {"default": store.NONE, "tooltip": "Saved sampler settings for THIS model — the list narrows to what's valid for the chosen model (its own presets plus any shared with its families). '🚫 None' loads the model but emits no settings. Save presets with Settings Save."}),
                 "seed_override": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff, "tooltip": "-1 = use the seed stored in the preset. Anything else replaces the seed on every stage — a preset records the seed it was measured with, which is worth keeping but not worth being stuck with."}),
-                "width": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8, "tooltip": "Fallback size, used only when the chosen preset has no size of its own. A preset saved with a latent wired into Settings Save carries the real one and wins."}),
-                "height": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8, "tooltip": "Fallback height — see 'width'."}),
                 "unload_others": ("BOOLEAN", {"default": True, "tooltip": "Free every other model first (ComfyUI's resident models plus the library's own cache of previously built bundles), so one model is resident at a time. Turn off on a big GPU to keep switching between models fast at the cost of RAM."}),
             },
             "optional": {
                 "model_override": ("MODEL", {"tooltip": "Escape hatch: a MODEL wired here wins over the library. For an assembly Model Capture refused (a merge, a LoRA fork, a node that needs execution context) — keep those loaders in the graph and wire them in; presets keep working."}),
                 "clip_override": ("CLIP", {"tooltip": "As 'model_override', for CLIP."}),
                 "vae_override": ("VAE", {"tooltip": "As 'model_override', for VAE."}),
+                # Connect-only: prompts in this pack come from prompt/LLM nodes, and a multiline
+                # widget on an already-tall node would be one more place for text to hide.
+                "prompt": ("STRING", {"forceInput": True, "tooltip": "Your prompt. Comes back out of 'prompt' with the bundle's LoRA trigger words appended, and — since the CLIP is right here — encoded into 'positive'. Leave it unwired and no text is encoded at all."}),
+                "negative_prompt": ("STRING", {"forceInput": True, "tooltip": "Optional negative prompt. Left unwired, 'negative' is the positive conditioning ZEROED OUT (what the flow models want) rather than the encoding of an empty string."}),
             },
         }
 
@@ -103,23 +147,29 @@ class ModelSelect:
         return True
 
     @classmethod
-    def IS_CHANGED(cls, model=None, preset=None, seed_override=-1, width=0, height=0, **kwargs):
+    def IS_CHANGED(cls, model=None, preset=None, seed_override=-1, **kwargs):
         """Edit a recipe or a preset in the library and the dropdown values don't change — so
         without this ComfyUI would hand back the previous run's model and settings. Hash what was
-        actually resolved, not what was picked."""
+        actually resolved, not what was picked. The trigger words are in here for the same reason:
+        they live on the model record, not in the recipe, so editing them in the Library dialog
+        would otherwise leave the old prompt cached."""
         try:
-            _, p, recipe = store.resolve(model, preset)
-            return json.dumps([recipe, p, int(seed_override), int(width), int(height)],
+            rec, p, recipe = store.resolve(model, preset)
+            return json.dumps([recipe, p, (rec or {}).get("triggers", ""), int(seed_override)],
                               sort_keys=True, default=str)
         except Exception as e:
             return f"error:{e}"
 
     # `model_id` last so existing workflows' output indices don't move. It feeds Settings Select,
     # which then narrows its own preset list to this model instead of asking for it twice.
-    RETURN_TYPES = ("MODEL", "MODEL", "CLIP", "VAE", SAMPLER_CFG, "INT", "INT", "STRING", "GEN_INFO",
-                    "STRING")
-    RETURN_NAMES = ("model", "model_negative", "clip", "vae", "sampler_settings", "width", "height",
-                    "info", "gen_extra_info", "model_id")
+    # Ordered the way the wires leave the node: what the sampler needs first (model + conditioning),
+    # then the rest of the bundle, then the text, then the reporting outputs. Output indices are
+    # positional in a saved workflow, so this order was changed ONCE, deliberately, rather than
+    # growing by appending forever — a Model Select saved before that has to be re-wired.
+    RETURN_TYPES = ("MODEL", "MODEL", "CONDITIONING", "CONDITIONING", "CLIP", "VAE", SAMPLER_CFG,
+                    "STRING", "STRING", "STRING", "GEN_INFO", "STRING")
+    RETURN_NAMES = ("model", "model_negative", "positive", "negative", "clip", "vae",
+                    "sampler_settings", "prompt", "triggers", "info", "gen_extra_info", "model_id")
     FUNCTION = "run"
     CATEGORY = CAT_MODEL
     DESCRIPTION = ("Pick a model and one of its saved sampler presets from two dropdowns — the "
@@ -127,10 +177,13 @@ class ModelSelect:
                    "assembly (loaders + patches) from the library, so the workflow holds one node "
                    "instead of a loader stack and a pile of Sampler Settings. 'sampler_settings' "
                    "goes straight into Chimera's stage_a or Ouroboros; 'model_negative' carries an "
-                   "unconditional-pass model when the bundle has one.")
+                   "unconditional-pass model when the bundle has one. Wire a 'prompt' in and the "
+                   "bundle's LoRA trigger words are appended to it and encoded, so 'positive' / "
+                   "'negative' come out ready for the sampler.")
 
-    async def run(self, model=None, preset=None, seed_override=-1, width=1024, height=1024,
-                  unload_others=True, model_override=None, clip_override=None, vae_override=None):
+    async def run(self, model=None, preset=None, seed_override=-1,
+                  unload_others=True, model_override=None, clip_override=None, vae_override=None,
+                  prompt=None, negative_prompt=None):
         lines, warnings = [], []
         rec, pre, recipe = store.resolve(model, preset)
         pname = preset if preset and preset != store.NONE else None
@@ -151,7 +204,12 @@ class ModelSelect:
         need_replay = bool(recipe and (recipe.get("nodes") or {}) and not covered)
         # Freeing before we load is the point; freeing when we're NOT about to load would just evict
         # the models wired into the overrides, which were built upstream in this very run.
-        if unload_others and need_replay:
+        # `is_cached` is the other half of that: when this exact bundle is already resident, replay
+        # will build nothing, so unloading it would only make ComfyUI push the same weights back to
+        # VRAM. With `prompt` wired in that would happen on every edit of the text — the hottest
+        # loop there is.
+        resident = need_replay and replay.is_cached(recipe)
+        if unload_others and need_replay and not resident:
             self._free()
         if need_replay:
             built, notes = await replay.replay(recipe, purge_others=unload_others)
@@ -163,11 +221,32 @@ class ModelSelect:
         out_vae = vae_override if vae_override is not None else built.get("vae")
         out_neg = built.get("model_negative")
 
+        # ---- the prompt: the bundle's LoRA trigger words go back where they belong
+        triggers = str((rec or {}).get("triggers") or "").strip()
+        full_prompt = join_prompt(prompt, triggers)
+        # Encode only when a prompt was actually WIRED. ComfyUI runs a node whole regardless of
+        # which outputs anyone reads, so encoding unconditionally would drag CLIP into VRAM for
+        # every graph that only wants a model out of this node.
+        positive = negative = None
+        wants_cond = isinstance(prompt, str) or isinstance(negative_prompt, str)
+        if wants_cond and out_clip is None:
+            warnings.append("a prompt is wired but there is no CLIP — 'positive' / 'negative' are "
+                            "empty. Wire 'clip_override', or capture the bundle with its CLIP.")
+        elif wants_cond:
+            positive = _encode(out_clip, full_prompt)
+            negative = (_encode(out_clip, negative_prompt)
+                        if isinstance(negative_prompt, str) and negative_prompt.strip()
+                        else _zero_out(positive))
+
         # ---- the settings
         stages = _seeded((pre or {}).get("stages") or [], seed_override)
         warnings += _stage_warnings(stages)
-        w = int((pre or {}).get("width") or 0) or int(width)
-        h = int((pre or {}).get("height") or 0) or int(height)
+        # The size the preset was measured at, when Settings Save recorded one. Reported only —
+        # this node no longer emits it: the latent's size belongs to the latent, and Settings
+        # Select still hands the stored figure out for the cases that want it back.
+        w = int((pre or {}).get("width") or 0)
+        h = int((pre or {}).get("height") or 0)
+        size = f" · measured at {w}×{h}" if w and h else ""
 
         # ---- report
         head = f"Model Select — {model or '(none)'} · preset {pname or 'none'}"
@@ -192,6 +271,14 @@ class ModelSelect:
                                 f"is wired into '{slot}_override'")
         if out_neg is not None:
             lines.append("  model_negative: present (wire it into Chimera's 'model_negative')")
+        if triggers:
+            lines.append(f"  triggers: {triggers}")
+        elif isinstance(prompt, str):
+            lines.append("  triggers: none stored for this model")
+        if positive is not None:
+            lines.append("  encoded: positive" + (" · negative" if isinstance(negative_prompt, str)
+                                                  and negative_prompt.strip()
+                                                  else " · negative = zeroed positive"))
         if pre:
             # store.resolve already folded the overrides into `recipe`; re-checking which class
             # names actually exist in the bundle is what turns a stale override into a warning
@@ -208,7 +295,7 @@ class ModelSelect:
                         f"{k}={pre['overrides'][k]}" for k in hit))
                 for k in missed:
                     warnings.append(f"preset override '{k}' matches no node in this bundle")
-            lines.append(f"  settings: {len(stages)} stage(s) · {w}×{h}")
+            lines.append(f"  settings: {len(stages)} stage(s){size}")
             for i, s in enumerate(stages):
                 lines.append(_stage_line(i, s))
             if int(seed_override) >= 0:
@@ -223,7 +310,7 @@ class ModelSelect:
             if pre.get("notes"):
                 lines.append(f"  preset notes: {pre['notes']}")
         else:
-            lines.append(f"  settings: none · {w}×{h}")
+            lines.append("  settings: none")
         if (rec or {}).get("notes"):
             lines.append(f"  model notes: {rec['notes']}")
         for wn in warnings:
@@ -234,14 +321,17 @@ class ModelSelect:
         # `gen_extra_info` adds the CHOICE to a Generation Info dump — a graph walk over widget
         # literals can't see which model a library id resolved to. Separate fields so the
         # Generation Info Filter's 'differences' mode can show exactly what changed between runs.
-        params = {"model": model or "", "preset": pname or "none", "size": f"{w}×{h}"}
+        params = {"model": model or "", "preset": pname or "none"}
+        if triggers:
+            params["triggers"] = triggers
         if (rec or {}).get("families"):
             params["families"] = ", ".join(rec["families"])
         if pre and pre.get("score") is not None:
             params["preset_score"] = pre["score"]
         gen_extra = json.dumps([{"class_type": "Model Select", "ord": 1, "params": params}],
                                ensure_ascii=False)
-        return (out_model, out_neg, out_clip, out_vae, stages, w, h, info, gen_extra,
+        return (out_model, out_neg, positive, negative, out_clip, out_vae, stages,
+                full_prompt, triggers, info, gen_extra,
                 model if model and model != store.NONE else "")
 
     def _free(self):

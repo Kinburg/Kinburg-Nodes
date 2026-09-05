@@ -22,7 +22,7 @@ const PICK_HINT = "(add existing…)";
 const ALL_FAMILIES = "🏷 All";
 const FAMILY_W = "🏷 family";
 
-let STORE = { none: NONE, order: [NONE], families: [], models: {}, shared: {} };
+let STORE = { none: NONE, order: [NONE], families: [], family_usage: {}, models: {}, shared: {} };
 
 const wv = (node, name) => node.widgets?.find((w) => w.name === name);
 const isType = (node, t) => node.comfyClass === t || node.type === t;
@@ -205,6 +205,22 @@ function wiredModelId(node) {
   const v = up?.widgets?.find((w) => w.name === "model")?.value;
   return typeof v === "string" && v && v !== (STORE.none || NONE) ? v : null;
 }
+
+// Which model a preset-picking node is actually working with: a wired `model_id` wins, otherwise
+// its own dropdown. Used to open the Library dialog on the right card.
+function effectiveModel(node) {
+  const v = wiredModelId(node) || wv(node, "model")?.value;
+  return typeof v === "string" && v && v !== (STORE.none || NONE) ? v : null;
+}
+
+// The dialog's card order. `focus` is the model the node that opened it has in effect — it goes on
+// top so you aren't hunting for it among twenty. Sorted, never filtered: the rest is still there.
+function orderModelIds(ids, focus) {
+  const sorted = [...ids].sort();
+  return focus && sorted.includes(focus)
+    ? [focus, ...sorted.filter((x) => x !== focus)] : sorted;
+}
+
 
 function syncSettings(node) {
   const wired = wiredModelId(node);
@@ -565,7 +581,144 @@ async function overridesEditor(modelId, presetName, shared, afterSave) {
   box.appendChild(foot);
 }
 
-async function libraryDialog() {
+// One preset's row of controls. Extracted from the model cards so the SHARED-preset section can
+// use the very same row: a shared preset used to be reachable only through a model whose family
+// matched it, which meant a shared preset matching nothing at all could be neither edited nor
+// deleted from anywhere. `modelId` is ignored by the store for shared presets (they live in their
+// own bucket), so "" is fine there.
+function presetRow(modelId, name, p, render, withFamilies) {
+  const row = mk("div", "display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #333");
+  const label = mk("span", "flex:0 0 30%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
+    `${p.default ? "⭐ " : ""}${p.shared ? "🌐 " : ""}${name}`);
+  label.title = p.shared ? `${name} (shared preset)` : name;
+  const stats = mk("span", "flex:0 0 auto;opacity:0.65;font-size:12px", fmtScore(p));
+  const post = (body, btn, rerender) => async () => {
+    try {
+      await postJSON("/kinburg/models/preset", { model: modelId, name, shared: !!p.shared, ...body });
+      refreshAll();
+      if (rerender) render(); else flash(btn, "✓");
+    } catch (e) { flash(btn, "✕ " + e.message, false); }
+  };
+  const tagIn = mk("input", INPUT + ";flex:1");
+  tagIn.value = (p.tags || []).join(", ");
+  tagIn.placeholder = "tags…";
+  const saveTags = mk("button", BTN, "Save");
+  saveTags.onclick = post({ tags: tagIn.value }, saveTags);
+  tagIn.addEventListener("keydown", (e) => { if (e.key === "Enter") saveTags.onclick(); });
+  row.append(label, stats, tagIn, saveTags);
+
+  // Only the shared section shows this: for a shared preset `families` is what decides which
+  // models can see it at all, so it is the field that matters most there — and the only place a
+  // family name can be created or corrected without going via a model.
+  if (withFamilies) {
+    const famIn = mk("input", INPUT + ";flex:1");
+    famIn.value = (p.families || []).join(", ");
+    famIn.placeholder = "families…";
+    famIn.title = "Which families this preset serves. Empty = no model can see it.";
+    const saveFam = mk("button", BTN, "Save");
+    saveFam.onclick = post({ families: famIn.value }, saveFam, true);
+    famIn.addEventListener("keydown", (e) => { if (e.key === "Enter") saveFam.onclick(); });
+    row.append(famIn, saveFam);
+  }
+
+  const ovBtn = mk("button", BTN, p.overrides ? `🎚 ${p.overrides}` : "🎚");
+  ovBtn.title = "Values this preset applies to the bundle instead of the bundle's own — "
+    + "e.g. the same model at a different shift";
+  ovBtn.onclick = () => overridesEditor(modelId, name, !!p.shared, render);
+  const defBtn = mk("button", BTN, p.default ? "Unset default" : "Make default");
+  defBtn.onclick = post({ set_default: !p.default }, defBtn, true);
+  const pdel = mk("button", DANGER, "✕");
+  pdel.title = p.shared ? "Delete this shared preset (affects every model in its families)"
+    : "Delete this preset";
+  pdel.onclick = post({ delete: true }, pdel, true);
+  row.append(ovBtn, defBtn, pdel);
+  return row;
+}
+
+
+// Shared presets, listed on their own rather than only under the models whose families match.
+// Without this a shared preset whose family nothing declares — the state you land in after
+// clearing models out, or after a typo — is invisible everywhere and can never be deleted.
+function sharedSection(box, render) {
+  const names = Object.keys(STORE.shared || {}).sort();
+  if (!names.length) return;
+  const card = mk("div", "border:1px solid #3a3a3a;border-radius:6px;padding:10px;margin-bottom:10px");
+  card.appendChild(mk("div", "font-weight:600;margin-bottom:2px", "🌐 Shared presets"));
+  card.appendChild(mk("div", "opacity:0.6;font-size:12px;margin-bottom:4px",
+    "Live in the family-wide pool, not under one model. Every model declaring a matching family "
+    + "sees them — so an empty 'families' means no model does."));
+  for (const name of names) {
+    const p = { ...STORE.shared[name], shared: true };
+    card.appendChild(presetRow("", name, p, render, true));
+    if (!(p.families || []).length) {
+      card.appendChild(mk("div", "opacity:0.55;font-size:11px;padding:0 0 4px 6px",
+        "⚠ no families — invisible to every model until one is set"));
+    }
+  }
+  box.appendChild(card);
+}
+
+// Families are stored NOWHERE on their own: the list is derived from whoever declares one. So a
+// typo could only be undone by visiting every model and every shared preset that carried it, and
+// through the nodes there was no way at all. These two buttons rewrite every holder in one write.
+function familySection(box, render) {
+  const usage = STORE.family_usage || {};
+  const names = Object.keys(usage).sort();
+  if (!names.length) return;
+  const card = mk("div", "border:1px solid #3a3a3a;border-radius:6px;padding:10px;margin-bottom:10px");
+  card.appendChild(mk("div", "font-weight:600;margin-bottom:2px", "🏷 Families"));
+  card.appendChild(mk("div", "opacity:0.6;font-size:12px;margin-bottom:4px",
+    "Not stored on their own — a family exists for as long as something declares it. Renaming or "
+    + "deleting one here rewrites every model and shared preset that carries it."));
+  for (const name of names) {
+    const u = usage[name] || { models: [], shared: [] };
+    const held = [u.models.length && `${u.models.length} model(s)`,
+                  u.shared.length && `${u.shared.length} shared preset(s)`].filter(Boolean).join(" · ");
+    const row = mk("div", "display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #333");
+    const label = mk("span", "flex:0 0 26%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
+      `🏷 ${name}`);
+    label.title = [...u.models, ...u.shared.map((s) => `🌐 ${s}`)].join("\n") || name;
+    const held_el = mk("span", "flex:0 0 auto;opacity:0.65;font-size:12px", held || "unused");
+    const renIn = mk("input", INPUT + ";flex:1");
+    renIn.placeholder = "rename to…";
+    const renGo = mk("button", BTN, "Rename");
+    const doRen = async () => {
+      const to = renIn.value.trim();
+      if (!to || to === name) return;
+      try {
+        const r = await postJSON("/kinburg/models/family", { name, rename: to });
+        refreshAll(); render();
+        console.log(`[Kinburg ModelLibrary] family '${name}' -> '${to}' on ${r.touched} holder(s)`);
+      } catch (e) { flash(renGo, "✕ " + e.message, false); }
+    };
+    renGo.onclick = doRen;
+    renIn.addEventListener("keydown", (e) => { if (e.key === "Enter") doRen(); });
+    const del = mk("button", DANGER, "Delete");
+    del.title = `Remove '${name}' from everything that declares it. Shared presets left with no `
+      + "family stay in the list above, just invisible to models until you give them one.";
+    del.onclick = async () => {
+      if (del.dataset.armed !== "1") {
+        del.dataset.armed = "1"; del.textContent = `Delete from ${held || "nothing"} — sure?`;
+        setTimeout(() => { del.dataset.armed = "0"; del.textContent = "Delete"; }, 3000);
+        return;
+      }
+      try {
+        const r = await postJSON("/kinburg/models/family", { name, delete: true });
+        refreshAll(); render();
+        if ((r.orphaned || []).length) {
+          console.log(`[Kinburg ModelLibrary] shared preset(s) now without a family: `
+            + r.orphaned.join(", "));
+        }
+      } catch (e) { flash(del, "✕ " + e.message, false); }
+    };
+    row.append(label, held_el, renIn, renGo, del);
+    card.appendChild(row);
+  }
+  box.appendChild(card);
+}
+
+
+async function libraryDialog(focus) {
   await refreshStore();
   const overlay = mk("div");
   css(overlay, { position: "fixed", inset: "0", background: "rgba(0,0,0,0.55)", zIndex: 10000,
@@ -585,20 +738,24 @@ async function libraryDialog() {
       "Here you can retag, set defaults, rename and delete."));
 
     const models = STORE.models || {};
-    const ids = Object.keys(models).sort();
+    const ids = orderModelIds(Object.keys(models), focus);
     if (!ids.length) {
-      box.appendChild(mk("div", "opacity:0.6",
-        "(empty — wire a working loader stack into Model Capture and register it)"));
+      box.appendChild(mk("div", "opacity:0.6;margin-bottom:10px",
+        "(no models — wire a working loader stack into Model Capture and register it)"));
     }
 
     for (const id of ids) {
       const m = models[id];
-      const card = mk("div", "border:1px solid #3a3a3a;border-radius:6px;padding:10px;margin-bottom:10px");
+      const card = mk("div", `border:1px solid ${id === focus ? "#3b82f6" : "#3a3a3a"};`
+        + "border-radius:6px;padding:10px;margin-bottom:10px");
 
       const top = mk("div", "display:flex;align-items:center;gap:8px;margin-bottom:6px");
       const title = mk("span", "flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
         `🎛 ${id}`);
       title.title = id;
+      if (id === focus) {
+        top.appendChild(mk("span", "opacity:0.6;font-size:11px;flex:0 0 auto", "this node"));
+      }
       const recipeBtn = mk("button", BTN, "🔧 Recipe");
       recipeBtn.title = "Edit this bundle's settings — filenames, shift, cfg, dtype…";
       recipeBtn.onclick = () => recipeEditor(id, render);
@@ -690,6 +847,26 @@ async function libraryDialog() {
         card.appendChild(chips);
       }
 
+      // LoRA trigger words. Model Capture fills these in by itself from a `Lora Trigger Loader`
+      // inside the bundle; this row is for a plain LoraLoader, which carries no word to find.
+      const trigRow = mk("div", "display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:12px");
+      const trigIn = mk("input", INPUT + ";flex:1");
+      trigIn.value = m.triggers || "";
+      trigIn.placeholder = "LoRA trigger words, comma-separated…";
+      trigIn.title = "Appended to Model Select's 'prompt' output, and emitted on its own 'triggers' "
+        + "output for Ouroboros. Re-capturing does not clear what you type here.";
+      const trigGo = mk("button", BTN, "Save");
+      const doTrig = async () => {
+        try {
+          await postJSON("/kinburg/models/model", { id, triggers: trigIn.value });
+          refreshAll(); flash(trigGo, "✔ saved");
+        } catch (e) { flash(trigGo, "✕ " + e.message, false); }
+      };
+      trigGo.onclick = doTrig;
+      trigIn.addEventListener("keydown", (e) => { if (e.key === "Enter") doTrig(); });
+      trigRow.append(mk("span", "opacity:0.6;flex:0 0 auto", "triggers"), trigIn, trigGo);
+      card.appendChild(trigRow);
+
       if (m.classes?.length) {
         card.appendChild(mk("div", "opacity:0.5;font-size:11px;margin-bottom:8px",
           m.classes.join(" · ")));
@@ -699,52 +876,12 @@ async function libraryDialog() {
       if (!presets.length) {
         card.appendChild(mk("div", "opacity:0.6;font-size:12px", "(no presets yet)"));
       }
-      for (const [name, p] of presets) {
-        const row = mk("div", "display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #333");
-        const label = mk("span", "flex:0 0 30%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
-          `${p.default ? "⭐ " : ""}${p.shared ? "🌐 " : ""}${name}`);
-        label.title = p.shared ? `${name} (shared preset)` : name;
-        const stats = mk("span", "flex:0 0 auto;opacity:0.65;font-size:12px", fmtScore(p));
-        const tagIn = mk("input", INPUT + ";flex:1");
-        tagIn.value = (p.tags || []).join(", ");
-        tagIn.placeholder = "tags…";
-        const saveTags = mk("button", BTN, "Save");
-        const doTags = async () => {
-          try {
-            await postJSON("/kinburg/models/preset",
-              { model: id, name, tags: tagIn.value, shared: !!p.shared });
-            refreshAll(); flash(saveTags, "✓");
-          } catch (e) { flash(saveTags, "✕ " + e.message, false); }
-        };
-        saveTags.onclick = doTags;
-        tagIn.addEventListener("keydown", (e) => { if (e.key === "Enter") doTags(); });
-        const ovBtn = mk("button", BTN, p.overrides ? `🎚 ${p.overrides}` : "🎚");
-        ovBtn.title = "Values this preset applies to the bundle instead of the bundle's own — "
-          + "e.g. the same model at a different shift";
-        ovBtn.onclick = () => overridesEditor(id, name, !!p.shared, render);
-        const defBtn = mk("button", BTN, p.default ? "Unset default" : "Make default");
-        defBtn.onclick = async () => {
-          try {
-            await postJSON("/kinburg/models/preset",
-              { model: id, name, set_default: !p.default, shared: !!p.shared });
-            refreshAll(); render();
-          } catch (e) { flash(defBtn, "✕ " + e.message, false); }
-        };
-        const pdel = mk("button", DANGER, "✕");
-        pdel.title = p.shared ? "Delete this shared preset (affects every model in its families)"
-          : "Delete this preset";
-        pdel.onclick = async () => {
-          try {
-            await postJSON("/kinburg/models/preset",
-              { model: id, name, delete: true, shared: !!p.shared });
-            refreshAll(); render();
-          } catch (e) { flash(pdel, "✕ " + e.message, false); }
-        };
-        row.append(label, stats, tagIn, saveTags, ovBtn, defBtn, pdel);
-        card.appendChild(row);
-      }
+      for (const [name, p] of presets) card.appendChild(presetRow(id, name, p, render));
       box.appendChild(card);
     }
+
+    sharedSection(box, render);
+    familySection(box, render);
 
     const foot = mk("div", "display:flex;justify-content:flex-end;gap:8px;margin-top:14px");
     const refreshBtn = mk("button", BTN, "🔄 Reload");
@@ -764,10 +901,124 @@ async function libraryDialog() {
   document.body.appendChild(overlay);
 }
 
+// --------------------------------------------------------------------- saved-workflow migration
+// Model Select's outputs were re-ordered once (2026-08-23): the conditioning moved up next to the
+// model, and `width` / `height` left both the widgets and the outputs — Settings Select lost the
+// same pair. A saved workflow stores its links by SLOT INDEX, so without this every wire off an
+// older node would silently re-point at a different — and usually wrongly typed — output, which
+// surfaces as a baffling error at sampling time rather than as a visibly broken wire.
+//
+// The saved file carries each output's NAME, so the remap needs no version detection at all: match
+// old slot -> new slot by name and drop what no longer exists. That makes it idempotent and
+// correct for any older layout, not just the one immediately before this.
+const SELECT_OUTPUTS = ["model", "model_negative", "positive", "negative", "clip", "vae",
+                        "sampler_settings", "prompt", "triggers", "info", "gen_extra_info",
+                        "model_id"];
+const SELECT_TYPES = ["MODEL", "MODEL", "CONDITIONING", "CONDITIONING", "CLIP", "VAE",
+                      "KINBURG_SAMPLER_CFG", "STRING", "STRING", "STRING", "GEN_INFO", "STRING"];
+const SETTINGS_OUTPUTS = ["sampler_settings", "label", "info", "gen_extra_info"];
+const SETTINGS_TYPES = ["KINBURG_SAMPLER_CFG", "STRING", "STRING", "GEN_INFO"];
+
+// Both nodes lost `width` / `height` as widgets too, and the pair sits in different company on
+// each, so each needs its own anchor. Both anchor from the END: the 🏷 family filter's presence at
+// the FRONT depends on which frontend version wrote the file, so counting forward is not safe.
+const lastIndexWhere = (a, f) => {
+  for (let i = a.length - 1; i >= 0; i--) if (f(a[i])) return i;
+  return -1;
+};
+const isNum = (v) => typeof v === "number";
+
+// Model Select ended `… seed_override, width, height, unload_others [, buttons]` — and
+// unload_others is its only boolean.
+function dropSelectSizes(wv) {
+  const b = lastIndexWhere(wv, (v) => typeof v === "boolean");
+  if (b < 3 || !isNum(wv[b - 1]) || !isNum(wv[b - 2])) return false;
+  wv.splice(b - 2, 2);
+  return true;
+}
+
+// Settings Select ended `… seed_override, width, height [, buttons]` — no boolean at all, so the
+// anchor is the last number, and three numbers in a row is what confirms the shape.
+function dropSettingsSizes(wv) {
+  const i = lastIndexWhere(wv, isNum);
+  if (i < 2 || !isNum(wv[i - 1]) || !isNum(wv[i - 2])) return false;
+  wv.splice(i - 1, 2);
+  return true;
+}
+
+const MIGRATIONS = {
+  [SELECT]: { outputs: SELECT_OUTPUTS, types: SELECT_TYPES, widgets: dropSelectSizes },
+  [SETTINGS]: { outputs: SETTINGS_OUTPUTS, types: SETTINGS_TYPES, widgets: dropSettingsSizes },
+};
+
+function nodeIsCurrent(node, spec) {
+  const names = (node.outputs || []).map((o) => (o && o.name) || "");
+  return names.length === spec.outputs.length && names.every((n, i) => n === spec.outputs[i]);
+}
+
+function migrateWidgets(node, spec) {
+  return Array.isArray(node.widgets_values) ? spec.widgets(node.widgets_values) : false;
+}
+
+// Returns the ids of links that no longer have an output to leave from (the width / height ones).
+function migrateLinks(node, links, spec) {
+  const old = (node.outputs || []).map((o) => (o && o.name) || "");
+  const dropped = new Set();
+  for (const l of links) {
+    if (!Array.isArray(l) || String(l[1]) !== String(node.id)) continue;
+    const to = spec.outputs.indexOf(old[l[2]]);
+    if (to < 0) dropped.add(l[0]); else l[2] = to;
+  }
+  const byName = new Map(old.map((n, i) => [n, (node.outputs || [])[i] || {}]));
+  node.outputs = spec.outputs.map((name, i) => {
+    const prev = byName.get(name) || {};
+    return { ...prev, name, type: spec.types[i], slot_index: i,
+             links: (prev.links || []).filter((id) => !dropped.has(id)) };
+  });
+  return dropped;
+}
+
+function migrateSelectNodes(graphData) {
+  const nodes = (graphData && graphData.nodes) || [];
+  const links = (graphData && Array.isArray(graphData.links)) ? graphData.links : [];
+  const stale = new Set();
+  let n = 0;
+  for (const node of nodes) {
+    const spec = node && MIGRATIONS[node.type];
+    if (!spec || nodeIsCurrent(node, spec)) continue;
+    migrateWidgets(node, spec);
+    for (const id of migrateLinks(node, links, spec)) stale.add(id);
+    n++;
+  }
+  if (!n) return 0;
+  if (stale.size) {
+    // A link is referenced from three places; leaving any of them behind is a dangling id.
+    for (let i = links.length - 1; i >= 0; i--) {
+      if (Array.isArray(links[i]) && stale.has(links[i][0])) links.splice(i, 1);
+    }
+    for (const node of nodes) {
+      for (const inp of (node && node.inputs) || []) {
+        if (inp && stale.has(inp.link)) inp.link = null;
+      }
+      for (const out of (node && node.outputs) || []) {
+        if (out && Array.isArray(out.links)) out.links = out.links.filter((id) => !stale.has(id));
+      }
+    }
+  }
+  console.log(`[Kinburg ModelLibrary] migrated ${n} node(s) to the new output layout`
+    + (stale.size ? ` · dropped ${stale.size} width/height wire(s)` : ""));
+  return n;
+}
+
 // -------------------------------------------------------------------------------- registration
 app.registerExtension({
   name: "Kinburg.ModelLibrary",
   async setup() { await refreshStore(); refreshAll(); },
+  async beforeConfigureGraph(graphData) {
+    // Before litegraph resolves anything — the slot indices have to be right by the time it does.
+    try { migrateSelectNodes(graphData); }
+    catch (e) { console.error("[Kinburg ModelLibrary] Model Select migration failed:", e); }
+  },
   async nodeCreated(node) {
     if (isType(node, SELECT)) {
       installFamilyFilter(node, syncSelect);
@@ -782,7 +1033,8 @@ app.registerExtension({
           return r;
         };
       }
-      node.addWidget("button", "🗂 Library", null, () => libraryDialog(), { serialize: false });
+      node.addWidget("button", "🗂 Library", null, () => libraryDialog(effectiveModel(node)),
+        { serialize: false });
       node.addWidget("button", "🔄 Refresh", null,
         async () => { await refreshStore(); refreshAll(); }, { serialize: false });
       if (!Object.keys(STORE.models || {}).length) refreshStore().then(() => syncSelect(node));
@@ -805,6 +1057,10 @@ app.registerExtension({
         if (!app.configuringGraph) syncSettings(node);
         return r;
       };
+      // Same dialog Model Select opens — this node picks presets, so it needs the place they are
+      // renamed, re-tagged, defaulted and deleted just as much. Opens on the model it follows.
+      node.addWidget("button", "🗂 Library", null, () => libraryDialog(effectiveModel(node)),
+        { serialize: false });
       node.addWidget("button", "🔄 Refresh", null,
         async () => { await refreshStore(); refreshAll(); }, { serialize: false });
       syncSettings(node);
