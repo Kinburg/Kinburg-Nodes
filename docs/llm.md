@@ -182,7 +182,7 @@ ComfyUI frontend renders `/` as nested submenus). As before, pick the placeholde
 absolute path in `model_path` / `mmproj_path` instead.
 
 For an OpenAI-compatible **server** instead of the Python binding, see
-[`llm_server/`](#-llm_server--local-llm-server-client-text) below.
+[`llm_server/`](#-llm_server--local-llm-server--control) below.
 
 ### `Local LLM Chat (GGUF) & Send Image` — *Interactive multi-turn LLM chat interface inside ComfyUI*
 
@@ -408,35 +408,77 @@ on the same config.
 
 ---
 
-## 🌐 `llm_server/` — Local LLM (server client, text)
+## 🌐 `llm_server/` — Local LLM Server & Control
 
 > **System Purpose & Overview**  
-> Drive an OpenAI-compatible LLM **server** (llama-server, koboldcpp, or any already-running one) instead of the in-process Python binding, so the server's own full command line is available.
+> Run `llama-server` or `koboldcpp` **under ComfyUI**, behind a gateway that stays reachable while the model itself is thrown out of VRAM for an image and pulled back for the next message — so a chat client like SillyTavern can share one GPU with image generation and never see the seam.
 
-**`Local LLM (server client, text)`** is a different beast: instead of the Python binding it
-talks HTTP to an OpenAI-compatible LLM **server**, so you get the server's **full command
-line**. A **`backend`** selector picks:
-- **llama-server (launch)** — launches llama.cpp's `llama-server`; `extra_args` reaches any
-  llama.cpp flag, e.g. `--spec-type draft-mtp` (MTP speculative decoding), `--flash-attn`,
-  `--model-draft path/to/draft.gguf`.
-- **koboldcpp (launch)** — launches `koboldcpp` with its own flag names (`--model`,
-  `--contextsize`, `--gpulayers`) plus Kobold extras via `extra_args` (readiness via
-  `/v1/models`; usual port 5001).
-- **connect to running server** — launches nothing; set **`base_url`** (e.g.
-  `http://localhost:5001`) and it calls a server you already run — koboldcpp's GUI, LM Studio,
-  Ollama, vLLM, a remote box…
+The problem is VRAM: a chat model and an image model do not fit at once. Point SillyTavern
+straight at `llama-server` and the moment ComfyUI kills that process to free the card,
+SillyTavern's next message hits a closed port — nothing is listening, so nothing can start the
+model back up. So the listener and the model are split in two:
 
-For the launch backends point **`server_binary`** at the executable (download it yourself —
-neither is bundled). A launched server starts on demand, is reused while
-backend/binary/model/`n_ctx`/`n_gpu_layers`/`host`/`port`/`extra_args` stay the same, and is
-shut down on exit — or after each run when **`keep_alive`** is off, to free VRAM. Sampling, the
-reasoning split (separate **`thoughts`** output, `strip_think`, `answer_marker`), reasoning
-directives and structured output (`output_format` / `grammar`, incl. the Ideogram preset) match
-the llama-cpp-python text node, so its full output set is here too (`text` / `thoughts` /
-`finish_reason` / token counts / `gen_seconds` / `help`) plus a `server_log` tail for
-troubleshooting. `unload_comfy_models` frees image models first; `ready_path` overrides the
-health probe. Text only. Node: **`Local LLM (server client, text)`** (category
-`Kinburg-Nodes/LLM`).
+- the **gateway** — a small HTTP server owned by this ComfyUI process, started by
+  **`Local LLM Server`** and up for as long as ComfyUI runs. This is the address the chat client
+  is configured with once, and it never goes away;
+- the **model** — a real `llama-server` (or `koboldcpp`) subprocess on a private port, holding the
+  VRAM. It loads on the first request that needs it and is killed whenever the VRAM is wanted
+  elsewhere.
+
+A message arriving with the model unloaded simply waits for it: the gateway loads it, then
+forwards. The client sees a slow first reply, never an error. Requests that need no model — the
+model list and the health probe a **Connect** button uses — are answered by the gateway itself, so
+connecting works with nothing loaded at all.
+
+**`Local LLM Server`** carries the whole configuration. **`flavour`** picks the flag names
+(`llama-server`'s `-m` / `--ctx-size` / `-ngl`, or koboldcpp's `--model` / `--contextsize` /
+`--gpulayers`); **`server_binary`** points at the executable (download or build it yourself,
+nothing is bundled) with **`server_binary_path`** for one that is not in `ComfyUI/models/llm`;
+**`model`** / **`model_path`** choose the `.gguf`; **`n_ctx`** and **`n_gpu_layers`** are the usual
+two, and **`extra_args`** is the server's own command line, so `--flash-attn`, `--jinja`,
+`--model-draft …` or any other flag reaches it. **`listen_host`** / **`listen_port`** are where the
+gateway listens (the address you give the chat client); **`backend_port`** is the model's private
+one (0 = pick a free port) and **`ready_path`** overrides the readiness probe. **`action`** is
+*serve* (start the gateway and wait for the first request), *serve + load the model now*,
+*reload the model*, or *stop everything*. Outputs: **`status`**, **`base_url`** (paste this into a
+Custom OpenAI-compatible endpoint — it already ends in `/v1`), **`server_log`** and **`help`**.
+
+Three separate ways get the VRAM back, and you can use all of them at once:
+
+- **`LLM Server Control`** — the small one, for an image workflow. **`action`** = *free vram*
+  kills the model and leaves the gateway listening, so the next chat message loads it again;
+  *load the model* / *stop the gateway* / *status only* do what they say. Wire anything at all
+  through its **`passthrough`** slot: that data dependency is what makes ComfyUI run the unload
+  **before** the sampler that needs the memory.
+- **`free_on_prompt`** on the server node — a hook on ComfyUI's prompt queue. Any prompt that is
+  not itself about the server unloads the model *as it is queued*, before a single node of it
+  runs. That is the safety net for the workflows you forgot to edit, and it is what makes a
+  picture requested from the chat client work with no changes to that workflow at all. Only a
+  graph that wants the model up is spared — the server node, or a **`LLM Server Control`** set
+  to *load the model* / *status only*. One set to *free vram* does **not** switch the net off,
+  because that node may well sit after the sampler in the graph; the early unload simply makes
+  its own call a no-op.
+- **`idle_unload_minutes`** — free it after a quiet spell (0 = never).
+
+**`unload_comfy_models`** frees ComfyUI's own models before the LLM loads, and a load that lands
+while ComfyUI is mid-prompt waits for that prompt to finish rather than fighting it for the card.
+**`autoload`** off turns a request with nothing loaded into a clear error instead of a load.
+
+**Parameter repair.** SillyTavern stores list-valued options as JSON *strings*, and llama.cpp's
+server refuses the whole request when one is not a real array — `dry_sequence_breakers` is the one
+everybody hits, and llama.cpp's own source comments that its format is "not compatible with TextGen
+WebUI, Koboldcpp and SillyTavern". **`fix_params`** rewrites those shapes on the way through.
+**`auto_retry`** covers the fields nobody has hit yet: a 400 that names a field is retried once
+without it, and that field is stripped from then on. **`drop_fields`** (one name per line) removes
+fields outright.
+
+The gateway also answers three of its own paths, handy from a browser tab or a script:
+`/kinburg/status` (the same JSON the `status` output summarises), `/kinburg/unload` and
+`/kinburg/load`.
+
+Nodes: **`Local LLM Server`**, **`LLM Server Control`** (category `Kinburg-Nodes/LLM`). Text only,
+and neither generates anything itself — for prompts inside a graph use
+[**Local LLM (GGUF)**](#-local_llm--local-llm-gguf--live-logging).
 
 ---
 

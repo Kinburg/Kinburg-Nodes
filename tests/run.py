@@ -19,6 +19,7 @@ SUITES = [
     ("chat", "py", TESTS / "test_chat.py"),
     ("worker", "py", TESTS / "test_worker.py"),
     ("llm_reasoning", "py", TESTS / "test_llm_reasoning.py"),
+    ("llm_gateway", "py", TESTS / "test_llm_gateway.py"),
     ("gguf_info", "py", TESTS / "test_gguf_info.py"),
     ("send_image", "py", TESTS / "test_send_image.py"),
     ("send_image_log", "py", TESTS / "test_send_image_log.py"),

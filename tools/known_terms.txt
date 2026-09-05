@@ -63,3 +63,6 @@ snake_case
 reference_latents
 attn_bias
 align_frame_count
+
+# --- llama.cpp / SillyTavern request fields the gateway repairs, named where that is explained ---
+dry_sequence_breakers
