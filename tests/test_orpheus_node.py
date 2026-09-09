@@ -66,11 +66,17 @@ def run(**kw):
     args = dict(audio=AUDIO, cut_on="2 bars", pace=7.0, sensitivity=0.5, bpm=BPM,
                 beats_per_bar=BPB, verbose=False)
     args.update(kw)
-    return Node.run(**args)
+    # BY NAME, not by position. Appending `lyrics` to the node's outputs broke every unpacking in
+    # this suite at once, which is a silly way to find out that a suite is coupled to an ordering
+    # the pack deliberately only ever appends to.
+    return dict(zip(Node.RETURN_NAMES, Node.run(**args)))
 
 
 # ------------------------------------------------------------------------------------ the basics
-durations, trims, cues, shot_count, seconds, report, scope, gen = run()
+first = run()
+durations, trims, cues = first["durations"], first["trims"], first["cues"]
+shot_count, seconds, report = first["shot_count"], first["seconds"], first["report"]
+scope, gen = first["scope"], first["gen_extra_info"]
 check(f"the song is {TOTAL:.1f} s", abs(TOTAL - 90.0) < 0.01, TOTAL)
 check(f"it becomes {shot_count} shots", 6 <= shot_count <= 16, shot_count)
 check("seconds is the planned length", abs(seconds - TOTAL) <= 1.0 / T.FPS, seconds)
@@ -90,7 +96,9 @@ check("cues lines are labelled by shot", all(l.startswith(f"shot {i + 1}: ")
                                              for i, l in enumerate(cues.splitlines())))
 
 # ---------------------------------------------------------------------------- the plan is authority
-d2, t2, cues2, count2, _, report2, _, _ = run(plan=PLAN)
+planned = run(plan=PLAN)
+d2, t2, cues2 = planned["durations"], planned["trims"], planned["cues"]
+count2, report2 = planned["shot_count"], planned["report"]
 labels = [label for label, _, _ in SONG]
 found_labels = [l for l in labels if l in cues2]
 check(f"the plan's section names reach the cues ({len(found_labels)}/{len(labels) - 1} internal)",
@@ -109,10 +117,11 @@ check("without a plan the detector's own name is used",
       "change of section" in cues or "accent" in cues or "bar line" in cues, cues.splitlines()[:3])
 
 # ----------------------------------------------------------------------------------- the window
-_, _, _, c3, s3, _, _, _ = run(start_sec=15.0, end_sec=60.0)
+window = run(start_sec=15.0, end_sec=60.0)
+c3, s3 = window["shot_count"], window["seconds"]
 check("the window sets the clip length", abs(s3 - 45.0) <= 1.0 / T.FPS, s3)
 check("…and it is fewer shots than the whole song", c3 < shot_count, (c3, shot_count))
-_, _, _, _, s4, _, _, _ = run(end_sec=0.0, start_sec=30.0)
+s4 = run(end_sec=0.0, start_sec=30.0)["seconds"]
 check("end_sec 0 runs to the end of the track", abs(s4 - (TOTAL - 30.0)) <= 1.0 / T.FPS, s4)
 
 
@@ -137,9 +146,9 @@ check("…the requested width", scope.shape[2] == 1280, tuple(scope.shape))
 check("…pixels in 0..1", float(scope.min()) >= 0.0 and float(scope.max()) <= 1.0,
       (float(scope.min()), float(scope.max())))
 check("…and it is not blank", float(scope.std()) > 0.02, float(scope.std()))
-narrow = run(scope_width=512)[6]
+narrow = run(scope_width=512)["scope"]
 check("scope_width is honoured", narrow.shape[2] == 512, tuple(narrow.shape))
-off = run(scope=False)[6]
+off = run(scope=False)["scope"]
 check("scope=False costs nothing", off.shape[1] <= 8 and off.shape[2] <= 8, tuple(off.shape))
 
 # ---------------------------------------------------------------------------------- the report
@@ -155,10 +164,106 @@ check("the report is printable on a cp1251 console", report.encode("cp1251") is 
 check("…and so is the plan variant", report2.encode("cp1251") is not None)
 
 # a detected tempo (bpm=0) must still produce a usable plan
-d5, _, _, c5, _, r5, _, g5 = run(bpm=0.0)
+auto = run(bpm=0.0)
+d5, c5, r5, g5 = auto["durations"], auto["shot_count"], auto["report"], auto["gen_extra_info"]
 check(f"bpm=0 detects and still plans ({c5} shots)", c5 >= 4 and len(d5.split(",")) == c5, d5)
 check("…and the report says it was detected", "detected" in r5,
       [l for l in r5.splitlines() if "tempo" in l])
 check("…and gen info records that too", "detected" in json.loads(g5)[0]["params"]["bpm"])
+
+# ------------------------------------------------------- Echo's timing beats the plan, by design
+# The plan says where a section was ASKED to be. On a real take the two were measured up to 18 s
+# apart, and cutting on the intention puts the picture change in the middle of a verse. So a wired
+# timing REPLACES the plan's boundaries — here they are deliberately 6 s off the plan's grid, and
+# the cuts have to follow the timing rather than the table.
+def timing_of(offsets, labels=("Verse 1", "Chorus", "Verse 2")):
+    sections, lines = [], []
+    for i, (label, at) in enumerate(zip(labels, offsets)):
+        sections.append({"index": i, "label": label, "voice": "Nina", "sung": True,
+                         "start": at, "end": at + 10.0, "planned": (at, at + 10.0)})
+        lines.append({"start": at + 0.5, "end": at + 3.0, "voice": "Nina", "label": label,
+                      "section": i, "text": f"рядок {i + 1}", "words": [], "score": 0.9,
+                      "found": 2})
+    return {"total": TOTAL, "sections": sections, "lines": lines, "quiet": [], "collisions": []}
+
+
+def cut_times(cues_text):
+    """Where the cuts actually FALL, read off `cues`.
+
+    Not from `durations`: those are the GENERATED lengths on H3's frame grid (every one of them
+    8.00 s here), and accumulating them gives the sampler's timeline rather than the music's. The
+    musical span is what survives the trim, and `cues` is where it is printed.
+    """
+    import re
+    out = []
+    for row in cues_text.splitlines():
+        m = re.search(r"(\d+):(\d+\.\d)-(\d+):(\d+\.\d)", row)
+        if m:
+            out.append(int(m.group(3)) * 60 + float(m.group(4)))
+    return out
+
+
+# Boundaries deliberately NOWHERE near the uniform grid this song otherwise produces (cuts every
+# 7.5 s). An earlier version of this check used boundaries at multiples of 15 and passed without
+# the feature doing anything at all — the grid happened to sit on them.
+MOVED = [11.2, 41.3, 63.7]
+
+
+def miss(cuts):
+    return sum(min(abs(t - c) for c in cuts) for t in MOVED)
+
+
+# `cue_pull` is what decides whether the planner can AFFORD a boundary: it is the seconds of
+# deviation from the ideal length that a cue's importance is worth. High enough, the singing wins.
+echo = run(plan=PLAN, timing=timing_of(MOVED), cue_pull=8.0)
+echo_cuts = cut_times(echo["cues"])
+near = [t for t in MOVED if any(abs(t - c) < 2.0 for c in echo_cuts)]
+check("the cuts land on where the words really are", len(near) == 3, (near, echo_cuts))
+check("...and far closer than the plan's own boundaries managed",
+      miss(echo_cuts) < miss(cut_times(planned["cues"])) / 4,
+      (round(miss(echo_cuts), 2), round(miss(cut_times(planned["cues"])), 2)))
+check("the section's own name reaches the cue list", "Verse 1" in echo["cues"], echo["cues"][:90])
+
+# At the DEFAULT cue_pull the same boundaries lose to an ordinary beat — that is the planner
+# working as documented, and it is also the most confusing thing a working feature can do, so the
+# report has to say it out loud rather than let the input look inert.
+timid = run(plan=PLAN, timing=timing_of(MOVED))
+check("a low cue_pull really does ignore them",
+      miss(cut_times(timid["cues"])) > 4 * miss(echo_cuts), miss(cut_times(timid["cues"])))
+check("...and the report says so instead of looking inert",
+      "cue_pull" in timid["report"] and "became a cut" in timid["report"],
+      [l for l in timid["report"].splitlines() if "cue_pull" in l])
+check("the tally is printed either way, so the two runs can be compared at a glance",
+      "landed on a cut at cue_pull" in echo["report"]
+      and "landed on a cut at cue_pull" in timid["report"],
+      [l for l in echo["report"].splitlines() if "landed" in l])
+check("...but the advice only appears when it is needed",
+      "Raise cue_pull" in timid["report"] and "Raise cue_pull" not in echo["report"])
+check("the report says the boundaries came from Echo", "Echo's alignment" in echo["report"],
+      [l for l in echo["report"].splitlines() if "Echo" in l])
+check("...and that a plan was wired too and only lent its labels",
+      "only for its labels" in echo["report"])
+
+# The per-shot lyric block, which is what Phantas reads.
+check("the lyrics output has one row per shot",
+      len(echo["lyrics"].splitlines()) == echo["shot_count"],
+      (len(echo["lyrics"].splitlines()), echo["shot_count"]))
+check("it is numbered by shot", echo["lyrics"].startswith("1. "), echo["lyrics"][:40])
+check("it names the singer", "Nina - " in echo["lyrics"], echo["lyrics"][:120])
+import re as _re  # noqa: E402
+check("it carries NO timestamps — Phantas' planner must not reason in seconds",
+      not _re.search(r"\d+:\d\d|\d+\.\d+\s*s\b", echo["lyrics"]), echo["lyrics"][:200])
+
+# Without a timing nothing changes at all, and a junk one must not be believed.
+check("no timing means no lyrics output", run(plan=PLAN)["lyrics"] == "")
+check("a timing is only used when it holds real spans",
+      N._sections_of(None) == [] and N._sections_of({"sections": []}) == []
+      and N._sections_of({"sections": [{"sung": True, "start": 5.0, "end": 5.0}]}) == [],
+      N._sections_of({"sections": [{"sung": True, "start": 5.0, "end": 5.0}]}))
+check("an unsung section is not a boundary",
+      N._sections_of({"sections": [{"sung": False, "start": 1.0, "end": 9.0}]}) == [])
+check("a junk timing falls back to the plan rather than raising",
+      run(plan=PLAN, timing={"sections": "nonsense"})["shot_count"] == count2)
+check("the Echo report line survives a cp1251 console", echo["report"].encode("cp1251") is not None)
 
 check.done()

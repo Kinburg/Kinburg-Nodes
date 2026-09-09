@@ -16,7 +16,13 @@ What it pins:
   a real array, and an unknown field named in a 400 being dropped and retried once;
 * streaming passing through chunk by chunk;
 * every way the VRAM goes back: the explicit unload, the queue hook that spares prompts containing
-  the pack's own two nodes, and a reload on the next request.
+  the pack's own two nodes, and a reload on the next request;
+* the **two backend roles** — an embedding model that has to be a second llama-server process,
+  the routing that sends `/v1/embeddings` to it and chat to the other, the two living and dying
+  independently, and koboldcpp needing none of it because it serves both from one process.
+
+The command lines themselves are pinned by `test_llm_server_options.py`; this suite only cares
+that the right process is launched and the right one is talked to.
 """
 import http.client
 import json
@@ -209,20 +215,69 @@ check("...and says why", "autoload" in json.dumps(answer), answer)
 # koboldcpp's own `--model` spelling cannot express. The probe path it needs is exercised by the
 # ready_path override just below, which goes through the same `_probe` call.
 configure(flavour="koboldcpp", autoload=True, fix_params=True, auto_retry=True, drop_fields=())
-argv = gw._argv(gw.STATE.cfg, 1234)
+argv = gw._argv(gw.STATE.cfg, gw.CHAT, 1234)
 check("koboldcpp gets its own flag names",
       argv[1:2] == ["--model"] and "--contextsize" in argv and "--gpulayers" in argv, argv)
 check("...and is waited for on /v1/models, since it has no /health",
-      gw.FLAVOURS["koboldcpp"]["ready"] == "/v1/models"
-      and gw.FLAVOURS["llama-server"]["ready"] == "/health")
+      gw.READY_PATHS["koboldcpp"] == "/v1/models" and gw.READY_PATHS["llama-server"] == "/health")
 
 configure(ready_path="/props")
 status, _ = jcall("POST", "/v1/chat/completions", {"messages": []})
 check("ready_path overrides the probe", status == 200 and gw.running(), status)
 
 # --------------------------------------------------------------- shutdown
+# ------------------------------------------- embeddings: a second process, and the routing to it
+# `--embeddings` restricts a llama-server process to embedding work, so the embedding model cannot
+# share the chat one. The stand-in reports `embed_only` exactly when it was launched that way,
+# which is how these checks prove which of the two processes actually answered.
+gw.stop_model("test")
+configure(embed_model_resolved="fake_llm_backend", embed_n_ctx=0, embed_n_gpu_layers=-1,
+          pooling="model default", rerank=False, embed_extra=())
+check("the gateway now knows it needs a second process",
+      gw.options.needs_embed_process(gw.STATE.cfg))
+check("...and routes the embedding path to it, not to chat",
+      gw._role_for("/v1/embeddings") == gw.EMBED and gw._role_for("/v1/chat/completions") == gw.CHAT)
+
+status, listed = jcall("GET", "/v1/models")
+check("both models are listed with nothing loaded",
+      len(listed.get("data", [])) == 2, listed)
+
+status, vec = jcall("POST", "/v1/embeddings", {"input": "hello", "model": "whatever"})
+check("an embedding request is answered", status == 200 and len(vec.get("data", [])) == 1, vec)
+check("...by the embedding-only process", vec.get("embed_only") is True, vec)
+check("...which is up while the chat model is still not",
+      gw.running(gw.EMBED) and not gw.running(gw.CHAT))
+
+jcall("POST", "/v1/chat/completions", {"messages": []})
+check("the chat model loads separately, and both are up at once",
+      gw.running(gw.CHAT) and gw.running(gw.EMBED))
+check("...on two different ports",
+      gw.STATE.backends[gw.CHAT].port != gw.STATE.backends[gw.EMBED].port)
+st = jcall("GET", "/kinburg/status")[1]
+check("status reports the embedding backend too",
+      st.get("embed", {}).get("loaded") is True, st.get("embed"))
+
+gw._on_prompt({"prompt": {"1": {"class_type": "KSampler"}}})
+check("a queued image prompt takes BOTH models down",
+      not gw.running(gw.CHAT) and not gw.running(gw.EMBED))
+
+status, vec = jcall("POST", "/v1/embeddings", {"input": "again"})
+check("the next embedding request reloads only the embedding model",
+      status == 200 and gw.running(gw.EMBED) and not gw.running(gw.CHAT))
+gw.stop_model("test", gw.EMBED)
+check("one role can be stopped without the other",
+      not gw.running(gw.EMBED) and not gw.running(gw.CHAT))
+
+# koboldcpp serves embeddings from the one process, so there is nothing to route.
+configure(flavour="koboldcpp", embed_model_resolved="fake_llm_backend")
+check("koboldcpp keeps embeddings in the chat process",
+      not gw.options.needs_embed_process(gw.STATE.cfg)
+      and gw._role_for("/v1/embeddings") == gw.CHAT)
+configure()
+
 gw.shutdown("end of suite")
-check("shutdown stops the model", not gw.running())
+check("shutdown stops every model",
+      not gw.running(gw.CHAT) and not gw.running(gw.EMBED))
 try:
     call("GET", "/v1/models", timeout=2)
     listening = True

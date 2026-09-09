@@ -573,10 +573,218 @@ had nothing to cut on and fell back to length alone. If the amber lines do not s
 nothing downstream is worth rendering. A row of red ones is a `sensitivity` or `cut_on` problem, and
 is otherwise invisible until the video looks wrong.
 
+### With Echo's timing wired
+
+`timing` replaces the plan's section boundaries with the **performance's**. The distinction is not
+academic: on a real take the two have been measured up to **18 s apart**, and cutting on the plan
+then puts the picture change in the middle of a verse. The tooltip above that calls a wired plan
+"exact… impossible to miss" is describing a table, and a table records intent. The stretches Echo
+found with no words in them become cues too — that is where an instrumental shot belongs, and it is
+a fact only the alignment has.
+
+**A boundary is a candidate, not a command, and `cue_pull` decides whether the planner can afford
+it.** At the default 2.0 a boundary more than about 2 s from the pace-preferred position loses to an
+ordinary beat, so the input can look inert. Raise `cue_pull` to follow the singing harder at the
+price of less even shots — and the report counts how many of the sung sections actually became cuts,
+so the choice is made against a number rather than a guess.
+
+It also fills the **`lyrics`** output: what is sung over each shot, by shot number. Wire it into
+`Phantas Storyboard`'s `shot_lyrics` and the planner stops writing shot 7 in ignorance of its own
+moment in the song. It is handed over as **mood**, explicitly not as subject matter — left to itself
+a model illustrates lyrics literally, a line about a river becomes a river in every frame, and that
+competes with the cast block that actually holds identity across frames. And it carries **no
+timestamps at all**, because that planner emits weights and the frame grid is applied afterwards.
+
 `start_sec` / `end_sec` cut a window out of the track — to skip a long intro, or to make a teaser —
 while the *whole* track is still analysed, because tempo and downbeat are measured far more reliably
 over three minutes than over twenty seconds. `trims` is the per-shot frame count to drop; wire it
 into Morpheus, or read it and trim at assembly.
+
+---
+
+## 💬 `echo/` — Echo Suite 💬
+
+> **System Purpose & Overview**
+> Find where each word of a lyric was **actually sung**, so the words can go back on the screen in
+> time with the voice — and so the plan can be corrected to match the performance.
+
+Echo is the nymph who could only repeat words already spoken, which is the job exactly: this suite
+never decides *what* was sung. **`Echo (Lyrics → Timing) 💬`** (`KinburgEchoAlign`) takes the song
+and the same lyric sheet that went to Siren, and answers the one question left — *when*.
+
+```
+Siren 🧜  →  Echo 💬  →  Save Clip 🎬   (subtitles, burnt or beside the file)
+ the song    when each        Orpheus 🎶   (cuts on the real section boundaries)
+             word lands
+```
+
+### Alignment, not transcription — and that is the whole design
+
+Asking Whisper "what was sung" is a harder question than the one that needs answering, and on a
+vocal under a full mix it answers badly: the words come back approximate, and its word timings are a
+DTW over attention, an estimate of an estimate. Here **the words are already known**. So the model
+is only asked where they are, and `torchaudio`'s `forced_align` answers with an exact Viterbi path
+through a CTC lattice. It cannot invent a word and it cannot drop one. What it hands back per word
+is a **confidence**, which is the number the whole node is judged by.
+
+The model is `MMS_FA` — wav2vec2 fine-tuned for alignment on 1130 languages, about 1.2 GB, fetched
+once into `ComfyUI/models/stt/echo/` (not into a hidden `~/.cache`, so it can be found and deleted).
+
+### Why this does not repeat the frame-batch memory failure
+
+A transformer over 20 ms frames costs attention **quadratic in what it is handed**: a three-minute
+song in one pass is ~9 000 frames, and that is where the memory goes. It is never handed one. The
+plan already says roughly where every section is, so the song is cut into **blocks — one plan row
+each** — and every block is encoded on its own: 15–45 s, i.e. 750–2 250 frames. **Peak memory is set
+by the longest section and stops depending on the song's length at all.** Two things fall out of the
+window besides the memory: a chorus sung four times cannot have its second occurrence matched to its
+fourth, and the `*` star token only has to absorb a few seconds of neighbouring music instead of a
+whole arrangement.
+
+### The plan is a hint; the performance is the truth
+
+`plan` says where a section was *asked* to be. The model sang it somewhere else. So each window is
+the planned span plus `slack` on either side, and **the disagreement is an output, not an error**:
+the `plan` output is the wired plan with every section moved to where its words really are, written
+in the same table shape `Save Clip` and `Orpheus` already read. Wire it back and the pictures land
+on the real boundaries. The `report` prints the drift per section next to the confidence, which is
+how you tell a section that genuinely moved from one the aligner lost.
+
+### One colour per singer, with no diarization at all
+
+Speaker diarization is a heavy model that would be solving a solved problem: the Siren plan carries
+a **voice column**, and `Siren Score` splits a section on inner `[Name]` markers so an alternation is
+already in the source. So who sings which line is *read*, not detected. Wire the same
+`Character Card`s into `voice_1`…`voice_4` and a marker like `[Chorus - Nina]` resolves to a member,
+so a solo line inside a duet chorus gets Nina's colour rather than the duet's. `colors` maps a name
+to a hex colour, one `Name = #rrggbb` per line; anyone unnamed takes the next colour off a palette
+in order of first appearance.
+
+### Burning it into the video
+
+Wire `timing` into **`Save Clip`** and set `subtitles`, and the words are painted into the frames
+themselves — karaoke and all, one colour per singer. The look travels **on the timing**, set once
+here on Echo: font, size, colours, sweep and lead-in. So what you checked in a player is what gets
+burnt, rather than two nodes with two sets of style widgets that drift apart.
+
+It is affordable inside `Save Clip`'s encode loop for one reason: **a line is laid out and drawn
+once for the whole render**, into two RGBA sprites of identical geometry — one in the colour a word
+waits in, one in the colour it becomes. Per frame there is no text layout, no glyph rasterizing and
+no outline, only a mask of rectangles saying how far the singing has got and a single composite. A
+frame carrying no words keeps the node's existing still fast path untouched, so an instrumental
+stretch costs exactly what it did before.
+
+### Check the timing before rendering anything
+
+With `write_ass` on, the node writes a **SubStation Alpha** file with real karaoke tags — each word
+lights up as it is sung, one style per voice. Open the song and that file in any player and the
+alignment is verified in seconds, **with no render at all**, and it can be restyled afterwards
+without re-encoding. `write_srt` adds a plain SubRip beside it for anything that cannot read ASS.
+`karaoke_sweep` fills the colour across a held word rather than flipping it at the word's start, and
+`lead_in` puts the line on screen a moment early so it can be read rather than only followed.
+
+### Anchoring: each section teaches the next one where to look
+
+`anchor` (on by default) searches a section from where the **previous one's words actually stopped**,
+instead of from where the plan says it begins. Two things are carried, and the second matters more.
+
+**The drift.** On a real take the plan ran +1.5 s behind the performance at the first verse and
++17.7 s by the second, growing steadily — a plan is not wrong at random, it is wrong *progressively*.
+So the last section's error is the next section's best correction. On that song, five of six sections
+did not fit inside their un-planned windows and every one of them needed the emergency widening;
+anchored, all six fit first time.
+
+It is applied **asymmetrically**, which a first version got wrong. That drift grew to +17.7 s and
+then *shrank* to +13.8 and +8.4, so a window whose start had been pushed forward by the last
+measurement began after the section it was looking for. Drift may therefore only ever make a window
+**bigger** — forward on the ceiling, backwards on the floor when it is negative. The costs are not
+symmetric: a window that starts too early is slower, a window that starts too late is wrong.
+
+**The floor**, which is a fact rather than an estimate: a section cannot begin before the previous
+one stopped singing. This is what turns the failure mode above into a report. On that same take the
+Outro was never sung, and without a floor its words were laid — at 0.71 confidence — on top of the
+chorus that *was* singing there. Anchored, it is searched in the outro, finds nothing, comes back at
+almost zero, and says so.
+
+A section whose own confidence comes back below `track.ANCHOR_TRUST` teaches the next one nothing,
+so one bad placement cannot walk the rest of the song off the music.
+
+An instrumental section is placed **between the singing on either side of it**, not where the plan
+put it — nothing measured it, and once the sung sections have moved by twenty-five seconds the
+plan's position for a `Break` is simply wrong. A run of them shares its gap in proportion to their
+planned lengths. This is not cosmetic: those rows go on to place pictures in `Save Clip` and cuts in
+`Orpheus`, and leaving them behind also filled the overlap warning with names that had not moved,
+burying the one section that really was misplaced.
+
+### A last word that ran into the silence
+
+A block is aligned with a `*` star token at each end so the model can account for audio the
+transcript does not cover — but entering that star costs something, and at the end of a section it
+is often cheaper for the Viterbi path to hold the last word's final character across the
+instrumental than to pay for it. The last word then swallows the gap, and the subtitle sits on
+screen for seconds after it was sung, over the top of the next section's first line.
+
+Echo pulls such a word back, bounded by **the line's own pace**: the words before it say how fast
+this line is being sung, and the last one is allowed a generous multiple of that. A line that really
+does end on a held note keeps it; one whose last word runs three times longer than the line's own
+pace was not held, it was stranded. The report says how many lines this happened to and how much was
+removed, because it is a heuristic about a held note and the only way to know it is not eating one is
+to listen where it fired.
+
+### When a section lands in the wrong place
+
+Forced alignment **must** place every word it is given, inside the window it is given. So if the
+plan says a section is at 1:20 and the singer came in at 1:35, the words are crammed against the far
+edge of the window: they appear **early, on top of whoever is really singing**, and the real
+performance passes with no subtitle at all. Confidence alone does not catch this — from inside one
+window it looks like an answer. Three things do:
+
+* **Repeated labels are matched in order.** A chorus sung three times is three sections, grouped by
+  *adjacency* and never by name; only an inner `[Name]` marker continues the section above it. A
+  label that appears a different number of times in the plan than in the lyrics is reported by name.
+* **A section flat against its window's edge is searched again**, wider — and the wider answer is
+  kept only if it is *more* confident, so a section that genuinely starts at the edge loses nothing.
+  The report says how far it moved and what the confidence did.
+* **Two sections on screen at once is reported as a collision.** That is the shape of the failure,
+  and it is visible even when every individual number looks healthy.
+
+If the report shows drift near the window's edge across the whole song, raise `slack` — it is the
+dial for exactly this, and the cost is encode time, not accuracy.
+
+### Feeding it an isolated vocal
+
+**The two audio inputs divide one job in two.** `audio` is the **clock**: its length is what the
+plan's sections are scaled onto, and it is also what gets listened to when nothing better is
+offered. `vocals` is only what gets **listened to**. So `audio` must be the whole song — **never the
+instrumental stem**, because a lyric aligned against music with no voice in it produces timings that
+look confident and are nonsense. If a separated vocal is all you want to wire, put it in `audio` and
+leave `vocals` empty: a full-length stem is its own clock and the result is identical. Wiring both
+is still better, for one reason — a separator sometimes swallows a whispered or quiet passage
+outright, and then the mix is still there to be the clock and to take over.
+
+`vocals` takes a separated vocal track (`Vocals using MDX` or any other separator) and aligns
+against that instead of the mix; `audio` still defines the length. The acoustic model was trained on
+speech, so a dense arrangement lowers its confidence on every word and worst on consonants — an
+isolated vocal raises the whole confidence column. That matters less for *placing* a word than for
+**trusting** the placement: a weak reading and a wrong one both look like 0.3, and tell each other
+apart at 0.8. It does not fix a section searched in the wrong window, which is arithmetic about the
+plan rather than hearing. The two tracks must be the same length, or a separator that trimmed
+silence would shift every timing by however much it cut — that is checked, and the mix is used
+instead if they disagree.
+
+### What this will not fix
+
+Forced alignment places every word it is given, **whether or not it was sung**. AceStep swallows
+words, and with a long tail it repeats the last phrase — see `Siren`'s own notes on `tail_bars`. A
+line the model never sang is still laid down somewhere, and the only signal that it was invented is
+a low confidence. That is why the report lists the weakest lines by name instead of printing one
+average and looking successful.
+
+`language` picks the spelling rules that turn the lyric into the aligner's 28-letter alphabet;
+`auto` decides **per word** from the letters that exist in only one language (`ї є ґ` against
+`ы э ъ ё`), so a line with a Ukrainian and a Russian word in it is spelled correctly on both.
+`half` runs the encoder in fp16 (the alignment itself is always fp32), and `unload_after` hands the
+1.2 GB back when the same graph goes straight into a video model.
 
 ---
 
@@ -592,6 +800,13 @@ into the file itself, and a player on the node when it is done. Required are an 
 frame, or a batch of slides) and an **`audio`**; it writes an **h264 + AAC mp4** and outputs the
 `video` object (so it also chains into ComfyUI's own video nodes), the saved `path` and a `report`.
 Category `Kinburg-Nodes/video`.
+
+**Subtitles.** Wire `Echo`'s `timing` and `subtitles` decides what happens to it: burnt into the
+picture, written as a `.ass` beside the mp4, both, or ignored. The styling lives on the timing, not
+here — one place to set a colour. With nothing wired to `timing` the setting does nothing. Note that
+the older `lyrics` input still writes its own `.srt`, timed off the **plan** rather than off the
+performance; wiring both leaves two subtitle tracks with different timings beside one video, and the
+report says so.
 
 **The batch is the list of pictures, not the list of frames.** A 4-image batch over a 3-minute song
 is four shots. This is also why the node exists at all rather than being `Create Video` + `Save

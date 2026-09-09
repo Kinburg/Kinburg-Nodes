@@ -1,7 +1,7 @@
 [project]
 name = "kinburg-nodes"
-description = "Kinburg's ComfyUI nodes: a local GGUF LLM nodes with on-demand VRAM unloading (+vision). Node for chat with LLM for discuss task before main generation (image or video, etc). An interactive HTML image-comparison node. Other utilities. Accumulator nodes, lora with keywords nodes, save song node and more."
-version = "3.4.0"
+description = "Kinburg's ComfyUI nodes. An end-to-end music-video pipeline: write and sing a song with Siren (AceStep, per-section voices), find where every word was actually sung with Echo (karaoke .ass or burnt-in subtitles that follow the performance rather than the plan), cut the edit to its own music with Orpheus, storyboard and render it with Phantas and Morpheus, then write it out with Save Clip and Save Song. Alongside it a local-LLM toolkit: GGUF nodes with on-demand VRAM unloading and vision, a chat node for talking a task through before you generate, a vision LLM judge, and a managed OpenAI-compatible LLM server that steps aside when ComfyUI needs the card. Plus Ouroboros (self-correcting sampler), Chimera (multi-stage sampler), Audio SR, an interactive HTML image-comparison node, a model and settings preset library, and workflow utilities - loops, accumulators, switches, timers."
+version = "3.5.0"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = []

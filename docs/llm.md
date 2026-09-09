@@ -411,7 +411,7 @@ on the same config.
 ## 🌐 `llm_server/` — Local LLM Server & Control
 
 > **System Purpose & Overview**  
-> Run `llama-server` or `koboldcpp` **under ComfyUI**, behind a gateway that stays reachable while the model itself is thrown out of VRAM for an image and pulled back for the next message — so a chat client like SillyTavern can share one GPU with image generation and never see the seam.
+> Run `llama-server` or `koboldcpp` **under ComfyUI** — with its draft, vision and embedding models — behind a gateway that stays reachable while the models themselves are thrown out of VRAM for an image and pulled back for the next message, so a chat client like SillyTavern can share one GPU with image generation and never see the seam.
 
 The problem is VRAM: a chat model and an image model do not fit at once. Point SillyTavern
 straight at `llama-server` and the moment ComfyUI kills that process to free the card,
@@ -464,6 +464,71 @@ Three separate ways get the VRAM back, and you can use all of them at once:
 while ComfyUI is mid-prompt waits for that prompt to finish rather than fighting it for the card.
 **`autoload`** off turns a request with nothing loaded into a clear error instead of a load.
 
+**Tuning, and the order worth trying it in.** Every launch setting is a widget; `extra_args` is
+left for what has none (rope/yarn, `--tensor-split`, `--override-tensor`, `--lora`, `--fit`) and is
+appended last, so a flag written by hand beats the widget for the same thing. The rule the whole
+table follows is that a widget left alone emits **nothing** — the server keeps its own default,
+and a saved workflow does not freeze today's defaults into next year's build.
+
+For VRAM, in descending order of what it buys you:
+1. **`cpu_moe_layers`** — on a Mixture-of-Experts model this moves the experts of the first N
+   layers into system RAM and frees more VRAM per point of speed than anything else here. On a
+   dense model it does nothing at all.
+2. **`kv_cache_type`** — a long chat is mostly KV cache; `q8_0` is nearly free, `q4_0` is
+   noticeable. Full effect needs Flash Attention, without which only K is quantized.
+3. **`n_ctx`** — the cache is proportional to it.
+4. **`n_gpu_layers`** — the blunt one; every layer left on the CPU costs real speed.
+
+**`flash_attn`** is best left at `auto`: llama-server decides for itself and koboldcpp has it on
+already, so the setting is really there to force it *off* for a model that misbehaves.
+**`n_batch`** / **`n_ubatch`** / **`threads`** / **`parallel_slots`** are the usual throughput
+knobs — one slot is right for one chat, since each slot takes its own share of the cache.
+**`context_shift`** off makes the server stop rather than drop the oldest tokens when a chat
+outgrows `n_ctx`. **`alias`** renames the model in the API (and in the list the gateway reports),
+**`api_key`** demands a key on every request.
+
+**Thinking.** **`reasoning`** is the on/off switch and **`reasoning_budget`** caps what it may
+spend. **`reasoning_format`** decides where the thoughts land: the default already hands them back
+as a separate field, which SillyTavern renders as its own collapsible block, so set it to `none`
+only if you would rather see raw think tags inside the reply. **`enable_thinking`** and
+**`reasoning_effort`** (with **`reasoning_effort_custom`**) are chat-template variables rather than
+prompt text — the same pair, with the same meaning, that
+[Local LLM Settings (GGUF)](#-local_llm--local-llm-gguf--live-logging) carries — so they reach
+families that ignore a prompt directive. **`chat_template_file`** replaces the template baked into
+the GGUF, which is only worth doing when that one is broken.
+
+### The side models
+
+Three optional inputs, each its own small node, so a second model's settings exist only when you
+use one.
+
+**`LLM Server Draft (GGUF)`** — speculative decoding: a small model guesses ahead and the big one
+checks the guess, which is free speed when the guess is usually right. **`spec_type`** picks the
+method: `draft-simple` for a small sibling model, `draft-mtp` for a Multi-Token-Prediction head
+shipped next to the model, or one of the `ngram-*` methods, which need **no** draft model at all
+because they guess from what the text already contains — cheap, and surprisingly effective on
+repetitive writing. **`draft_model`** must share the main model's vocabulary. **`draft_n_max`**,
+**`draft_n_min`** and **`draft_p_min`** decide how far ahead it guesses and when it gives up;
+**`draft_n_gpu_layers`** keeps the draft on the GPU, which is rather the point.
+
+**`LLM Server Vision (GGUF)`** — an **`mmproj`** served next to the model so the chat client can
+send images. **`mmproj_offload`** off puts the projector on the CPU (a little VRAM back, slower
+image encoding); **`image_max_tokens`** caps how much context one image may eat.
+
+**`LLM Server Embeddings (GGUF)`** — an embedding model on the *same address*, so SillyTavern's
+Vector Storage needs no second endpoint. How it runs depends on the backend, and the difference is
+not cosmetic: `llama-server --embeddings` **restricts** a process to embedding work, so there the
+**`embed_model`** gets a second process of its own and the gateway routes `/v1/embeddings` and
+`/rerank` to it while chat goes to the other; koboldcpp loads it inside the one process. Either
+way it obeys the same unload rules as the chat model, and each is loaded on demand by the first
+request that needs it — ask for a vector with nothing loaded and only the embedding model wakes
+up. **`embed_n_ctx`**, **`embed_n_gpu_layers`**, **`pooling`**, **`rerank`** and
+**`embed_extra_args`** belong to that model alone.
+
+**The two backends are not the same program.** koboldcpp has no word for some of this — no ubatch,
+no alias, no thinking budget, no reasoning format, no jinja override, no `spec_type`. Rather than
+drop those silently, the node lists them under *ignored by this backend* in its `status` output.
+
 **Parameter repair.** SillyTavern stores list-valued options as JSON *strings*, and llama.cpp's
 server refuses the whole request when one is not a real array — `dry_sequence_breakers` is the one
 everybody hits, and llama.cpp's own source comments that its format is "not compatible with TextGen
@@ -476,8 +541,9 @@ The gateway also answers three of its own paths, handy from a browser tab or a s
 `/kinburg/status` (the same JSON the `status` output summarises), `/kinburg/unload` and
 `/kinburg/load`.
 
-Nodes: **`Local LLM Server`**, **`LLM Server Control`** (category `Kinburg-Nodes/LLM`). Text only,
-and neither generates anything itself — for prompts inside a graph use
+Nodes: **`Local LLM Server`**, **`LLM Server Control`**, **`LLM Server Draft (GGUF)`**,
+**`LLM Server Vision (GGUF)`**, **`LLM Server Embeddings (GGUF)`** (category `Kinburg-Nodes/LLM`).
+Text only, and none of them generates anything itself — for prompts inside a graph use
 [**Local LLM (GGUF)**](#-local_llm--local-llm-gguf--live-logging).
 
 ---

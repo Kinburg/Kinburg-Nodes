@@ -1,22 +1,28 @@
 # 🎨 Kinburg-Nodes
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
-[![version](https://img.shields.io/badge/version-3.4.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-98-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-1752%20checks-brightgreen.svg)](#-tests)
+[![version](https://img.shields.io/badge/version-3.5.0-blue.svg)](pyproject.toml)
+[![nodes](https://img.shields.io/badge/nodes-102-orange.svg)](#-node-index)
+[![tests](https://img.shields.io/badge/tests-2127%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
 <!-- END GENERATED badges -->
 
-A personal collection of custom ComfyUI nodes. One folder = one package: ComfyUI reads the node mappings from the root `__init__.py`, and the sets are split into subpackages.
+A personal collection of custom ComfyUI nodes, grown around one thing it does end to end: **a music video, from the song to the finished file.**
+
+**Siren** writes and sings it (AceStep, with a voice per section). **Echo** finds where every word was *actually* sung and turns that into karaoke subtitles — soft `.ass` or burnt into the picture — timed to the performance rather than to the plan, and it hands back the plan corrected to match. **Orpheus** cuts the edit to the song's own music. **Phantas** and **Morpheus** storyboard and render the shots. **Save Clip** and **Save Song** write the result out.
+
+Around that: local GGUF LLM nodes with on-demand VRAM unloading and vision, a chat node for talking a task through before you generate, a managed OpenAI-compatible LLM server, the **Ouroboros** self-correcting and **Chimera** multi-stage samplers, an interactive HTML image-comparison node, a model and settings preset library, and the usual workflow plumbing — loops, accumulators, switches, timers.
+
+One folder = one package: ComfyUI reads the node mappings from the root `__init__.py`, and the sets are split into subpackages.
 
 ---
 
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **98** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **102** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -25,7 +31,7 @@ All **98** nodes, grouped by the package they live in. Every package links to it
 | Package | Nodes |
 |---|---|
 | [`local_llm/` — Local LLM (GGUF) & Live Logging](docs/llm.md#-local_llm--local-llm-gguf--live-logging) | `Context Sizer (GGUF)`, `Kinburg Live Log 📜`, `LLM Live Log (old id)`, `Local LLM (GGUF)`, `Local LLM Chat (GGUF)`, `Local LLM Model Info 🔍`, `Local LLM Settings (GGUF)`, `Send Image to Chat`, `Send Image to Live Log 📜`, `Token Counter (GGUF)`, `Vision Settings (GGUF)` |
-| [`llm_server/` — Local LLM Server & Control](docs/llm.md#-llm_server--local-llm-server--control) | `LLM Server Control`, `Local LLM Server` |
+| [`llm_server/` — Local LLM Server & Control](docs/llm.md#-llm_server--local-llm-server--control) | `LLM Server Control`, `LLM Server Draft (GGUF)`, `LLM Server Embeddings (GGUF)`, `LLM Server Vision (GGUF)`, `Local LLM Server` |
 | [`context/` — Character Card, Entity Card, Context Collector](docs/llm.md#-context--character-card-entity-card-context-collector) | `Character Card`, `Context Collector`, `Entity Card` |
 | [`vision_judge/` — Vision LLM Judge & Criteria Builder](docs/llm.md#-vision_judge--vision-llm-judge--criteria-builder) | `Criteria Builder 📋`, `Vision LLM Judge` |
 | [`card_presets/` — Card Save & Card Presets](docs/llm.md#-card_presets--card-save--card-presets) | `Card Presets`, `Card Save` |
@@ -61,6 +67,7 @@ All **98** nodes, grouped by the package they live in. Every package links to it
 | [`morpheus/` — Morpheus Suite 🌙](docs/video.md#-morpheus--morpheus-suite-) | `Morpheus (Video Sampler) 🌙`, `Morpheus Dream Board 🌙`, `Morpheus Dream 🌙`, `Morpheus Storyboard 🌙` |
 | [`phantas/` — Phantas Suite 🎞](docs/video.md#-phantas--phantas-suite-) | `Phantas Storyboard 🎞`, `Phantas 🎞` |
 | [`orpheus/` — Orpheus Suite 🎶](docs/video.md#-orpheus--orpheus-suite-) | `Orpheus (Audio → Shots) 🎶` |
+| [`echo/` — Echo Suite 💬](docs/video.md#-echo--echo-suite-) | `Echo (Lyrics → Timing) 💬` |
 | [`save_video/` — Save Clip](docs/video.md#-save_video--save-clip) | `Save Clip` |
 
 ### 🎛️ Presets & Asset Management
@@ -123,6 +130,7 @@ All **98** nodes, grouped by the package they live in. Every package links to it
 | Date String | `KinburgDateString` | `Kinburg-Nodes/util` |
 | Delay | `KinburgDelay` | `Kinburg-Nodes/flow/loops` |
 | Diffusion Safetensors -> GGUF (city96) | `SafetensorsToGGUFDiffusion` | `Kinburg-Nodes/LLM/GGUF` |
+| Echo (Lyrics → Timing) 💬 | `KinburgEchoAlign` | `Kinburg-Nodes/Bestiary/Echo` |
 | Entity Card | `EntityCard` | `Kinburg-Nodes/LLM/context` |
 | For Each (Collect) | `KinburgForEachCollect` | `Kinburg-Nodes/flow/loops` |
 | For Each (Open) | `KinburgForEachOpen` | `Kinburg-Nodes/flow/loops` |
@@ -145,6 +153,9 @@ All **98** nodes, grouped by the package they live in. Every package links to it
 | Kinburg Live Log 📜 | `KinburgLiveLog` | `Kinburg-Nodes/LLM` |
 | LLM Live Log (old id) | `KinburgLLMLog` | `Kinburg-Nodes/LLM` |
 | LLM Server Control | `LLMServerControl` | `Kinburg-Nodes/LLM` |
+| LLM Server Draft (GGUF) | `LLMServerDraft` | `Kinburg-Nodes/LLM` |
+| LLM Server Embeddings (GGUF) | `LLMServerEmbeddings` | `Kinburg-Nodes/LLM` |
+| LLM Server Vision (GGUF) | `LLMServerVision` | `Kinburg-Nodes/LLM` |
 | List Insert | `ListInsert` | `Kinburg-Nodes/flow/list` |
 | List Output | `KinburgListEmit` | `Kinburg-Nodes/flow/loops` |
 | List Remove | `ListRemove` | `Kinburg-Nodes/flow/list` |

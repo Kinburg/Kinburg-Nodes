@@ -462,6 +462,9 @@ class KinburgPhantasStoryboard:
                 "system_style": ("STRING", {"multiline": True, "default": STYLE_SYSTEM, "tooltip": "System prompt for the style-bible call. Blank = the built-in default."}),
                 "system_plan": ("STRING", {"multiline": True, "default": PLAN_SYSTEM, "tooltip": "System prompt for the planning call. The JSON shape is forced by a grammar built from the frame count, so editing this can change the writing but can never break parsing.\n\nThere are TWO shipped defaults and 'write_beats' picks between them: the continuous-take prompt (shown here) when beats are on, and a slideshow prompt that cuts freely between shot sizes when they are off. Leave this field as it came — or blank — and the right one is used. Type anything of your own and yours is used in both modes."}),
                 "system_frame": ("STRING", {"multiline": True, "default": FRAME_SYSTEM, "tooltip": "System prompt for the per-frame prompt calls. Blank = the built-in default."}),
+                # Appended last, and anything added later must be too: ComfyUI maps a saved
+                # workflow's widget values by POSITION. Same rule as Morpheus' `trims`.
+                "shot_lyrics": ("STRING", {"forceInput": True, "tooltip": "Orpheus' 'lyrics' output — what is actually SUNG over each shot, numbered by shot.\n\nWithout it the planner sees a brief for the whole clip and nothing about the individual shots, so shot 7 is written knowing nothing of its own moment in the song. With it the arc can follow the words: the quiet verse and the shout land where they land in the music.\n\nIt is given to the planner as MOOD, explicitly not as subject matter. Left to itself a model illustrates lyrics literally — a line about a river becomes a river in every frame — and that competes with the cast block, which is the thing actually holding identity across frames. The instruction sent with it says so.\n\nDeliberately carries no timestamps: this planner emits weights and the shot grid is applied afterwards, so a model shown seconds starts reasoning in them and its lengths stop landing on the frame grid."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -484,8 +487,9 @@ class KinburgPhantasStoryboard:
               style_notes="", prompts_override="", preferred_length=timing.DEFAULT_SECONDS,
               write_beats=True, cache="disk", live_preview=True,
               unload_after_run="config default", system_style="", system_plan="",
-              system_frame="", unique_id=None):
+              system_frame="", unique_id=None, shot_lyrics=""):
         cfg = dict(config or {})
+        sung = str(shot_lyrics or "")
         with_beats = bool(write_beats)
         sys_style = (system_style or "").strip() or STYLE_SYSTEM
         sys_plan = _plan_system(system_plan, with_beats)
@@ -530,8 +534,13 @@ class KinburgPhantasStoryboard:
             return text
 
         try:
+            # `shot_lyrics` joins the key only when it is actually filled. `diskcache.key` hashes
+            # its separators too, so passing an empty extra part would change every existing key and
+            # throw away the frames already rendered in every saved graph — and the cache is what
+            # makes cancel-and-resume work at all.
             env = diskcache.key(_cfg_fingerprint(cfg), brief, cast, style_notes, sys_style,
-                                plan_stamp, sys_frame, n_frames)
+                                plan_stamp, sys_frame, n_frames,
+                                *(["lyrics", sung.strip()] if sung.strip() else []))
 
             # ------------------------------------------------------------------------- the bible
             bkey = diskcache.key(env, "bible")
@@ -575,6 +584,12 @@ class KinburgPhantasStoryboard:
                        f"shown one after another as stills, with no video running between them, so "
                        f"answer with the 'frames' array alone. The whole brief is still spent "
                        f"across the keyframes — the change lives in their states. ")
+                    + (f"WHAT IS SUNG OVER EACH SHOT, by shot number:\n{sung.strip()}\n\n"
+                       f"Use this for MOOD and for where the intensity sits — which shot is the "
+                       f"quiet one and which is the shout. Do NOT illustrate the words: a line "
+                       f"about a river is not an instruction to put a river on screen, and no "
+                       f"picture may contain text, lyrics, captions or subtitles of any kind. The "
+                       f"brief still decides what is filmed.\n\n" if sung.strip() else "")
                     + f"Keyframe 1 is the sequence's first image and keyframe {n_frames} is its "
                     f"last.")
                 plan_text = ask(sys_plan, plan_user, "plan",

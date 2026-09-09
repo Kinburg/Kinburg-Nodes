@@ -400,4 +400,42 @@ check("…and the request says so", "stream_text" not in BUILT["req"])
 check("output_format is forced to text so the grammar override wins",
       BUILT["cfg"]["output_format"] == "text" and BUILT["cfg"]["grammar"] == "")
 
+# ----------------------------------------------------- what is sung over each shot (Orpheus join)
+# Without it the planner sees a brief for the whole clip and nothing about the individual shots.
+PLAN["n"] = 4
+SUNG = ('1. (instrumental - no words)\n'
+        '2. Nina - "Воно не стихне під гуркіт небес!"\n'
+        '3. Nina - "ЦЕ СТАЛЕВЕ СЕРЦЕ!"')
+
+run(count_mode="scenes", count=3)
+plain_key = sorted(SAVED)
+plain_plan = [c["prompt"] for c in CALLS if c["tag"] == "plan"][0]
+
+run(count_mode="scenes", count=3, shot_lyrics=SUNG)
+sung_plan = [c["prompt"] for c in CALLS if c["tag"] == "plan"][0]
+check("the sung lines reach the planner", "ЦЕ СТАЛЕВЕ СЕРЦЕ!" in sung_plan)
+check("...labelled by shot number", "WHAT IS SUNG OVER EACH SHOT, by shot number" in sung_plan)
+# The two failure modes this input has, both guarded in the prompt rather than hoped for.
+check("...as mood, explicitly not as subject matter",
+      "Do NOT illustrate the words" in sung_plan and "brief still decides" in sung_plan)
+check("...and no picture may contain the words themselves",
+      "no\npicture may contain text" in sung_plan or "picture may contain text" in sung_plan)
+check("the brief is still the authority", "BRIEF:" in sung_plan)
+# The planner emits weights and the grid is applied afterwards — a model shown seconds starts
+# reasoning in them and its lengths stop landing on H3's frame grid.
+import re as _re  # noqa: E402
+block = sung_plan.split("WHAT IS SUNG")[1].split("Keyframe 1")[0]
+check("no timestamps ride in with it", not _re.search(r"\d+:\d\d|\d+\.\d+\s*s\b", block), block[:120])
+
+# The cache is the stop button — `diskcache.key` hashes its separators, so an extra empty part
+# would change every key that already exists and throw away the frames in every saved graph.
+run(count_mode="scenes", count=3, shot_lyrics="")
+check("an empty shot_lyrics leaves every cache key byte-identical", sorted(SAVED) == plain_key,
+      (len(SAVED), len(plain_key)))
+check("...and the prompt unchanged too",
+      [c["prompt"] for c in CALLS if c["tag"] == "plan"][0] == plain_plan)
+
+run(count_mode="scenes", count=3, shot_lyrics=SUNG)
+check("a filled one DOES re-roll the cache", sorted(SAVED) != plain_key)
+
 check.done()

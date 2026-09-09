@@ -47,6 +47,16 @@ FIT_BLACK = "pad with black"
 FIT_CROP = "crop to fill"
 FIT_OPTIONS = [FIT_BLUR, FIT_BLACK, FIT_CROP]
 
+#: Echo's wire type, spelled rather than imported: `echo` imports `siren`, and a module-level import
+#: here would drag that whole chain in just to declare an input slot. The string IS the contract.
+ECHO_TIMING = "KINBURG_ECHO_TIMING"
+
+SUB_OFF = "off"
+SUB_BURN = "burn into the video"
+SUB_FILE = "write a .ass beside it"
+SUB_BOTH = "burn in, and write the .ass too"
+SUB_OPTIONS = [SUB_BURN, SUB_FILE, SUB_BOTH, SUB_OFF]
+
 
 def _even(n):
     """yuv420p needs both sides even, and an odd one fails inside libx264 rather than here."""
@@ -171,6 +181,12 @@ class KinburgSaveClip:
                 "lyrics": ("STRING", {"forceInput": True, "tooltip": "The lyrics, with their '[Verse 1 - ...]' markers — the SAME text that went to Siren. Each section's own lines are written to a .srt next to the video, timed to that section's segment.\n\nOnly works with a Siren plan wired (the labels are what the two are matched on). Sections with no sung lines get no cue."}),
                 "tags": ("SONG_TAGS", {"tooltip": "Artist, album, year, genre — wire a 'Song Tags' node, the same one Save Song takes. Written into the mp4's own metadata; the title falls back to the file's name."}),
                 "verbose": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Print the report to the console. The same text is always on the 'report' output."}),
+                # Appended AFTER `verbose` on purpose, and everything added later must be too:
+                # ComfyUI maps a saved workflow's widget values by POSITION, so a new widget
+                # anywhere else silently shifts `fps`, `fit` and the rest in every graph that
+                # already exists. Same rule as Morpheus' `trims`.
+                "timing": (ECHO_TIMING, {"tooltip": "Echo's 'timing' output — where each word was actually sung.\n\nThis is what makes karaoke subtitles possible: the words light up in time with the voice, one colour per singer, because Echo aligned the real performance rather than trusting the plan. Without it 'subtitles' has nothing to draw and does nothing.\n\nThe look — font, size, colours, the sweep, the lead-in — travels ON the timing, set once on the Echo node. So what you checked in a player is what gets burnt here."}),
+                "subtitles": (SUB_OPTIONS, {"default": SUB_BURN, "tooltip": "What to do with a wired 'timing'.\n\n• burn into the video — the words are painted into the frames themselves. Costs one composite per frame, and no more: a line is laid out and drawn ONCE for the whole render however long it is on screen.\n• write a .ass beside it — soft subtitles next to the mp4, restylable and switchable off in a player, nothing touched in the picture.\n• both — burnt in for anything that will not carry a subtitle file, and the .ass kept for editing.\n• off — ignore the timing entirely.\n\nWith nothing wired to 'timing' this setting does nothing at all."}),
             },
         }
 
@@ -186,7 +202,8 @@ class KinburgSaveClip:
 
     def run(self, image, audio, filename_prefix="clips/clip", quality="Balanced (crf 21)",
             plan="", layout=T.LAYOUT_ORDER, fps=12, frame_size=SIZE_SOURCE, fit=FIT_BLUR,
-            crossfade=0.5, ken_burns=0.0, lyrics="", tags=None, verbose=True):
+            crossfade=0.5, ken_burns=0.0, lyrics="", tags=None, verbose=True,
+            timing=None, subtitles=SUB_BURN):
         import av
         import folder_paths
         import numpy as np
@@ -221,6 +238,26 @@ class KinburgSaveClip:
         track = T.frame_track(segments, fps, total, float(crossfade))
 
         crf, preset, audio_rate = _QUALITY.get(quality, _QUALITY["Balanced (crf 21)"])
+
+        # ---------------------------------------------------------------------------- subtitles
+        # Imported here rather than at module level: `echo` pulls in `siren`, and declaring an
+        # input slot should not cost that. `subtitles` does nothing at all without a timing.
+        painter, sub_style = None, None
+        want_burn = timing is not None and subtitles in (SUB_BURN, SUB_BOTH)
+        want_file = timing is not None and subtitles in (SUB_FILE, SUB_BOTH)
+        if want_burn or want_file:
+            try:
+                from ..echo import burn as EB
+                sub_style = EB.style_from(timing)
+                if want_burn:
+                    painter = EB.Painter(timing, size, sub_style)
+                    if not painter.lines:
+                        painter = None
+                        notes.append("the timing carries no aligned lines, so nothing was burnt in")
+            except Exception as e:
+                painter, want_file = None, False
+                notes.append(f"the subtitles could not be prepared ({e}) — the video was written "
+                             f"without them.")
 
         out_dir = folder_paths.get_output_directory()
         full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
@@ -260,7 +297,11 @@ class KinburgSaveClip:
 
             still = {}          # segment index -> the encoded-ready frame, when nothing moves
             for i, (t, a, b, mix) in enumerate(track):
-                if amount <= 0 and mix <= 0.0:
+                # A frame carrying words is unique and cannot be reused; one carrying none still
+                # can, so a slideshow with subtitles pays the composite only while text is on
+                # screen and keeps the still fast path through every instrumental bar.
+                on = painter.active(t) if painter is not None else ()
+                if amount <= 0 and mix <= 0.0 and not on:
                     frame = still.get(a)
                     if frame is None:
                         still = {a: av.VideoFrame.from_ndarray(
@@ -268,9 +309,21 @@ class KinburgSaveClip:
                         ).reformat(format="yuv420p")}
                         frame = still[a]
                 else:
+                    from PIL import Image
+                    if amount <= 0 and mix <= 0.0:
+                        # NOT named `base`: that is the output file's name, three lines further
+                        # down, and shadowing it here made the .ass and .srt paths be built out of
+                        # a PIL image. Caught by a smoke render, not by a type checker.
+                        slide = slides(segments[a]["slide"])
+                        canvas = (slide if slide.size == size
+                                  else slide.resize(size, Image.LANCZOS)).copy()
+                    else:
+                        canvas = Image.fromarray(
+                            _compose(slides, segments, t, a, b, mix, size, amount))
+                    if on:
+                        painter.draw(canvas, t, on)
                     frame = av.VideoFrame.from_ndarray(
-                        _compose(slides, segments, t, a, b, mix, size, amount),
-                        format="rgb24").reformat(format="yuv420p")
+                        np.asarray(canvas), format="rgb24").reformat(format="yuv420p")
                 frame.pts = i
                 out.mux(video.encode(frame))
                 if pbar is not None and (i % 32 == 0 or i == len(track) - 1):
@@ -286,6 +339,21 @@ class KinburgSaveClip:
             out.mux(track_audio.encode(None))
 
         # ------------------------------------------------------------------------------ subtitles
+        ass_written = ""
+        if want_file:
+            try:
+                from ..echo import subs as ES
+                body = ES.ass(timing, sub_style.get("colors"), size[0], size[1],
+                              font=sub_style.get("font"), size=int(sub_style.get("size") or 0) or None,
+                              sweep=bool(sub_style.get("sweep", True)),
+                              lead_in=float(sub_style.get("lead_in", 0.35)))
+                ass_written = base + ".ass"
+                with open(os.path.join(full_output_folder, ass_written), "w",
+                          encoding="utf-8", newline="\n") as f:
+                    f.write(body)
+            except Exception as e:
+                notes.append(f"the .ass could not be written: {e}")
+
         srt_written = ""
         if str(lyrics or "").strip():
             try:
@@ -308,8 +376,19 @@ class KinburgSaveClip:
             except Exception as e:
                 notes.append(f"the .srt could not be written: {e}")
 
+        if painter is not None:
+            notes.append(f"{len(painter.lines)} subtitle line(s) burnt into the picture")
+        if ass_written:
+            notes.append(f"karaoke subtitles written to {ass_written}")
         if srt_written:
             notes.append(f"subtitles written to {srt_written}")
+        if srt_written and (ass_written or painter is not None):
+            # Two subtitle tracks from two different sources beside one video, and the .srt is the
+            # worse of them — it is timed off the PLAN, which is the thing Echo exists to correct.
+            notes.append("both an Echo timing and 'lyrics' were wired, so there are now two "
+                         "subtitle tracks with different timings. The .srt is the one timed off "
+                         "the plan rather than off the performance — unwire 'lyrics' unless you "
+                         "want it.")
         text = T.report(segments, int(image.shape[0]), fps, size, total, notes)
         if verbose:
             print("[Save Clip] " + text.replace("\n", "\n[Save Clip] "))

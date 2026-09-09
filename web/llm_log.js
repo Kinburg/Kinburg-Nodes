@@ -18,7 +18,11 @@ import { api } from "../../scripts/api.js";
 // `KinburgLLMLog` is the older, LLM-only id: the same renderer drives it, so graphs saved against
 // it keep working and gain the images.
 const CLASSES = new Set(["KinburgLiveLog", "KinburgLLMLog"]);
-const MAX_BLOCKS = 25;                 // keep the last N generations; older ones drop off the top
+// Keep the last N generations; older ones drop off the top. 25 was chosen when a run was a handful
+// of calls — Phantas alone sends a style bible, a plan and one call per keyframe, so a 24-frame
+// board pushed its own bible and plan off the list before it finished. The cap exists because every
+// block is DOM and an unbounded log makes the canvas sluggish, so this is raised rather than removed.
+const MAX_BLOCKS = 100;
 const STICK_SLACK = 24;                // px from the bottom that still counts as "at the bottom"
 const instances = new Set();           // live log-node instances to fan events out to
 

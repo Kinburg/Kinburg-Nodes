@@ -66,3 +66,10 @@ align_frame_count
 
 # --- llama.cpp / SillyTavern request fields the gateway repairs, named where that is explained ---
 dry_sequence_breakers
+
+# --- torchaudio primitives Echo is built on, named where the docs explain them ---
+forced_align
+
+# --- KV cache quantisation levels, named where the server node's tuning is explained ---
+q8_0
+q4_0

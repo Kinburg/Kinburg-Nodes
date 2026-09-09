@@ -23,6 +23,7 @@ ROOT = "Kinburg-Nodes"
 # --- the bestiary: one folder per suite, plus the shelf they share ------------------------------
 CAT_BESTIARY = ROOT + "/Bestiary"
 CAT_CHIMERA = CAT_BESTIARY + "/Chimera"
+CAT_ECHO = CAT_BESTIARY + "/Echo"
 CAT_MORPHEUS = CAT_BESTIARY + "/Morpheus"
 CAT_ORPHEUS = CAT_BESTIARY + "/Orpheus"
 CAT_OUROBOROS = CAT_BESTIARY + "/Ouroboros"
@@ -62,6 +63,7 @@ ALL = frozenset(v for k, v in list(globals().items()) if k.startswith("CAT_"))
 #: but nowhere else — and no other package may put a node inside a suite folder.
 SUITES = {
     "chimera": CAT_CHIMERA,
+    "echo": CAT_ECHO,
     "morpheus": CAT_MORPHEUS,
     "orpheus": CAT_ORPHEUS,
     "ouroboros": CAT_OUROBOROS,

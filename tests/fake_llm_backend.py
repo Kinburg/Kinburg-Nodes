@@ -18,7 +18,8 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-STATE = {"last": None, "reject": set(), "requests": 0}
+STATE = {"last": None, "reject": set(), "requests": 0, "embed_only": False,
+         "port": 0}
 
 
 def _validate(body):
@@ -61,6 +62,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": {"message": "no such path: " + p}})
 
     def do_POST(self):
+        if self.path.split("?")[0] in ("/v1/embeddings", "/embeddings"):
+            return self._embeddings()
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n) if n else b""
         try:
@@ -80,6 +83,18 @@ class Handler(BaseHTTPRequestHandler):
             "choices": [{"index": 0, "finish_reason": "stop",
                          "message": {"role": "assistant", "content": "ok"}}],
             "usage": {"prompt_tokens": 7, "completion_tokens": 1, "total_tokens": 8},
+        })
+
+    def _embeddings(self):
+        """Enough of an embedding answer to prove WHICH process handled it: `embed_only` is true
+        only in a process launched with --embeddings, i.e. the second one."""
+        n = int(self.headers.get("Content-Length") or 0)
+        if n:
+            self.rfile.read(n)
+        return self._json(200, {
+            "object": "list", "model": "fake-embed",
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2, 0.3]}],
+            "embed_only": STATE["embed_only"], "port": STATE["port"],
         })
 
     def _sse(self):
@@ -106,10 +121,14 @@ def main(argv=None):
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--reject", default="")
+    ap.add_argument("--embeddings", action="store_true",
+                    help="as llama-server: this process serves embeddings and nothing else")
     ap.add_argument("--boot-seconds", type=float, default=0.0)
     # Whatever else the gateway puts on the command line is the real server's business, not ours.
     args, _rest = ap.parse_known_args(argv if argv is not None else sys.argv[1:])
     STATE["reject"] = {s for s in args.reject.split(",") if s}
+    STATE["embed_only"] = bool(args.embeddings)
+    STATE["port"] = args.port
     if args.boot_seconds:
         time.sleep(args.boot_seconds)
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)

@@ -42,6 +42,10 @@ from ..timer.timer_nodes import _format_elapsed
 from . import detect as det
 from . import timing as T
 
+#: Echo's wire type, spelled rather than imported — declaring an input slot should not drag the
+#: whole `echo` package (and `siren` behind it) in at module load. The string IS the contract.
+ECHO_TIMING = "KINBURG_ECHO_TIMING"
+
 #: The picture's dB window. Absolute, never auto-ranged — same rule as Siren Scope, so two runs of
 #: the same track are comparable and a quiet mix renders dark instead of being silently boosted.
 DB_FLOOR, DB_CEILING = -80.0, 0.0
@@ -86,6 +90,20 @@ def _scope_image(sig, sr, duration, shots, bpm, beats_per_bar, offset, width, he
     return torch.cat([panel, strip], dim=0).unsqueeze(0)
 
 
+def _sections_of(timing):
+    """The sung sections of an Echo timing, in time order — or `[]` for anything else.
+
+    Defensive rather than trusting: this is a wire another node filled, and a half-built timing
+    (nothing aligned, a section with no span) must fall back to the plan rather than produce cuts
+    at 0.0 that the planner would then dutifully honour.
+    """
+    if not isinstance(timing, dict):
+        return []
+    out = [s for s in (timing.get("sections") or [])
+           if isinstance(s, dict) and s.get("sung") and s.get("end", 0) > s.get("start", 0)]
+    return sorted(out, key=lambda s: s["start"])
+
+
 class KinburgOrpheusScore:
     """Audio → where the cuts fall, as `durations` Phantas and Morpheus already take."""
 
@@ -108,12 +126,18 @@ class KinburgOrpheusScore:
                 "scope": ("BOOLEAN", {"default": True, "tooltip": "Render the spectrogram with the cuts drawn on it. Amber = the cut landed on a cue, dim red = the planner had nothing to cut on there. This is how you check a plan in half a second instead of a render."}),
                 "scope_width": ("INT", {"default": 1280, "min": 256, "max": 4096, "step": 16, "advanced": True, "tooltip": "Width of that picture in pixels. The whole track always spans it, so a longer song simply gets less detail per second."}),
                 "verbose": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Print the report to the console. The same text is always on the 'report' output."}),
+                # Appended after `verbose`, and anything added later must be too — ComfyUI maps a
+                # saved workflow's widget values by POSITION. Same rule as Morpheus' `trims`.
+                "timing": (ECHO_TIMING, {"tooltip": "Echo's 'timing' — where each word was ACTUALLY sung.\n\nWired, the section boundaries come from the performance instead of from the table. That matters more than it sounds: a plan says where a section was ASKED to be, and on a real take those two have been measured up to 18 s apart. Cutting on the plan then puts the picture change in the middle of a verse.\n\nIt also fills the 'lyrics' output — what is sung over each shot, by number, for a storyboard planner to read.\n\nWhen both this and 'plan' are wired, this one wins and the plan is used only for the labels it carries."}),
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "FLOAT", "STRING", "IMAGE", "GEN_INFO")
+    # `lyrics` is appended LAST rather than put next to `cues` where it belongs: outputs are wired
+    # by index in a saved workflow, so inserting one in the middle re-points every link after it.
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "INT", "FLOAT", "STRING", "IMAGE", "GEN_INFO",
+                    "STRING")
     RETURN_NAMES = ("durations", "trims", "cues", "shot_count", "seconds", "report", "scope",
-                    "gen_extra_info")
+                    "gen_extra_info", "lyrics")
     FUNCTION = "run"
     CATEGORY = CAT_ORPHEUS
     DESCRIPTION = ("Read a track and decide where the cuts fall, so a music video is edited to its "
@@ -121,7 +145,8 @@ class KinburgOrpheusScore:
                    "plus the per-shot trim that puts each cut back exactly on the beat.")
 
     def run(self, audio, cut_on, pace, sensitivity, bpm, beats_per_bar, plan="", start_sec=0.0,
-            end_sec=0.0, cue_pull=T.DEFAULT_CUE_PULL, scope=True, scope_width=1280, verbose=True):
+            end_sec=0.0, cue_pull=T.DEFAULT_CUE_PULL, scope=True, scope_width=1280, verbose=True,
+            timing=None):
         began = time.time()
         notes = []
 
@@ -146,7 +171,28 @@ class KinburgOrpheusScore:
 
         cues = list(found["cues"])
         plan_rows = []
-        if str(plan or "").strip():
+        sung = _sections_of(timing)
+        if sung:
+            # Echo's boundaries REPLACE both the detected ones and the plan's. The plan says where a
+            # section was asked to be; on the author's own take those two were measured up to 18 s
+            # apart, and cutting on the intention puts the picture change in the middle of a verse.
+            cues = [c for c in cues if c["kind"] != "section"]
+            for section in sung:
+                at = float(section["start"])
+                if start + 1e-6 < at < end - 1e-6:
+                    cues.append(T.cue(at, 1.0, "section", section.get("label") or ""))
+            # A stretch with no words in it is where an instrumental shot belongs, and it is a fact
+            # only the alignment has — the plan's idea of a solo is where one was asked for.
+            for a, b in (timing.get("quiet") or []):
+                for at in (float(a), float(b)):
+                    if start + 1e-6 < at < end - 1e-6:
+                        cues.append(T.cue(at, 0.8, "section", "words start/stop"))
+            notes.append(f"section boundaries came from Echo's alignment ({len(sung)} sung "
+                         f"section(s)), not from the plan or the detector")
+            if str(plan or "").strip():
+                notes.append("'plan' was wired as well and was used only for its labels — the "
+                             "timing is the more accurate of the two by construction")
+        elif str(plan or "").strip():
             use_bpm = found["bpm"] if found["bpm"] > 0 else 0.0
             plan_rows, plan_notes = _parse_plan(plan, use_bpm, beats_per_bar)
             notes.extend(plan_notes)
@@ -168,12 +214,47 @@ class KinburgOrpheusScore:
         shots = T.plan_shots(end, cues, preferred=pace, start=start, cue_pull=cue_pull,
                              step=step, offset=offset)
         notes.extend(T.warnings(shots, total=end))
+        # A wired timing supplies CANDIDATES; `cue_pull` decides whether the planner can afford
+        # them. At the default 2.0 a boundary more than about 2 s off the pace-preferred position
+        # loses to an ordinary beat, so the input can look like it did nothing — which is the most
+        # confusing thing a correctly-working feature can do. The tally is printed ALWAYS, because
+        # the only way to choose cue_pull is to run it twice and compare this number, and counting
+        # labels down a 27-line timeline by hand is how somebody stops bothering.
+        landed = None
+        if sung and shots:
+            reach = (step or 1.0) * 0.6
+            landed = sum(1 for section in sung
+                         if any(abs(section["start"] - s["end"]) <= reach for s in shots[:-1])
+                         or abs(section["start"] - start) <= reach)
+            if landed * 2 < len(sung):
+                notes.append(f"only {landed} of {len(sung)} sung section(s) actually became a cut. "
+                             f"The boundaries were offered to the planner, but at cue_pull "
+                             f"{cue_pull:.1f} a cut that far from the 'pace' position costs more "
+                             f"than the boundary is worth. Raise cue_pull to follow the singing "
+                             f"harder, at the price of less even shots.")
+
+        # What is sung over each shot, by shot NUMBER and with no timestamps anywhere — see
+        # `echo.track.shot_lyrics` for why the seconds must not be in it.
+        lyrics = ""
+        if sung:
+            try:
+                from ..echo.track import shot_lyrics
+                lyrics = "\n".join(shot_lyrics(timing, [(s["start"], s["end"]) for s in shots]))
+            except Exception as e:
+                notes.append(f"the per-shot lyrics could not be assembled: {e}")
+
 
         head = [f"[Orpheus] {T.mmss(end - start)} of {T.mmss(track_len)}, {len(shots)} shot(s)",
                 "  " + det.confidence_note(found),
                 f"  cutting on {cut_on}" + (f" = {step:.2f} s, downbeat {offset:.2f} s" if step else ""),
                 "  " + T.describe(shots)]
-        if plan_rows:
+        if sung:
+            head.append(f"  sections: {len(sung)} read from Echo's alignment - where the words "
+                        f"really are, not where the plan put them")
+            if landed is not None:
+                head.append(f"  {landed} of {len(sung)} of them landed on a cut at cue_pull "
+                            f"{cue_pull:.1f} - run it twice and compare this line")
+        elif plan_rows:
             head.append(f"  plan: {len(plan_rows)} section(s) read from the table, not detected")
         body = [T.timeline(shots), "", T.describe_options(step, cut_on) if step else ""]
         report = "\n".join(head + [""] + [b for b in body if b] +
@@ -198,7 +279,7 @@ class KinburgOrpheusScore:
                                ensure_ascii=False)
 
         return (T.format_durations(shots), T.format_trims(shots), T.format_cues(shots), len(shots),
-                float(end - start), report, img, gen_extra)
+                float(end - start), report, img, gen_extra, lyrics)
 
 
 NODE_CLASS_MAPPINGS = {"KinburgOrpheusScore": KinburgOrpheusScore}
