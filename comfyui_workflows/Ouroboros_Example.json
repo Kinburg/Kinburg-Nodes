@@ -1,0 +1,1553 @@
+{
+  "id": "1921543e-12f7-4c95-8ed6-9fefc41a8e75",
+  "revision": 0,
+  "last_node_id": 37,
+  "last_link_id": 41,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "KinburgOuroboros",
+      "pos": [
+        -4130,
+        -3920
+      ],
+      "size": [
+        400,
+        910
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 5
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 23
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 19
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "link": 30
+        },
+        {
+          "name": "enhancer_settings",
+          "type": "KINBURG_LLM_CONFIG",
+          "link": 33
+        },
+        {
+          "name": "critic_settings",
+          "type": "KINBURG_CRITIC",
+          "link": 3
+        },
+        {
+          "name": "sampler_settings",
+          "type": "KINBURG_SAMPLER_CFG",
+          "link": 24
+        },
+        {
+          "name": "model_negative",
+          "shape": 7,
+          "type": "MODEL",
+          "link": null
+        },
+        {
+          "name": "trigger_words",
+          "shape": 7,
+          "type": "STRING",
+          "link": 9
+        },
+        {
+          "name": "user_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "user_prompt"
+          },
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            38
+          ]
+        },
+        {
+          "name": "prompts",
+          "type": "STRING",
+          "links": [
+            40
+          ]
+        },
+        {
+          "name": "judge_data",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "best_image",
+          "type": "IMAGE",
+          "links": [
+            39
+          ]
+        },
+        {
+          "name": "best_prompt",
+          "type": "STRING",
+          "links": [
+            41
+          ]
+        },
+        {
+          "name": "best_score",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "iterations",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "captions",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "times",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "settings_data",
+          "type": "GEN_SETTINGS",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KinburgOuroboros"
+      },
+      "widgets_values": [
+        "",
+        "",
+        4.5,
+        3,
+        true,
+        4,
+        true,
+        "streaming"
+      ],
+      "widgets_values_named": {
+        "user_prompt": "",
+        "negative": "",
+        "target_score": 4.5,
+        "max_iterations": 3,
+        "low_vram": true,
+        "enhancer_history": 4,
+        "full_console_log": true,
+        "log_mode": "streaming"
+      }
+    },
+    {
+      "id": 2,
+      "type": "KinburgCriticSettings",
+      "pos": [
+        -4960,
+        -3960
+      ],
+      "size": [
+        400,
+        410
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "config",
+          "type": "KINBURG_LLM_CONFIG",
+          "link": 2
+        },
+        {
+          "name": "criteria",
+          "type": "STRING",
+          "widget": {
+            "name": "criteria"
+          },
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "critic_settings",
+          "type": "KINBURG_CRITIC",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KinburgCriticSettings"
+      },
+      "widgets_values": [
+        "overall_quality: style matches the prompt, no artifacts, no excess noise, correct proportions, good color reproduction\nanatomy: all required limbs present, no extra limbs, correct placement, natural pose, proportional body\nprompt_compliance: how accurately the image follows the generation prompt\ncamera: camera angle and camera settings match the intent\ntext: if the prompt requests text — present, character-accurate, correct color/font/size/placement (if the prompt has NO text, give the top score)",
+        1,
+        5,
+        "Strictly and critically evaluate the generated image.",
+        "You are a strict, consistent image-quality judge inside an automatic refinement loop. You are shown ONE image plus evaluation criteria and the prompt it was generated from. Score it objectively, then give concrete, actionable advice on how to change the GENERATION PROMPT (not the image directly) to raise the weakest criteria, and list negative-prompt terms for the flaws you see. Reply with ONLY a single JSON object — no prose, no markdown, no fences.",
+        "one or two concrete, actionable sentences",
+        1,
+        1
+      ],
+      "widgets_values_named": {
+        "criteria": "overall_quality: style matches the prompt, no artifacts, no excess noise, correct proportions, good color reproduction\nanatomy: all required limbs present, no extra limbs, correct placement, natural pose, proportional body\nprompt_compliance: how accurately the image follows the generation prompt\ncamera: camera angle and camera settings match the intent\ntext: if the prompt requests text — present, character-accurate, correct color/font/size/placement (if the prompt has NO text, give the top score)",
+        "score_min": 1,
+        "score_max": 5,
+        "rubric": "Strictly and critically evaluate the generated image.",
+        "system_prompt": "You are a strict, consistent image-quality judge inside an automatic refinement loop. You are shown ONE image plus evaluation criteria and the prompt it was generated from. Score it objectively, then give concrete, actionable advice on how to change the GENERATION PROMPT (not the image directly) to raise the weakest criteria, and list negative-prompt terms for the flaws you see. Reply with ONLY a single JSON object — no prose, no markdown, no fences.",
+        "advice_style": "one or two concrete, actionable sentences",
+        "samples": 1,
+        "image_downscale": 1
+      }
+    },
+    {
+      "id": 4,
+      "type": "LocalLLMSettingsGGUF",
+      "pos": [
+        -5800,
+        -3960
+      ],
+      "size": [
+        400,
+        1150
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "context",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "name": "vision",
+          "shape": 7,
+          "type": "KINBURG_VISION_CONFIG",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "config",
+          "type": "KINBURG_LLM_CONFIG",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LocalLLMSettingsGGUF"
+      },
+      "widgets_values": [
+        "gemma4family/Froopert/Froopert-31B-Q4_K_M.gguf",
+        "",
+        "",
+        2448,
+        1,
+        0.95,
+        40,
+        0,
+        1.1,
+        "",
+        8192,
+        -1,
+        512,
+        true,
+        "f16",
+        394518284964274,
+        "randomize",
+        true,
+        true,
+        true,
+        "",
+        "model default",
+        "",
+        "text",
+        "",
+        "",
+        "",
+        "model default",
+        "model default",
+        "",
+        null,
+        null
+      ],
+      "widgets_values_named": {
+        "model": "gemma4family/Froopert/Froopert-31B-Q4_K_M.gguf",
+        "model_path": "",
+        "system_prompt": "",
+        "max_tokens": 2448,
+        "temperature": 1,
+        "top_p": 0.95,
+        "top_k": 40,
+        "min_p": 0,
+        "repeat_penalty": 1.1,
+        "stop": "",
+        "n_ctx": 8192,
+        "n_gpu_layers": -1,
+        "n_batch": 512,
+        "flash_attn": true,
+        "kv_cache_type": "f16",
+        "seed": 394518284964274,
+        "control_after_generate": "randomize",
+        "unload_comfy_models": true,
+        "unload_llm_after_run": true,
+        "strip_think": true,
+        "answer_marker": "",
+        "thinking_directive": "model default",
+        "custom_directive": "",
+        "output_format": "text",
+        "grammar": "",
+        "extra_load_args": "",
+        "chat_template_path": "",
+        "enable_thinking": "model default",
+        "reasoning_effort": "model default",
+        "reasoning_effort_custom": "",
+        "🔍 Model info": null,
+        "📋 Apply model defaults": null
+      }
+    },
+    {
+      "id": 5,
+      "type": "LocalLLMVisionSettingsGGUF",
+      "pos": [
+        -6080,
+        -3960
+      ],
+      "size": [
+        270,
+        180
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "vision",
+          "type": "KINBURG_VISION_CONFIG",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LocalLLMVisionSettingsGGUF"
+      },
+      "widgets_values": [
+        "gemma4family/Froopert/mmproj-Nimbz_Froopert-31B-bf16.gguf",
+        "",
+        "auto (MTMD)",
+        1024
+      ],
+      "widgets_values_named": {
+        "mmproj": "gemma4family/Froopert/mmproj-Nimbz_Froopert-31B-bf16.gguf",
+        "mmproj_path": "",
+        "vision_handler": "auto (MTMD)",
+        "image_max_side": 1024
+      }
+    },
+    {
+      "id": 8,
+      "type": "CriteriaBuilder",
+      "pos": [
+        -5370,
+        -3960
+      ],
+      "size": [
+        400,
+        610
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "criteria_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "criteria",
+          "type": "STRING",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CriteriaBuilder"
+      },
+      "widgets_values": [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+        ""
+      ],
+      "widgets_values_named": {
+        "overall_quality": true,
+        "prompt_compliance": true,
+        "anatomy": false,
+        "hands": false,
+        "face": false,
+        "composition": false,
+        "perspective": false,
+        "camera": false,
+        "lighting": false,
+        "color": false,
+        "sharpness": false,
+        "detail": false,
+        "background": false,
+        "style_consistency": true,
+        "realism": false,
+        "aesthetics": false,
+        "text": false,
+        "extra": ""
+      }
+    },
+    {
+      "id": 9,
+      "type": "LoraUnlimAccumulator",
+      "pos": [
+        -4540,
+        -3920
+      ],
+      "size": [
+        400,
+        160
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 6
+        },
+        {
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 10
+        },
+        {
+          "name": "prompt",
+          "shape": 7,
+          "type": "STRING",
+          "link": 21
+        },
+        {
+          "name": "lora_1",
+          "shape": 7,
+          "type": "KINBURG_LORA",
+          "link": 7
+        },
+        {
+          "name": "lora_2",
+          "shape": 7,
+          "type": "KINBURG_LORA",
+          "link": 11
+        },
+        {
+          "name": "lora_3",
+          "type": "KINBURG_LORA",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            5
+          ]
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            23
+          ]
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "triggers",
+          "type": "STRING",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraUnlimAccumulator"
+      }
+    },
+    {
+      "id": 10,
+      "type": "LoraTriggerLoader",
+      "pos": [
+        -6810,
+        -3520
+      ],
+      "size": [
+        270,
+        180
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "lora",
+          "type": "KINBURG_LORA",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraTriggerLoader"
+      },
+      "widgets_values": [
+        "Krea 2\\DALI_krea2_3289057_epoch_20.safetensors",
+        1,
+        1,
+        "Salvador Dalí style, surrealism, paranoiac-critical, melting clocks, dreamlike realism, Dalí landscape"
+      ],
+      "widgets_values_named": {
+        "lora_name": "Krea 2\\DALI_krea2_3289057_epoch_20.safetensors",
+        "strength_model": 1,
+        "strength_clip": 1,
+        "trigger": "Salvador Dalí style, surrealism, paranoiac-critical, melting clocks, dreamlike realism, Dalí landscape"
+      }
+    },
+    {
+      "id": 11,
+      "type": "UNETLoader",
+      "pos": [
+        -6810,
+        -3970
+      ],
+      "size": [
+        270,
+        90
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UNETLoader"
+      },
+      "widgets_values": [
+        "Krea 2\\krea2_turbo_bf16.safetensors",
+        "default"
+      ],
+      "widgets_values_named": {
+        "unet_name": "Krea 2\\krea2_turbo_bf16.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    {
+      "id": 12,
+      "type": "CLIPLoader",
+      "pos": [
+        -6810,
+        -3840
+      ],
+      "size": [
+        270,
+        120
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPLoader"
+      },
+      "widgets_values": [
+        "krea2\\qwen3vl_4b_fp8_scaled.safetensors",
+        "krea2",
+        "default"
+      ],
+      "widgets_values_named": {
+        "clip_name": "krea2\\qwen3vl_4b_fp8_scaled.safetensors",
+        "type": "krea2",
+        "device": "default"
+      }
+    },
+    {
+      "id": 13,
+      "type": "LoraTriggerLoader",
+      "pos": [
+        -6810,
+        -3300
+      ],
+      "size": [
+        270,
+        180
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "lora",
+          "type": "KINBURG_LORA",
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraTriggerLoader"
+      },
+      "widgets_values": [
+        "Krea 2\\Krea2_TextFusion_Refusal_Reduction_v2.safetensors",
+        1,
+        1,
+        ""
+      ],
+      "widgets_values_named": {
+        "lora_name": "Krea 2\\Krea2_TextFusion_Refusal_Reduction_v2.safetensors",
+        "strength_model": 1,
+        "strength_clip": 1,
+        "trigger": ""
+      }
+    },
+    {
+      "id": 14,
+      "type": "PrimitiveStringMultiline",
+      "pos": [
+        -6750,
+        -2560
+      ],
+      "size": [
+        860,
+        390
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "title": "User Prompt",
+      "properties": {
+        "Node name for S&R": "PrimitiveStringMultiline"
+      },
+      "widgets_values": [
+        "A painting in the style of Salvador Dalí. A cyberpunk city, but if it was built Salvador Dalí times, where people with cyber-implants simply go about their lives as time flows by—as if their very lives were draining away."
+      ],
+      "widgets_values_named": {
+        "value": "A painting in the style of Salvador Dalí. A cyberpunk city, but if it was built Salvador Dalí times, where people with cyber-implants simply go about their lives as time flows by—as if their very lives were draining away."
+      }
+    },
+    {
+      "id": 18,
+      "type": "VAELoader",
+      "pos": [
+        -6810,
+        -3680
+      ],
+      "size": [
+        270,
+        70
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAELoader"
+      },
+      "widgets_values": [
+        "qwen_image_vae.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "qwen_image_vae.safetensors"
+      }
+    },
+    {
+      "id": 19,
+      "type": "KinburgSamplerSettings",
+      "pos": [
+        -4450,
+        -3500
+      ],
+      "size": [
+        300,
+        400
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "sampler_settings",
+          "shape": 7,
+          "type": "KINBURG_SAMPLER_CFG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sampler_settings",
+          "type": "KINBURG_SAMPLER_CFG",
+          "links": [
+            24
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KinburgSamplerSettings"
+      },
+      "widgets_values": [
+        560462590649822,
+        "randomize",
+        8,
+        1.3,
+        "euler",
+        "simple",
+        1,
+        "fixed",
+        1,
+        1,
+        1,
+        0,
+        "midpoint"
+      ],
+      "widgets_values_named": {
+        "seed": 560462590649822,
+        "control_after_generate": "randomize",
+        "steps": 8,
+        "cfg": 1.3,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1,
+        "seed_mode": "fixed",
+        "seed_step": 1,
+        "eta": 1,
+        "s_noise": 1,
+        "s_churn": 0,
+        "solver_type": "midpoint"
+      }
+    },
+    {
+      "id": 24,
+      "type": "KinburgGroupControl",
+      "pos": [
+        -7080,
+        -2520
+      ],
+      "size": [
+        300,
+        280
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "KinburgGroupControl",
+        "_kbHidden": [
+          "Init loads",
+          "LLM Config Setup",
+          "Critic Setup"
+        ]
+      },
+      "widgets_values": [
+        ""
+      ],
+      "widgets_values_named": {
+        "kb_group_control": ""
+      }
+    },
+    {
+      "id": 25,
+      "type": "EmptyLatentImage",
+      "pos": [
+        -4440,
+        -3710
+      ],
+      "size": [
+        270,
+        120
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": 31
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": 32
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            30
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "EmptyLatentImage"
+      },
+      "widgets_values": [
+        1024,
+        1024,
+        1
+      ],
+      "widgets_values_named": {
+        "width": 1024,
+        "height": 1024,
+        "batch_size": 1
+      }
+    },
+    {
+      "id": 26,
+      "type": "ResolutionSelector",
+      "pos": [
+        -7060,
+        -2740
+      ],
+      "size": [
+        260,
+        170
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "showAdvanced": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "links": [
+            31
+          ]
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": [
+            32
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ResolutionSelector"
+      },
+      "widgets_values": [
+        "1:1 (Square)",
+        2,
+        8
+      ],
+      "widgets_values_named": {
+        "aspect_ratio": "1:1 (Square)",
+        "megapixels": 2,
+        "multiple": 8
+      }
+    },
+    {
+      "id": 27,
+      "type": "LocalLLMSettingsGGUF",
+      "pos": [
+        -6500,
+        -3960
+      ],
+      "size": [
+        400,
+        1150
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "context",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "name": "vision",
+          "shape": 7,
+          "type": "KINBURG_VISION_CONFIG",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "config",
+          "type": "KINBURG_LLM_CONFIG",
+          "links": [
+            33
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LocalLLMSettingsGGUF"
+      },
+      "widgets_values": [
+        "gemma4family/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+        "",
+        "You are an expert prompt engineer for text-to-image models. Your task is to expand the user's prompt into a highly effective image-generation prompt by using your psyhological and anatomy knowlages for describe it more properly and detailed.\n\nThink step by step about the request before writing the answer:\n- What is the subject and mood?\n- What visual styles, mediums, and lighting options would fit? Consider two or three alternatives and pick the one that best serves the caption.\n- What composition, framing, and grounded details will help the text-to-image model?\n\nThen output an expanded and structured prompt, use 250-400 words.\n\nFollow these rules strictly:\n0. **Judge feedback comes first:** On refinement rounds the message includes a\n   \"JUDGE FEEDBACK — required fixes\" section from a vision critic that scored the\n   previous image. Before anything else, apply EVERY listed fix with a concrete,\n   visible change to the prompt, and phrase it to avoid the flaws it lists — while\n   keeping the original intent. Update previous prompt.\n1. **Faithfulness First:** Preserve all original subjects, actions, colors, and spatial relationships.\n2. **Practical T2I Structure:** Write a prompt that a text-to-image model can parse cleanly. Group subjects with their own attributes and actions. Use grounded phrasing for poses, interactions, and spatial layout.\n3. **Style Planning Stays Internal:** Use your internal reasoning to choose style, medium, framing, and lighting. Do not emit planning tags or wrappers in the visible answer body.\n4. **Display Text:** If the user requests visible text, quotes, captions, or typography, clearly state the exact text in the requested language and enclose the requested words in quotation marks.\n5. **Avoid descriptions of the invisible:** Don't describe smells, temperatures, history or other entities that can't be seen. Instead, describe what these factors influence.\n6. **Structure:** After the thinking block, write the prompt with meaningful and logical Markdown markup. Return prompt only.\n7. **Remember that not all people are perfect:** Do not idealize a person’s appearance, let the appearance be more natural.\n9. **Preserve User Medium:** When the user explicitly requests a medium (e.g. \"photo of\", \"photograph of\", \"illustration of\", \"painting of\", \"sketch of\", \"3D render of\"), honor it. Do not pivot to a different medium to avoid difficulty — match the user's stated intent.\n9. **Main prompt should be in English:** All prompt text have to be in English except rendered text (see rule 4).",
+        2448,
+        1,
+        0.95,
+        64,
+        0,
+        1.1,
+        "",
+        8192,
+        -1,
+        512,
+        true,
+        "f16",
+        423092769013875,
+        "randomize",
+        true,
+        true,
+        true,
+        "",
+        "model default",
+        "",
+        "text",
+        "",
+        "",
+        "",
+        "model default",
+        "model default",
+        "",
+        null,
+        null
+      ],
+      "widgets_values_named": {
+        "model": "gemma4family/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+        "model_path": "",
+        "system_prompt": "You are an expert prompt engineer for text-to-image models. Your task is to expand the user's prompt into a highly effective image-generation prompt by using your psyhological and anatomy knowlages for describe it more properly and detailed.\n\nThink step by step about the request before writing the answer:\n- What is the subject and mood?\n- What visual styles, mediums, and lighting options would fit? Consider two or three alternatives and pick the one that best serves the caption.\n- What composition, framing, and grounded details will help the text-to-image model?\n\nThen output an expanded and structured prompt, use 250-400 words.\n\nFollow these rules strictly:\n0. **Judge feedback comes first:** On refinement rounds the message includes a\n   \"JUDGE FEEDBACK — required fixes\" section from a vision critic that scored the\n   previous image. Before anything else, apply EVERY listed fix with a concrete,\n   visible change to the prompt, and phrase it to avoid the flaws it lists — while\n   keeping the original intent. Update previous prompt.\n1. **Faithfulness First:** Preserve all original subjects, actions, colors, and spatial relationships.\n2. **Practical T2I Structure:** Write a prompt that a text-to-image model can parse cleanly. Group subjects with their own attributes and actions. Use grounded phrasing for poses, interactions, and spatial layout.\n3. **Style Planning Stays Internal:** Use your internal reasoning to choose style, medium, framing, and lighting. Do not emit planning tags or wrappers in the visible answer body.\n4. **Display Text:** If the user requests visible text, quotes, captions, or typography, clearly state the exact text in the requested language and enclose the requested words in quotation marks.\n5. **Avoid descriptions of the invisible:** Don't describe smells, temperatures, history or other entities that can't be seen. Instead, describe what these factors influence.\n6. **Structure:** After the thinking block, write the prompt with meaningful and logical Markdown markup. Return prompt only.\n7. **Remember that not all people are perfect:** Do not idealize a person’s appearance, let the appearance be more natural.\n9. **Preserve User Medium:** When the user explicitly requests a medium (e.g. \"photo of\", \"photograph of\", \"illustration of\", \"painting of\", \"sketch of\", \"3D render of\"), honor it. Do not pivot to a different medium to avoid difficulty — match the user's stated intent.\n9. **Main prompt should be in English:** All prompt text have to be in English except rendered text (see rule 4).",
+        "max_tokens": 2448,
+        "temperature": 1,
+        "top_p": 0.95,
+        "top_k": 64,
+        "min_p": 0,
+        "repeat_penalty": 1.1,
+        "stop": "",
+        "n_ctx": 8192,
+        "n_gpu_layers": -1,
+        "n_batch": 512,
+        "flash_attn": true,
+        "kv_cache_type": "f16",
+        "seed": 423092769013875,
+        "control_after_generate": "randomize",
+        "unload_comfy_models": true,
+        "unload_llm_after_run": true,
+        "strip_think": true,
+        "answer_marker": "",
+        "thinking_directive": "model default",
+        "custom_directive": "",
+        "output_format": "text",
+        "grammar": "",
+        "extra_load_args": "",
+        "chat_template_path": "",
+        "enable_thinking": "model default",
+        "reasoning_effort": "model default",
+        "reasoning_effort_custom": "",
+        "🔍 Model info": null,
+        "📋 Apply model defaults": null
+      }
+    },
+    {
+      "id": 33,
+      "type": "PreviewImage",
+      "pos": [
+        -3610,
+        -3920
+      ],
+      "size": [
+        660,
+        600
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 38
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      }
+    },
+    {
+      "id": 34,
+      "type": "PreviewImage",
+      "pos": [
+        -2920,
+        -3920
+      ],
+      "size": [
+        1660,
+        1190
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 39
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      }
+    },
+    {
+      "id": 35,
+      "type": "KinburgOuroborosLog",
+      "pos": [
+        -6740,
+        -2090
+      ],
+      "size": [
+        850,
+        570
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "KinburgOuroborosLog"
+      },
+      "widgets_values": [
+        ""
+      ],
+      "widgets_values_named": {
+        "ob_log": ""
+      }
+    },
+    {
+      "id": 36,
+      "type": "KinburgShowText",
+      "pos": [
+        -3610,
+        -3280
+      ],
+      "size": [
+        660,
+        1430
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "value",
+          "shape": 7,
+          "type": "*",
+          "link": 40
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KinburgShowText",
+        "kb_text": "A highly detailed, masterfully executed oil painting in the distinct, hyper-surrealist style of Salvador Dalí. The scene depicts an expansive, dreamlike cyberpunk cityscape bathed in a perpetual, uncanny twilight. Towers and structures are not merely futuristic; they are biologically organic, resembling petrified, calcified organisms that writhe under an impossibly vast sky filled with swirling nebulae and distorted horizons. Scattered throughout this alien metropolis, inhabitants go about their daily routines—a mix of frantic activity and serene resignation. These figures possess intricate, visible cybernetic implants: polished chrome arms that blend seamlessly into flesh, glowing optical sensors peering out from disfigured, elongated faces, and delicate bio-luminescent circuitry tracing patterns across skin. Crucially, the atmosphere conveys a sense of temporal decay; these people move with a subtle, visible drain, as if their life essence is physically leaching out through pores or shimmering off metallic appendages. Central to the composition are exaggerated Dalí elements: clocks draped over crumbling facades, melting downwards like soft cheese over jagged concrete edges, and perhaps a solitary figure caught in mid-stride whose form seems to be partially dissolving into the ground plane. The overall mood is melancholic grandeur—a beautiful, yet profoundly transient existence. Compositionally, use deep perspective leading toward a vanishing point where the city melts into a strange desert plain under an oversized, melting moon.\n\n*Style & Medium:* Oil painting on canvas, Hyper-surrealism, Paranoiac-Critical imagery, Dalí Landscape aesthetic.\n*Lighting:* Ethereal, dramatic chiaroscuro; harsh rim lighting emphasizes the contours of the metallic implants and the sagging flesh; a pervasive, warm but sickly yellow/blue twilight illumination permeates the scene.\n*Composition & Detail:* Wide shot (establishing view), rich texture detail on paint strokes (impasto effect), high saturation for cybernetics contrasted with muted, earthy tones in the ancient stone structures.\n\nSalvador Dalí style, melting clocks, dreamlike realism\n---\nA highly detailed, masterfully executed oil painting in the distinct, hyper-surrealist style of Salvador Dalí. The scene is dominated by an expansive, dreamlike **organic mega-structure cityscape**, where towering buildings resemble colossal, calcified biological organisms—perhaps structures that have been petrified or slowly extruded from subterranean stone—rather than mere futuristic constructs. This city is bathed in a perpetual, uncanny twilight under an impossibly vast sky filled with swirling, highly textured nebulae and dramatically distorted horizons. Scattered across these impossible avenues, human inhabitants are observed performing daily routines with a mixture of frantic, desperate activity and profound, resigned stillness. **In the immediate foreground, emphasize the extreme detail of their cybernetic implants:** one figure's forearm should display intricate filigree chrome merging seamlessly into visibly taut flesh; another face must showcase pronounced elongation, featuring glowing optical sensors that appear to be weeping viscous light; and delicate bio-luminescent circuitry should clearly trace paths across wrinkled skin. The overriding atmosphere conveys a tangible sense of **accelerated temporal decay**; these people are captured mid-action with their very life essence visibly leaching outward—perhaps shimmering faintly off the chrome plating or slowly being absorbed back into the dusty ground plane through the pores of their skin. Crucially, central Dalí motifs abound: clocks are not just draped but actively melting downwards like viscous honey over jagged segments of crumbling façade; a solitary figure in sharp mid-stride shows clear evidence of **dissolving flesh**, with sections visibly slumping and merging into the patterned cobblestones beneath them. The overall mood is one of melancholic, magnificent transience. Compositionally, this must be a wide shot leveraging deep perspective that pulls the eye toward a vanishing point where the city architecture dissolves into a strange, saline desert plain under an oversized, realistically rendered, yet softly melting moon.\n\n**Style & Medium:** Oil painting on canvas, Hyper-surrealism, Paranoiac-Critical imagery, Dalí Landscape aesthetic.\n**Lighting:** Ethereal and intensely dramatic chiaroscuro; sharp, unforgiving rim lighting highlights the contours of metallic exoskeletal joints and the slackness of sagging dermal tissue; a pervasive, warm yet sickly yellow/cerulean twilight illumination permeates the entire scene.\n**Composition & Detail:** Wide establishing shot; extreme impasto texture visible in every brushstroke, giving substance to the paint itself; exceptionally high saturation must be maintained for the polished cybernetics contrasted vividly against the muted, earthy tones of the ancient, porous stone structures.\n\nSalvador Dalí style, melting clocks, dreamlike realism\n---\nA highly detailed, masterfully executed oil painting in the distinct, hyper-surrealist style of Salvador Dalí. The scene is dominated by an expansive, dreamlike **organic mega-structure cityscape**, where towering buildings resemble colossal, calcified biological organisms—structures that appear petrified or slowly extruded from subterranean stone—rather than mere modern futuristic constructs; these structures must exhibit visible, imperfect geometries and organic imperfections. This city is bathed in a perpetual, uncanny twilight under an impossibly vast sky featuring **dramatically swirling, highly textured nebulae** and aggressively distorted horizons, ensuring the sky never appears flat or static. Scattered across these impossible avenues, human inhabitants are observed performing daily routines with a mixture of frantic, desperate activity and profound, resigned stillness; critically, their forms must *never* maintain perfect proportions—some should exhibit subtle elongations or slight collapses under gravity's surreal influence. In the immediate foreground, emphasis is placed on the extreme detail of their cybernetic implants: one figure’s forearm showcases intricate filigree chrome merging seamlessly into visibly taut yet subtly yielding flesh; another face displays pronounced elongation, featuring glowing optical sensors that appear to weep viscous, brightly saturated light; and delicate bio-luminescent circuitry clearly traces paths across wrinkled, imperfect skin. The overriding atmosphere conveys a palpable sense of **accelerated temporal decay**; these people are captured mid-action with their very life essence visibly leaching outward—shimmering faintly off the chrome plating or slowly being absorbed back into the dusty ground plane through the pores of their skin, *specifically emphasizing this dissolving action*. Crucially, central Dalí motifs abound: clocks actively melt downwards like viscous honey over jagged segments of crumbling façade; a solitary figure in sharp mid-stride distinctly shows **dissolving flesh**, with sections visibly slumping and merging directly into the patterned cobblestones beneath them. The overall mood is one of melancholic, magnificent transience. Compositionally, this must be a wide shot leveraging deep perspective pulling the eye toward a vanishing point where the city architecture dissolves into a strange, saline desert plain under an oversized, realistically rendered, yet softly melting moon.\n\n**Style & Medium:** Oil painting on canvas; Hyper-surrealism; Paranoiac-Critical imagery; Dalí Landscape aesthetic.\n**Lighting:** Intense and ethereal chiaroscuro; sharp, unforgiving rim lighting dramatically highlights the contours of metallic exoskeletal joints and the slackness of sagging dermal tissue; pervasive, warm yet sickly yellow/cerulean twilight illumination permeates the entire scene.\n**Composition & Detail:** Wide establishing shot with deep perspective; extreme impasto texture visible in every brushstroke, giving substance to the paint itself; exceptionally high saturation for polished cybernetics contrasted vividly against the muted, earthy tones of the ancient, porous stone structures.\n\nSalvador Dalí style, melting clocks, dreamlike realism"
+      },
+      "widgets_values": [
+        true,
+        "",
+        false,
+        false,
+        "",
+        null,
+        null,
+        ""
+      ],
+      "widgets_values_named": {
+        "markdown": true,
+        "save_path": "",
+        "autosave": false,
+        "use_saved_text": false,
+        "saved_text": "",
+        "💾 Save .md": null,
+        "📋 Copy": null,
+        "kb_display": ""
+      }
+    },
+    {
+      "id": 37,
+      "type": "KinburgShowText",
+      "pos": [
+        -2920,
+        -2690
+      ],
+      "size": [
+        1660,
+        840
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "value",
+          "shape": 7,
+          "type": "*",
+          "link": 41
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KinburgShowText",
+        "kb_text": "A highly detailed, masterfully executed oil painting in the distinct, hyper-surrealist style of Salvador Dalí. The scene is dominated by an expansive, dreamlike **organic mega-structure cityscape**, where towering buildings resemble colossal, calcified biological organisms—perhaps structures that have been petrified or slowly extruded from subterranean stone—rather than mere futuristic constructs. This city is bathed in a perpetual, uncanny twilight under an impossibly vast sky filled with swirling, highly textured nebulae and dramatically distorted horizons. Scattered across these impossible avenues, human inhabitants are observed performing daily routines with a mixture of frantic, desperate activity and profound, resigned stillness. **In the immediate foreground, emphasize the extreme detail of their cybernetic implants:** one figure's forearm should display intricate filigree chrome merging seamlessly into visibly taut flesh; another face must showcase pronounced elongation, featuring glowing optical sensors that appear to be weeping viscous light; and delicate bio-luminescent circuitry should clearly trace paths across wrinkled skin. The overriding atmosphere conveys a tangible sense of **accelerated temporal decay**; these people are captured mid-action with their very life essence visibly leaching outward—perhaps shimmering faintly off the chrome plating or slowly being absorbed back into the dusty ground plane through the pores of their skin. Crucially, central Dalí motifs abound: clocks are not just draped but actively melting downwards like viscous honey over jagged segments of crumbling façade; a solitary figure in sharp mid-stride shows clear evidence of **dissolving flesh**, with sections visibly slumping and merging into the patterned cobblestones beneath them. The overall mood is one of melancholic, magnificent transience. Compositionally, this must be a wide shot leveraging deep perspective that pulls the eye toward a vanishing point where the city architecture dissolves into a strange, saline desert plain under an oversized, realistically rendered, yet softly melting moon.\n\n**Style & Medium:** Oil painting on canvas, Hyper-surrealism, Paranoiac-Critical imagery, Dalí Landscape aesthetic.\n**Lighting:** Ethereal and intensely dramatic chiaroscuro; sharp, unforgiving rim lighting highlights the contours of metallic exoskeletal joints and the slackness of sagging dermal tissue; a pervasive, warm yet sickly yellow/cerulean twilight illumination permeates the entire scene.\n**Composition & Detail:** Wide establishing shot; extreme impasto texture visible in every brushstroke, giving substance to the paint itself; exceptionally high saturation must be maintained for the polished cybernetics contrasted vividly against the muted, earthy tones of the ancient, porous stone structures.\n\nSalvador Dalí style, melting clocks, dreamlike realism"
+      },
+      "widgets_values": [
+        true,
+        "",
+        false,
+        false,
+        "",
+        null,
+        null,
+        ""
+      ],
+      "widgets_values_named": {
+        "markdown": true,
+        "save_path": "",
+        "autosave": false,
+        "use_saved_text": false,
+        "saved_text": "",
+        "💾 Save .md": null,
+        "📋 Copy": null,
+        "kb_display": ""
+      }
+    }
+  ],
+  "links": [
+    [
+      1,
+      5,
+      0,
+      4,
+      1,
+      "KINBURG_VISION_CONFIG"
+    ],
+    [
+      2,
+      4,
+      0,
+      2,
+      0,
+      "KINBURG_LLM_CONFIG"
+    ],
+    [
+      3,
+      2,
+      0,
+      1,
+      5,
+      "KINBURG_CRITIC"
+    ],
+    [
+      4,
+      8,
+      0,
+      2,
+      1,
+      "STRING"
+    ],
+    [
+      5,
+      9,
+      0,
+      1,
+      0,
+      "MODEL"
+    ],
+    [
+      6,
+      11,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      7,
+      10,
+      0,
+      9,
+      3,
+      "KINBURG_LORA"
+    ],
+    [
+      8,
+      9,
+      2,
+      1,
+      9,
+      "STRING"
+    ],
+    [
+      9,
+      9,
+      3,
+      1,
+      8,
+      "STRING"
+    ],
+    [
+      10,
+      12,
+      0,
+      9,
+      1,
+      "CLIP"
+    ],
+    [
+      11,
+      13,
+      0,
+      9,
+      4,
+      "KINBURG_LORA"
+    ],
+    [
+      19,
+      18,
+      0,
+      1,
+      2,
+      "VAE"
+    ],
+    [
+      21,
+      14,
+      0,
+      9,
+      2,
+      "STRING"
+    ],
+    [
+      23,
+      9,
+      1,
+      1,
+      1,
+      "CLIP"
+    ],
+    [
+      24,
+      19,
+      0,
+      1,
+      6,
+      "KINBURG_SAMPLER_CFG"
+    ],
+    [
+      30,
+      25,
+      0,
+      1,
+      3,
+      "LATENT"
+    ],
+    [
+      31,
+      26,
+      0,
+      25,
+      0,
+      "INT"
+    ],
+    [
+      32,
+      26,
+      1,
+      25,
+      1,
+      "INT"
+    ],
+    [
+      33,
+      27,
+      0,
+      1,
+      4,
+      "KINBURG_LLM_CONFIG"
+    ],
+    [
+      38,
+      1,
+      0,
+      33,
+      0,
+      "IMAGE"
+    ],
+    [
+      39,
+      1,
+      3,
+      34,
+      0,
+      "IMAGE"
+    ],
+    [
+      40,
+      1,
+      1,
+      36,
+      0,
+      "STRING"
+    ],
+    [
+      41,
+      1,
+      4,
+      37,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "Init loads",
+      "bounding": [
+        -6820,
+        -4040,
+        290,
+        432
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "Lora loads",
+      "bounding": [
+        -6820,
+        -3590,
+        290,
+        480
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "LLM Critic Config Setup",
+      "bounding": [
+        -6090,
+        -4030,
+        700,
+        1230
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 5,
+      "title": "Critic Setup",
+      "bounding": [
+        -5380,
+        -4030,
+        830,
+        690
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 6,
+      "title": "All Results",
+      "bounding": [
+        -3620,
+        -3990,
+        680,
+        2150
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 7,
+      "title": "The Best Result",
+      "bounding": [
+        -2930,
+        -3990,
+        1680,
+        2150
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 8,
+      "title": "Logs",
+      "bounding": [
+        -6740,
+        -2160,
+        860,
+        640
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.32349184307610346,
+      "offset": [
+        8255.81311928893,
+        4648.254249776558
+      ]
+    },
+    "frontendVersion": "1.51.10",
+    "VHS_latentpreview": true,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}
