@@ -49,7 +49,7 @@ import node_helpers
 from . import timing
 from .board import PHANTAS_BOARD
 from ..morpheus.nodes import MORPHEUS_SHOT
-from ..ouroboros.nodes import SAMPLER_CFG, _sample_stage, _seed_for
+from ..ouroboros.nodes import SAMPLER_CFG, _append_triggers, _sample_stage, _seed_for
 from ..util import diskcache
 from ..util.images import fp16_round, log_uris
 from ..categories import CAT_PHANTAS
@@ -176,6 +176,9 @@ class KinburgPhantas:
                 "negative": ("STRING", {"multiline": True, "default": "", "tooltip": "Negative prompt. Empty = the board's own [NEGATIVE] block, which is what the style bible wrote."}),
                 "live_preview": ("BOOLEAN", {"default": True, "tooltip": "Push each finished keyframe to a 'Kinburg Live Log' node as soon as it is decoded. No wiring — drop a log node anywhere."}),
                 "cache_tag": ("STRING", {"default": "", "tooltip": "Any text you like, folded into the cache key. Two different checkpoints of the same architecture and size look identical to the cache; put something here to tell them apart."}),
+                # Appended last, and anything added later must be too: ComfyUI maps a saved
+                # workflow's widget values by POSITION. Same rule as the board's `shot_lyrics`.
+                "trigger_words": ("STRING", {"forceInput": True, "tooltip": "Comma-separated words appended to EVERY keyframe prompt — the LoRA triggers of the model wired into this node ('Lora Unlim Accumulator' and 'Model Select' both have a 'triggers' output that is exactly this).\n\nThey belong here rather than in the brief because the board does not know which model renders it: the writer LLM paraphrases whatever it is given, and a trigger word paraphrased is a LoRA that never fires. Appending them after the prompt is written puts them beyond that rewrite — and beyond 'prompts_override', so hand-edited frames keep them too.\n\nA word the prompt already carries is not repeated (case-insensitive), so a trigger the style bible happens to use is left alone. They go in their own paragraph, the same layout 'Lora Unlim Accumulator' uses.\n\nPart of every frame's cache key: change them and the board re-renders."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -196,7 +199,7 @@ class KinburgPhantas:
     def render(self, board, model, clip, vae, sampler_settings, width, height, reference,
                reference_strength, anchor, cache, redo, redo_seed_offset=1, style_model=None, clip_vision=None,
                first_frame=None, reference_image=None, negative="", live_preview=True,
-               cache_tag="", unique_id=None):
+               cache_tag="", trigger_words="", unique_id=None):
         from nodes import CLIPTextEncode, EmptyLatentImage, VAEDecode
 
         if not isinstance(board, dict) or not board.get("frames"):
@@ -209,6 +212,7 @@ class KinburgPhantas:
                              f"a chain of {n} frames has exactly {n - 1}.")
         stages = _stages(sampler_settings)
         neg_text = (negative or "").strip() or board.get("negative", "")
+        triggers = (trigger_words or "").strip()
         forced = parse_selection(redo, n)
         use_cache = cache == "disk"
 
@@ -238,9 +242,13 @@ class KinburgPhantas:
 
         rng = random.Random(int(stages[0].get("seed", 0)))
         images, settings, report, prev_key = [], [], [], env
+        if triggers:
+            report.append(f"trigger words on every keyframe: {triggers}")
         t_run = time.time()
         for i, fr in enumerate(frames_plan):
-            prompt = fr.get("prompt", "")
+            # The LoRA triggers ride on the prompt, which the causal key already folds in — so
+            # changing them re-renders the board, exactly as editing a frame's text does.
+            prompt = _append_triggers(fr.get("prompt", ""), triggers)
             # Worked out for EVERY frame, cached or not, so a 'random' seed_mode walks the same
             # sequence whether or not the disk had the picture already.
             bump = int(redo_seed_offset) if i in forced else 0
