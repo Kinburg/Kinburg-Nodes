@@ -499,6 +499,15 @@ rather than on the bundle: match the aspect ratio you will render the video at, 
 are also what the video model's writer looks at. `captions` and `settings_data` go straight into
 `Image Compare`, and each keyframe is pushed to a `Kinburg Live Log` node the moment it decodes.
 
+**LoRA triggers.** `trigger_words` takes a comma-separated list — the `triggers` output of
+`Lora Unlim Accumulator`, or of `Model Select` — and stamps it onto every keyframe prompt on the
+way to CLIP. It lives here rather than in the brief because the board does not know which model
+renders it, and an LLM asked to carry a trigger word through a rewrite paraphrases it: a LoRA that
+never fires. Stamping at render time is also past `prompts_override`, so hand-edited frames keep
+their triggers. A word the prompt already carries is not repeated, and the words go into every
+frame's cache key — change them and the board re-renders, exactly as editing a prompt does. Same
+input, same reason, as Ouroboros' `trigger_words`.
+
 ---
 
 ## 🎶 `orpheus/` — Orpheus Suite 🎶

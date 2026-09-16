@@ -21,6 +21,7 @@ SUITES = [
     ("llm_reasoning", "py", TESTS / "test_llm_reasoning.py"),
     ("llm_gateway", "py", TESTS / "test_llm_gateway.py"),
     ("llm_server_options", "py", TESTS / "test_llm_server_options.py"),
+    ("llm_server_events", "py", TESTS / "test_llm_server_events.py"),
     ("gguf_info", "py", TESTS / "test_gguf_info.py"),
     ("send_image", "py", TESTS / "test_send_image.py"),
     ("send_image_log", "py", TESTS / "test_send_image_log.py"),
@@ -54,6 +55,8 @@ SUITES = [
     ("group_control.js", "js", TESTS / "js" / "build_group_control.mjs"),
     ("model_presets.js", "js", TESTS / "js" / "build_model_presets.mjs"),
     ("card_presets.js", "js", TESTS / "js" / "build_card_presets.mjs"),
+    ("ouroboros_log.js", "js", TESTS / "js" / "build_ouroboros_log.mjs"),
+    ("llm_server_log.js", "js", TESTS / "js" / "build_llm_server_log.mjs"),
 ]
 
 

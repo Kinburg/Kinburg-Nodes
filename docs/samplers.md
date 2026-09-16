@@ -127,6 +127,15 @@ additions), and **`clear`** in the log header wipes it. The log follows new rows
 only while you're parked at the bottom — **scroll up and it stays put** while the loop keeps
 running, with a **`↓ latest`** pill to jump back.
 
+**An empty log is not always a broken log.** Ouroboros has no `IS_CHANGED`, so ComfyUI's execution
+cache applies to it like any other node: queue a prompt whose inputs have not changed and the
+sampler is **not run at all** — its previous output is handed back — so it emits nothing and the log
+sits exactly as the last run left it. `Sampler Settings`' own advice is to keep `seed` constant, so
+this is the ordinary case rather than a rare one: with the seed widget's *control after generate* on
+`fixed` and nothing else touched, every re-run after the first is a cache hit. The log now says so
+(`⏭ nothing re-ran — ComfyUI served Ouroboros from its cache`) instead of leaving you to guess.
+Change the seed, edit the intent, or set *control after generate* to `randomize` to force a real run.
+
 **VRAM discipline (built for small cards):** when a config's **`unload_comfy_models`** is on,
 Ouroboros frees all ComfyUI models before each LLM call **and** frees the LLM worker before each
 diffusion — so only **one model is resident at any moment** (diffusion *or* one GGUF). The cost is

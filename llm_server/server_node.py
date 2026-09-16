@@ -121,6 +121,13 @@ one is not a real array — most famously `dry_sequence_breakers`. The gateway r
 way through. `auto_retry` goes further: a 400 naming a field is retried once without it, and that
 field is stripped from then on. `drop_fields` (one name per line) removes fields outright.
 
+## The live log
+Drop an **LLM Server Live Log 📜** anywhere on the canvas: one row per request with its status,
+duration, token counts, context fill and the sampler settings the client actually sent, plus loads,
+unloads, errors and every parameter repair. `log_text` adds a trimmed preview of the last message
+and the reply - off by default, because the log is drawn on a canvas anyone at this machine can
+see. `log_server_output` folds in llama.cpp's own stdout.
+
 ## Notes
 - `server_binary` must point at the executable — download or build it yourself, nothing is bundled.
 - `extra_args` is for what has no widget: rope/yarn, `--tensor-split`, `--override-tensor`,
@@ -241,6 +248,9 @@ class LocalLLMServer:
                 "reasoning_effort": (REASONING_EFFORTS, {"default": REASONING_DEFAULT, "tooltip": "How hard to think, as a chat-template variable. Qwen3.5/3.8 accept xhigh / medium / low and ERROR on anything else; use 'custom' for other families (gpt-oss: high)."}),
                 "reasoning_effort_custom": ("STRING", {"default": "", "tooltip": "Effort value sent when reasoning_effort = custom (e.g. 'high' for gpt-oss). Empty = send nothing."}),
                 "chat_template_file": ("STRING", {"default": "", "tooltip": "A .jinja chat template that OVERRIDES the one in the GGUF (--chat-template-file). Empty = the model's own, which is right for almost every model. llama-server only."}),
+                "log_events": ("BOOLEAN", {"default": True, "tooltip": "Feed the 'LLM Server Live Log' node: every request with its status, duration, token counts and the sampler settings the client sent, plus loads, unloads and errors. No message text — see log_text."}),
+                "log_text": ("BOOLEAN", {"default": False, "tooltip": "Also log the last user message and the reply, trimmed to a few hundred characters. OFF by default on purpose: that is somebody's conversation, and the log is drawn on the ComfyUI canvas for whoever is sitting there."}),
+                "log_server_output": ("BOOLEAN", {"default": False, "tooltip": "Also log llama.cpp's own stdout (slots, prompt-eval timings). Useful when a model misbehaves, noisy the rest of the time. It always reaches the 'server_log' output regardless."}),
             },
             "optional": {
                 "draft": (DRAFT_CONFIG, {"tooltip": "Optional — wire an 'LLM Server Draft' node here for speculative decoding."}),
@@ -270,6 +280,7 @@ class LocalLLMServer:
             reasoning=REASONING_DEFAULT, reasoning_budget=-1, reasoning_format="auto",
             enable_thinking=REASONING_DEFAULT, reasoning_effort=REASONING_DEFAULT,
             reasoning_effort_custom="", chat_template_file="",
+            log_events=True, log_text=False, log_server_output=False,
             draft=None, vision=None, embeddings=None):
 
         if action == STOP:
@@ -303,6 +314,8 @@ class LocalLLMServer:
             enable_thinking=enable_thinking, reasoning_effort=reasoning_effort,
             reasoning_effort_custom=reasoning_effort_custom,
             chat_template_file=chat_template_file,
+            log_events=bool(log_events), log_text=bool(log_text),
+            log_server_output=bool(log_server_output),
         )
 
         problems = []
@@ -434,6 +447,34 @@ class LLMServerEmbeddings:
         return (dict(kw),)
 
 
+class LLMServerLog:
+    """UI-only live log for the gateway. No inputs, no outputs, never runs on the backend — the
+    whole display lives in web/llm_server_log.js, which listens for the `kinburg.llmserver`
+    websocket events and, because this server is talked to whether or not a browser is open, asks
+    /kinburg/llm_server/log for the backlog when it appears."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}}
+
+    RETURN_TYPES = ()
+    RETURN_NAMES = ()
+    FUNCTION = "noop"
+    CATEGORY = CAT_LLM
+    OUTPUT_NODE = False
+    DESCRIPTION = ("Live log for the Local LLM Server: every request the chat client makes, with "
+                   "its status, how long it took, the tokens it cost and how full the context now "
+                   "is - plus loads, unloads, errors and the parameter repairs on the way through. "
+                   "One row per request, opened when it arrives and closed when it finishes, so a "
+                   "cold start looks like a load rather than a hang. Drop it anywhere on the canvas "
+                   "- it needs no connections, and it fills itself in from the backlog, so a chat "
+                   "that happened while ComfyUI was closed is still there. Message text is NOT "
+                   "logged unless the server node's 'log_text' is on.")
+
+    def noop(self):
+        return ()
+
+
 class LLMServerControl:
     @classmethod
     def INPUT_TYPES(cls):
@@ -474,6 +515,7 @@ NODE_CLASS_MAPPINGS = {
     "LLMServerDraft": LLMServerDraft,
     "LLMServerVision": LLMServerVision,
     "LLMServerEmbeddings": LLMServerEmbeddings,
+    "LLMServerLog": LLMServerLog,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     SERVER_NODE_ID: "Local LLM Server",
@@ -481,4 +523,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LLMServerDraft": "LLM Server Draft (GGUF)",
     "LLMServerVision": "LLM Server Vision (GGUF)",
     "LLMServerEmbeddings": "LLM Server Embeddings (GGUF)",
+    "LLMServerLog": "LLM Server Live Log 📜",
 }

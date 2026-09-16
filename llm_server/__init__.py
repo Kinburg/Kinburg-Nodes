@@ -1,3 +1,4 @@
+from . import routes  # noqa: F401  (registers the /kinburg/llm_server/log routes)
 from .server_node import (
     NODE_CLASS_MAPPINGS as _SRV_NODES,
     NODE_DISPLAY_NAME_MAPPINGS as _SRV_NAMES,

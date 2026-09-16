@@ -10,6 +10,7 @@ import { api } from "../../scripts/api.js";
 // view stays put while the loop keeps running; a "↓ latest" pill takes you back.
 
 const CLASS = "KinburgOuroborosLog";
+const SAMPLER = "KinburgOuroboros";   // the node whose run we are logging
 const STICK_SLACK = 24;      // px from the bottom that still counts as "at the bottom"
 const instances = new Set(); // live log-node instances to fan events out to
 
@@ -398,23 +399,81 @@ function restore(node) {
   toBottom(node);   // a fresh render starts parked at the newest row, following again
 }
 
+// Which log nodes are actually on a canvas right now.
+//
+// `instances` is a CACHE, not the truth. onNodeCreated puts a node in and onRemoved takes it out,
+// but the frontend rebuilds nodes behind our back — a workflow tab switch, an undo, a reloaded
+// graph — and does not always run both halves. A stale copy left in the set kept taking events
+// meant for the live one (and, sharing its id, recorded every event into the history a second
+// time). So each fan-out re-derives the truth from the graph: LiteGraph nulls `node.graph` when a
+// node leaves a canvas, which is the reliable signal that a copy is dead, and a sweep of the
+// current graph picks up any log node whose registration we missed.
+function liveNodes() {
+  for (const n of [...instances]) {
+    if (n.graph) n._obLive = true;                          // it is on a canvas
+    else if (n._obLive || !n._obEls) instances.delete(n);   // …and has since left one
+  }
+  for (const n of app.graph?._nodes || []) {
+    if ((n.comfyClass || n.type) === CLASS && n._obEls) instances.add(n);
+  }
+  return [...instances].filter((n) => n._obEls);
+}
+
+// Record for restore-after-rebuild, ONE entry per node id — two objects for the same id are the
+// same log. "start" resets the history for this run. The live-only streaming events (per-token
+// deltas + the empty 'open' prompt row) are NOT stored: on replay the finalized prompt stage
+// renders the full prompt row instead, so history stays compact.
+function record(d, nodes) {
+  if (d.type === "prompt_delta" || (d.type === "stage" && d.stage === "prompt" && d.open)) return;
+  for (const id of new Set(nodes.map((n) => n.id))) {
+    if (d.type === "start") logStore.set(id, [d]);
+    else {
+      const arr = logStore.get(id);
+      if (arr) arr.push(d); else logStore.set(id, [d]);
+    }
+  }
+}
+
+let sawRun = false;        // did this queued prompt actually start an Ouroboros run?
+let sawCached = false;     // …or did ComfyUI hand back a cached Ouroboros instead?
+
 // One shared websocket listener fans out to every live log node on the canvas.
 api.addEventListener("kinburg.ouroboros", (e) => {
   const d = (e && e.detail) || {};
-  for (const node of instances) {
-    if (!node._obEls) continue;
-    applyEvent(node, d);
-    // Record for restore-after-tab-switch. "start" resets the history for this run. The live-only
-    // streaming events (per-token deltas + the empty 'open' prompt row) are NOT stored — on replay
-    // the finalized prompt stage renders the full prompt row instead, so history stays compact.
-    if (d.type === "start") {
-      logStore.set(node.id, [d]);
-    } else if (d.type === "prompt_delta" || (d.type === "stage" && d.stage === "prompt" && d.open)) {
-      /* transient — skip */
-    } else {
-      const arr = logStore.get(node.id);
-      if (arr) arr.push(d); else logStore.set(node.id, [d]);
+  const nodes = liveNodes();
+  if (d.type === "start") sawRun = true;
+  for (const node of nodes) {
+    // One node's row blowing up must not cost the others theirs: the throw used to escape this
+    // listener, so every node after it in the set lost that event — and the frontend swallows the
+    // error with a console warning, which is why the log just went quiet with nothing to show.
+    try {
+      applyEvent(node, d);
+    } catch (err) {
+      console.error("[Ouroboros] live log could not render an event on node", node.id, d.type, err);
     }
+  }
+  record(d, nodes);
+});
+
+// ── the silence that is NOT a bug ────────────────────────────────────────────────────────────
+// Queue a prompt whose inputs have not changed and ComfyUI serves the Ouroboros node from its
+// execution cache: run() is never called, so nothing is emitted and the log sits there looking
+// broken. The node has no IS_CHANGED, and its own advice is to keep the seed fixed, so this is the
+// ordinary case rather than a rare one. Say it out loud instead of showing an empty log.
+api.addEventListener("execution_start", () => { sawRun = false; sawCached = false; });
+
+api.addEventListener("execution_cached", (e) => {
+  const ids = new Set((app.graph?._nodes || [])
+    .filter((n) => (n.comfyClass || n.type) === SAMPLER)
+    .map((n) => String(n.id)));
+  sawCached = ((e && e.detail && e.detail.nodes) || []).some((id) => ids.has(String(id)));
+});
+
+api.addEventListener("execution_success", () => {
+  if (sawRun || !sawCached) return;
+  for (const node of liveNodes()) {
+    setStatus(node, "⏭ nothing re-ran — ComfyUI served Ouroboros from its cache "
+                    + "(change the seed or an input to force a new run)");
   }
 });
 

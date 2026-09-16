@@ -35,6 +35,7 @@ class El {
   set innerHTML(v) { if (!v) this.children = []; }
   append(...k) { this.children.push(...k); }
   appendChild(k) { this.children.push(k); return k; }
+  removeChild(k) { this.children = this.children.filter((c) => c !== k); return k; }
   addEventListener(t, f) { (this._ls || (this._ls = {}))[t] = f; }
   // How a test raises an event the browser would have raised.
   fire(t, ev) { this._ls?.[t]?.(ev || { preventDefault() {}, stopPropagation() {} }); }

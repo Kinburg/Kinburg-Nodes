@@ -52,7 +52,7 @@ import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import options
+from . import events, options
 from .compat import field_from_error, normalize
 from .options import KOBOLDCPP, LLAMA_SERVER
 
@@ -136,6 +136,19 @@ def log_tail(n=60):
 
 
 # --------------------------------------------------------------------------------- backends
+def _wants(what="log_events"):
+    """Is this kind of event switched on? `log_events` gates the lot; the other two are opt-in,
+    because one carries somebody's conversation and the other is a wall of llama.cpp chatter."""
+    cfg = STATE.cfg
+    if not cfg.get("log_events", True):
+        return False
+    return True if what == "log_events" else bool(cfg.get(what))
+
+
+def _event(kind, **fields):
+    return events.emit(kind, **fields) if _wants() else None
+
+
 def running(role=CHAT):
     return STATE.backends[role].alive()
 
@@ -165,7 +178,12 @@ def _drain(proc, role):
         for line in iter(proc.stdout.readline, ""):
             if line == "" and proc.poll() is not None:
                 break
-            STATE.log.append(prefix + line.rstrip("\n"))
+            line = line.rstrip("\n")
+            STATE.log.append(prefix + line)
+            # llama-server is chatty (a line per slot, per prompt, per timing), so its own output
+            # reaches the live log only when asked for.
+            if line.strip() and _wants("log_server_output"):
+                events.emit("stdout", role=role, line=line[:400])
     except Exception:
         pass
 
@@ -246,6 +264,7 @@ def ensure_model(role=CHAT, force=False, wait_for_comfy=True):
             return False, "nothing to launch for the %s backend." % role
         what = os.path.basename(argv[2] if len(argv) > 2 else "?")
         log("loading %s%s on port %d" % ("" if role == CHAT else "embedding model ", what, port))
+        _event("model", event="loading", role=role, model=what, port=port)
         try:
             proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, encoding="utf-8", errors="replace", bufsize=1)
@@ -267,14 +286,20 @@ def ensure_model(role=CHAT, force=False, wait_for_comfy=True):
         while time.time() < t0 + timeout_s:
             if proc.poll() is not None:
                 back.proc = None
-                return False, ("the server exited while loading (code %s).%s\n--- log ---\n%s"
-                               % (proc.returncode, _exit_hint(proc.returncode), log_tail(25)))
+                why = ("the server exited while loading (code %s).%s"
+                       % (proc.returncode, _exit_hint(proc.returncode)))
+                _event("model", event="failed", role=role, model=what, error=why)
+                return False, why + "\n--- log ---\n" + log_tail(25)
             if _probe(port, ready_path) == 200:
                 back.loaded_at = time.time()
                 log("%s ready in %.1fs" % (role, time.time() - t0))
+                _event("model", event="ready", role=role, model=what, port=port,
+                       ms=int((time.time() - t0) * 1000))
                 return True, ""
             time.sleep(0.4)
         stop_model("startup timed out", role)
+        _event("model", event="failed", role=role, model=what,
+               error="did not become ready within %ds" % timeout_s)
         return False, "the model did not become ready within %ds." % timeout_s
 
 
@@ -286,12 +311,15 @@ def stop_model(reason="", role=None):
         for r in (ROLES if role is None else (role,)):
             back = STATE.backends[r]
             proc = back.proc
+            was_up = back.loaded_at
             back.proc = None
             back.loaded_at = 0.0
             if proc is None:
                 continue
             stopped = True
             log("unloading the %s model%s" % (r, (" - " + reason) if reason else ""))
+            _event("model", event="unloaded", role=r, reason=reason,
+                   up_seconds=round(time.time() - was_up, 1) if was_up else 0.0)
             try:
                 if proc.poll() is None:
                     proc.terminate()
@@ -403,6 +431,13 @@ def _role_for(bare):
     return EMBED if (bare in EMBED_PATHS and options.needs_embed_process(STATE.cfg)) else CHAT
 
 
+def _probe_event(bare):
+    """A GET the gateway answered itself — the model list and health checks a client polls. Its own
+    kind, so the log node can fold a run of them into one line instead of drowning in them."""
+    if _wants():
+        events.emit("probe", path=bare)
+
+
 # --------------------------------------------------------------------------------- HTTP side
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -478,25 +513,62 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_json(200 if ok else 503, {"loaded": ok, "error": err})
 
         role = _role_for(bare)
+        ctx = None
         if method == "POST":
+            ctx = self._open(method, bare, role, body)
             ok, err = ensure_model(role)
             if not ok:
+                self._close(ctx, 503, error=err)
                 return self._send_error_json(503, err)
-            body = self._repair(body)
+            body = self._repair(body, ctx)
         elif bare in ("/models", "/v1/models"):
             # Always ours, loaded or not. The chat client remembers the id it was shown, and it
             # must not change under it when the model happens to be up (llama-server names the
             # model after its own path or `--alias`, which is a different string).
+            _probe_event(bare)
             return self._send_json(200, _synthesise(bare))
         elif not running(role):
             synth = _synthesise(bare)
             if synth is not None:
+                _probe_event(bare)
                 return self._send_json(200, synth)
+            self._close(self._open(method, bare, role, b""), 503,
+                        error="the model is not loaded and this path needs it.")
             return self._send_error_json(503, "the model is not loaded and this path needs it.")
+        else:
+            ctx = self._open(method, bare, role, body)
 
-        self._relay(method, path, body, role)
+        self._relay(method, path, body, role, ctx)
 
-    def _repair(self, body):
+    # ------------------------------------------------------------------ the event pair
+    def _open(self, method, bare, role, body):
+        """Open a row in the live log the moment a request arrives — before the model is loaded, so
+        a 40-second cold start is visibly a load and not a hang. Returns the context `_close` needs.
+        """
+        if not _wants():
+            return None
+        summary, preview = {}, ""
+        if body:
+            try:
+                obj = json.loads(body.decode("utf-8"))
+            except Exception:
+                obj = None
+            if isinstance(obj, dict):
+                summary = events.request_summary(obj)
+                if _wants("log_text"):
+                    preview = events.prompt_preview(obj)
+        ev = events.emit("request", method=method, path=bare, role=role, prompt=preview,
+                         n_ctx=int(STATE.cfg.get("n_ctx") or 0), **summary)
+        return {"id": ev["seq"], "t0": time.perf_counter(), "role": role, "path": bare}
+
+    def _close(self, ctx, status, **extra):
+        """Close that row: status, how long it took, and whatever the answer could tell us."""
+        if not ctx:
+            return
+        events.emit("request_done", id=ctx["id"], status=int(status), role=ctx["role"],
+                    path=ctx["path"], ms=int((time.perf_counter() - ctx["t0"]) * 1000), **extra)
+
+    def _repair(self, body, ctx=None):
         """Fix the request body llama.cpp would refuse. Non-JSON bodies pass through untouched."""
         cfg = STATE.cfg
         if not body or not cfg.get("fix_params", True):
@@ -507,12 +579,13 @@ class _Handler(BaseHTTPRequestHandler):
             return body
         drop = tuple(cfg.get("drop_fields", ())) + tuple(STATE.learned_drops)
         fixed, notes = normalize(obj, drop=drop)
-        for n in notes:
-            log("request: " + n)
+        for note in notes:
+            log("request: " + note)
+            _event("note", text=note, id=ctx["id"] if ctx else 0)
         return json.dumps(fixed).encode("utf-8") if notes else body
 
     # ------------------------------------------------------------------ forwarding
-    def _relay(self, method, path, body, role=CHAT, attempt=0):
+    def _relay(self, method, path, body, role=CHAT, ctx=None, attempt=0):
         timeout = int(STATE.cfg.get("request_timeout", 900))
         port = STATE.backends[role].port
         headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_BY_HOP}
@@ -528,17 +601,20 @@ class _Handler(BaseHTTPRequestHandler):
             # - that is what keeps a new SillyTavern option from breaking every message.
             if resp.status == 400 and STATE.cfg.get("auto_retry", True) and body and attempt < 4:
                 raw = resp.read()
-                retry = self._retry_body(raw, body)
+                retry = self._retry_body(raw, body, ctx)
                 conn.close()
                 if retry is not None:
-                    return self._relay(method, path, retry, role, attempt + 1)
+                    return self._relay(method, path, retry, role, ctx, attempt + 1)
+                self._close(ctx, 400, error=_error_text(raw))
                 return self._send_raw(400, resp.getheader("Content-Type", "application/json"), raw)
 
-            self._stream(resp)
+            self._stream(resp, ctx)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             self.close_connection = True
+            self._close(ctx, 499, error="the client went away", aborted=True)
         except Exception as e:
             log("forwarding %s %s failed: %s" % (method, path, e))
+            self._close(ctx, 502, error=str(e))
             try:
                 self._send_error_json(502, "the model server did not answer: " + str(e))
             except Exception:
@@ -549,7 +625,7 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def _retry_body(self, raw, body):
+    def _retry_body(self, raw, body, ctx=None):
         """The same body without the field llama.cpp rejected, or None if we cannot tell."""
         name = field_from_error(raw.decode("utf-8", "replace"))
         if not name:
@@ -563,6 +639,8 @@ class _Handler(BaseHTTPRequestHandler):
         obj.pop(name)
         STATE.learned_drops.add(name)
         log("llama.cpp rejected '%s' - dropped it and retried (stripped from now on)" % name)
+        _event("note", dropped=name, id=ctx["id"] if ctx else 0,
+               text="llama.cpp rejected '%s' - dropped it and retried" % name)
         return json.dumps(obj).encode("utf-8")
 
     def _send_raw(self, code, ctype, blob):
@@ -573,8 +651,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self._write(blob)
 
-    def _stream(self, resp):
-        """Copy the answer through as it arrives - token by token for a streamed reply."""
+    def _stream(self, resp, ctx=None):
+        """Copy the answer through as it arrives - token by token for a streamed reply.
+
+        On the way past we count what the log wants: tokens, rate, and (only when `log_text` is on)
+        the first few hundred characters of the reply. A streamed answer is never held in memory —
+        its frames are counted and the last couple of kilobytes kept, which is where llama.cpp puts
+        the real timings.
+        """
         clen = resp.getheader("Content-Length")
         self.send_response(resp.status)
         self.send_header("Content-Type", resp.getheader("Content-Type", "application/json"))
@@ -586,17 +670,26 @@ class _Handler(BaseHTTPRequestHandler):
             self._cors()
             self.end_headers()
             left = int(clen)
+            keep = bytearray() if left <= 512 * 1024 else None
+            ok = True
             while left > 0:
                 chunk = resp.read(min(65536, left))
-                if not chunk or not self._write(chunk):
+                if not chunk:
+                    break
+                if keep is not None:
+                    keep += chunk
+                if not self._write(chunk):
+                    ok = False
                     break
                 left -= len(chunk)
+            self._close(ctx, resp.status, **_answer_stats(keep, ok))
             return
         # No length: the upstream is streaming (SSE). Re-chunk it ourselves so the HTTP/1.1 framing
         # stays valid, and flush every chunk - buffering here would stall the live reply.
         self.send_header("Transfer-Encoding", "chunked")
         self._cors()
         self.end_headers()
+        frames, tail, ok = 0, bytearray(), True
         while True:
             try:
                 chunk = resp.read1(65536)
@@ -604,13 +697,50 @@ class _Handler(BaseHTTPRequestHandler):
                 break
             if not chunk:
                 break
+            frames += chunk.count(b"data:")
+            tail += chunk
+            del tail[:-2048]
             if not self._write(b"%x\r\n" % len(chunk) + chunk + b"\r\n"):
-                return
+                ok = False
+                break
             try:
                 self.wfile.flush()
             except Exception:
-                return
-        self._write(b"0\r\n\r\n")
+                ok = False
+                break
+        if ok:
+            self._write(b"0\r\n\r\n")
+        stats = events.stream_stats(frames, bytes(tail).decode("utf-8", "replace"))
+        self._close(ctx, resp.status, aborted=not ok, **stats)
+
+
+def _error_text(raw):
+    """The message out of an error body, or the body itself when it is not the usual shape."""
+    try:
+        obj = json.loads(raw.decode("utf-8", "replace"))
+        err = obj.get("error")
+        if isinstance(err, dict):
+            return str(err.get("message") or err)[:400]
+        return str(err or obj)[:400]
+    except Exception:
+        return raw.decode("utf-8", "replace")[:400]
+
+
+def _answer_stats(blob, ok=True):
+    """Tokens, rate and (when asked for) a snippet of the reply, out of a whole answer."""
+    out = {} if ok else {"aborted": True}
+    if not blob:
+        return out
+    try:
+        obj = json.loads(bytes(blob).decode("utf-8"))
+    except Exception:
+        return out
+    out.update(events.usage_of(obj))
+    if _wants("log_text"):
+        preview = events.reply_preview(obj)
+        if preview:
+            out["reply"] = preview
+    return out
 
 
 # --------------------------------------------------------------------------------- lifecycle
@@ -696,6 +826,7 @@ def serve(host, port):
                                           kwargs={"poll_interval": 0.4}, daemon=True)
     STATE.httpd_thread.start()
     log("listening on %s  (SillyTavern points at %s/v1)" % (addr, addr))
+    _event("gateway", event="listening", addr=addr)
     _install_hook()
     if STATE.idle_thread is None or not STATE.idle_thread.is_alive():
         STATE.idle_thread = threading.Thread(target=_idle_watch, daemon=True)
@@ -717,6 +848,7 @@ def stop_serving():
         except Exception:
             pass
         log("gateway stopped listening")
+        _event("gateway", event="stopped")
 
 
 def shutdown(reason=""):

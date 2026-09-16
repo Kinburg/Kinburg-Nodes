@@ -24,6 +24,7 @@ dc = sys.modules["kn.util.diskcache"]
 check = Checker()
 
 SAMPLED = []        # (frame index is implicit) the seeds actually sampled, in order
+PROMPTS = []        # the text that actually reached CLIP, per sampled frame
 EMITS = []
 
 
@@ -47,6 +48,7 @@ class FakeEmpty:
 
 def fake_sample(model, latent, positive, negative, stg, seed, guider=None):
     SAMPLED.append(seed)
+    PROMPTS.append(positive[0][1].get("text"))
     return {"samples": torch.full_like(latent["samples"], (seed % 997) / 997.0)}
 
 
@@ -80,6 +82,7 @@ Node = nd.KinburgPhantas()
 
 def run(**kw):
     SAMPLED.clear()
+    PROMPTS.clear()
     EMITS.clear()
     args = dict(board=board(), model=MODEL, clip=CLIP, vae=VAE, sampler_settings=[dict(STAGE)],
                 width=64, height=64, reference="off", reference_strength=0.6,
@@ -217,6 +220,32 @@ check("…and is fitted to the board's canvas", tuple(images[0].shape) == (64, 6
 check("…and reported as such", "wired in" in report)
 check("…and it is what shot 1 starts on",
       dc.tensor_key(chain[0]["start_frame"]) == dc.tensor_key(images[0:1]))
+
+# ------------------------------------------------------------------------------ trigger words
+run(cache="off")
+check("with nothing wired the board's prompt is what reaches CLIP",
+      PROMPTS == [f"prompt {i}" for i in range(4)], PROMPTS)
+
+_, _, _, _, rep = run(cache="off", trigger_words="ohwx style, neon glow")
+check("triggers are appended to EVERY keyframe, not just the first",
+      PROMPTS == [f"prompt {i}\n\nohwx style, neon glow" for i in range(4)], PROMPTS)
+check("...and the report says which words went on", "ohwx style, neon glow" in rep)
+
+_, _, _, _, rep = run(cache="off")
+check("no triggers, no report line", "trigger words" not in rep)
+
+dup = board(2)
+dup["frames"][0]["prompt"] = "a photo, OHWX man"
+run(board=dup, cache="off", trigger_words="ohwx man")
+check("a trigger the prompt already carries is not stamped twice",
+      PROMPTS[0] == "a photo, OHWX man", PROMPTS)
+
+run(cache="disk", trigger_words="ohwx style")
+check("a board with triggers is not the cached board without them", len(SAMPLED) == 4)
+run(cache="disk", trigger_words="ohwx style")
+check("...and caches under its own key", SAMPLED == [], SAMPLED)
+run(cache="disk", trigger_words="ohwx style, neon glow")
+check("changing the triggers re-renders, the way editing a prompt does", len(SAMPLED) == 4)
 
 # ----------------------------------------------------------------------------------- live log
 run(live_preview=True)   # no server in a test: the emit must swallow that, not raise

@@ -2,8 +2,8 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.5.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-102-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-2127%20checks-brightgreen.svg)](#-tests)
+[![nodes](https://img.shields.io/badge/nodes-103-orange.svg)](#-node-index)
+[![tests](https://img.shields.io/badge/tests-2227%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
@@ -22,7 +22,7 @@ One folder = one package: ComfyUI reads the node mappings from the root `__init_
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **102** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **103** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -31,7 +31,7 @@ All **102** nodes, grouped by the package they live in. Every package links to i
 | Package | Nodes |
 |---|---|
 | [`local_llm/` — Local LLM (GGUF) & Live Logging](docs/llm.md#-local_llm--local-llm-gguf--live-logging) | `Context Sizer (GGUF)`, `Kinburg Live Log 📜`, `LLM Live Log (old id)`, `Local LLM (GGUF)`, `Local LLM Chat (GGUF)`, `Local LLM Model Info 🔍`, `Local LLM Settings (GGUF)`, `Send Image to Chat`, `Send Image to Live Log 📜`, `Token Counter (GGUF)`, `Vision Settings (GGUF)` |
-| [`llm_server/` — Local LLM Server & Control](docs/llm.md#-llm_server--local-llm-server--control) | `LLM Server Control`, `LLM Server Draft (GGUF)`, `LLM Server Embeddings (GGUF)`, `LLM Server Vision (GGUF)`, `Local LLM Server` |
+| [`llm_server/` — Local LLM Server & Control](docs/llm.md#-llm_server--local-llm-server--control) | `LLM Server Control`, `LLM Server Draft (GGUF)`, `LLM Server Embeddings (GGUF)`, `LLM Server Live Log 📜`, `LLM Server Vision (GGUF)`, `Local LLM Server` |
 | [`context/` — Character Card, Entity Card, Context Collector](docs/llm.md#-context--character-card-entity-card-context-collector) | `Character Card`, `Context Collector`, `Entity Card` |
 | [`vision_judge/` — Vision LLM Judge & Criteria Builder](docs/llm.md#-vision_judge--vision-llm-judge--criteria-builder) | `Criteria Builder 📋`, `Vision LLM Judge` |
 | [`card_presets/` — Card Save & Card Presets](docs/llm.md#-card_presets--card-save--card-presets) | `Card Presets`, `Card Save` |
@@ -155,6 +155,7 @@ All **102** nodes, grouped by the package they live in. Every package links to i
 | LLM Server Control | `LLMServerControl` | `Kinburg-Nodes/LLM` |
 | LLM Server Draft (GGUF) | `LLMServerDraft` | `Kinburg-Nodes/LLM` |
 | LLM Server Embeddings (GGUF) | `LLMServerEmbeddings` | `Kinburg-Nodes/LLM` |
+| LLM Server Live Log 📜 | `LLMServerLog` | `Kinburg-Nodes/LLM` |
 | LLM Server Vision (GGUF) | `LLMServerVision` | `Kinburg-Nodes/LLM` |
 | List Insert | `ListInsert` | `Kinburg-Nodes/flow/list` |
 | List Output | `KinburgListEmit` | `Kinburg-Nodes/flow/loops` |

@@ -529,6 +529,33 @@ up. **`embed_n_ctx`**, **`embed_n_gpu_layers`**, **`pooling`**, **`rerank`** and
 no alias, no thinking budget, no reasoning format, no jinja override, no `spec_type`. Rather than
 drop those silently, the node lists them under *ignored by this backend* in its `status` output.
 
+### Watching it work
+
+**`LLM Server Live Log 📜`** is a UI-only node — no inputs, no outputs, drop it anywhere — showing
+what the server is actually doing. One row per request, and a request is two events: the row opens
+the moment it arrives and is filled in when it finishes, so the forty seconds a cold start takes
+read as a load in progress rather than as a hang. A finished row carries the status, how long it
+took, the tokens in and out, the rate, and the context fill against the `n_ctx` the server was
+started with — the number that tells you when the chat is about to start forgetting its own
+beginning. Under it sits the line this log is really for: **the sampler settings the client
+actually sent**, which is otherwise guesswork on the SillyTavern side. Loads, unloads with their
+reason, errors with the server's own wording, and every parameter repair get their own rows; a run
+of identical model-list or health polls collapses into one row with a counter rather than burying
+everything else.
+
+Unlike the pack's other live logs this one is **not tied to a ComfyUI run**: the server is talked
+to whenever the chat client feels like it, very possibly with no browser open at all. So the events
+are kept on the backend and the node asks for the backlog when it appears — open ComfyUI after an
+hour of chatting and the log is already full. **clear** empties that backlog too, or a reload would
+bring it all back.
+
+What it logs is set on the server node. **`log_events`** is the log itself. **`log_text`** adds a
+trimmed preview of the last message and the reply and is **off by default on purpose**: that is
+somebody's conversation, and this is drawn on a canvas that whoever is at the machine can read —
+with it off, the text never leaves the gateway at all, rather than being sent and then not
+displayed. **`log_server_output`** folds in llama.cpp's own stdout, which is useful when a model
+misbehaves and noise the rest of the time; it always reaches the `server_log` output regardless.
+
 **Parameter repair.** SillyTavern stores list-valued options as JSON *strings*, and llama.cpp's
 server refuses the whole request when one is not a real array — `dry_sequence_breakers` is the one
 everybody hits, and llama.cpp's own source comments that its format is "not compatible with TextGen
@@ -542,7 +569,8 @@ The gateway also answers three of its own paths, handy from a browser tab or a s
 `/kinburg/load`.
 
 Nodes: **`Local LLM Server`**, **`LLM Server Control`**, **`LLM Server Draft (GGUF)`**,
-**`LLM Server Vision (GGUF)`**, **`LLM Server Embeddings (GGUF)`** (category `Kinburg-Nodes/LLM`).
+**`LLM Server Vision (GGUF)`**, **`LLM Server Embeddings (GGUF)`**, **`LLM Server Live Log 📜`**
+(category `Kinburg-Nodes/LLM`).
 Text only, and none of them generates anything itself — for prompts inside a graph use
 [**Local LLM (GGUF)**](#-local_llm--local-llm-gguf--live-logging).
 
