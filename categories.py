@@ -28,6 +28,7 @@ CAT_MORPHEUS = CAT_BESTIARY + "/Morpheus"
 CAT_ORPHEUS = CAT_BESTIARY + "/Orpheus"
 CAT_OUROBOROS = CAT_BESTIARY + "/Ouroboros"
 CAT_PHANTAS = CAT_BESTIARY + "/Phantas"
+CAT_SATYR = CAT_BESTIARY + "/Satyr"
 CAT_SIREN = CAT_BESTIARY + "/Siren"
 
 # --- language & vision --------------------------------------------------------------------------
@@ -68,5 +69,6 @@ SUITES = {
     "orpheus": CAT_ORPHEUS,
     "ouroboros": CAT_OUROBOROS,
     "phantas": CAT_PHANTAS,
+    "satyr": CAT_SATYR,
     "siren": CAT_SIREN,
 }

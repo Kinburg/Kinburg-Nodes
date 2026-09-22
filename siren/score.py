@@ -145,19 +145,36 @@ _JOINERS = {"and", "with", "together", "both", "plus", "feat", "ft", "duet", "vs
 
 
 # -------------------------------------------------------------------------------- text inspection
-_VOWELS = re.compile(r"[aeiouyаеёиоуыэюяіїєAEIOUYАЕЁИОУЫЭЮЯІЇЄ]+")
+_VOWELS = re.compile(r"[aeiouyAEIOUY]+")
 _LETTERS = re.compile(r"[^\W\d_]+", re.UNICODE)
+#: Every Cyrillic vowel. `й` and `ь` are deliberately absent: they are consonants and carry no
+#: syllable, so `край` is one and `свій` is one.
+_CYRILLIC_VOWELS = set("аеєиіїоуюяёыэАЕЄИІЇОУЮЯЁЫЭ")
 
 
 def _syllables(text):
-    """Vowel groups, with English's silent final 'e' dropped.
+    """Syllables in a line: Cyrillic vowels one at a time, Latin vowel groups less a silent final e.
 
-    Exact for the Slavic languages (one vowel is one syllable) and close enough for English, where a
-    trailing silent 'e' is the only common systematic overcount. This is what section lengths are
-    computed from, because syllables are what a singer spends time on — a line of four words and a
-    line of twelve do not take the same number of bars, and counting lines pretends they do."""
+    The two scripts genuinely need different rules, and for a long time this had only one. It counted
+    vowel GROUPS everywhere, which is right for English — `beautiful` has five vowels and three
+    syllables — and wrong for the Slavic languages, where two vowels side by side are two syllables.
+    So `знає` (зна-є) came back as one, `свою` (сво-ю) as one and `загартує` (за-гар-ту-є) as three,
+    while the docstring claimed to be exact for exactly those languages. The error only ever ran one
+    way, which is why it hid: every section was short by the same few per cent, so the proportions
+    that decide bar counts barely moved.
+
+    It surfaced next door. Satyr reads a YuE2 score, where one syllable is one note and the count is
+    checkable against the model's own plan: a chorus the model had written 47 notes for counted 44.
+
+    This is what section lengths are computed from, because syllables are what a singer spends time
+    on — a line of four words and a line of twelve do not take the same number of bars, and counting
+    lines pretends they do."""
     total = 0
     for word in _LETTERS.findall(str(text or "")):
+        cyrillic = sum(1 for ch in word if ch in _CYRILLIC_VOWELS)
+        if cyrillic:
+            total += cyrillic
+            continue
         n = len(_VOWELS.findall(word))
         if n > 1 and word[-1] in "eE":
             n -= 1

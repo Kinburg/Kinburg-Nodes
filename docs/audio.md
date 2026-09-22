@@ -440,6 +440,247 @@ seconds and leave the check to you.
 
 ---
 
+## 🐐 `satyr/` — Satyr Suite 🐐
+
+> **System Purpose & Overview**
+> Reads a YuE2 plan against the lyrics and says what it will and will not sing, before a render is
+> spent on it — and corrects the one thing an edit can safely correct. Reading a plan (Satyr Read)
+> and checking one against the words (Satyr Score).
+
+YuE2 composes before it performs: it writes an ABC score — a vocal melody, an instrumental melody,
+chord symbols, section labels — and then renders that score into audio. The score is an ordinary
+string input on `YuE2 Generate Music`, tokenised verbatim and never validated, which makes it the one
+piece of YuE2's conditioning that can be edited by hand. It is also the only conditioning it has with
+a **time axis**: `M:` and `L:` and `Q:` make a bar's length arithmetic, so a plan states the song's
+duration rather than wishing for it. `style` and `lyrics` are one flat blob each for the whole track.
+
+**Who sings is decided in `style`, and the plan does not get a say.** This is the conclusion of a
+long and mostly negative investigation, and it is worth stating first because it is what the suite
+turned out not to be able to do.
+
+There is no field for a voice — no reference singer, no per-section timbre — and the ABC has exactly
+two hardcoded voices, `Vocal` and `Ins`. Asked in `style` for two singers, the model writes both into
+the one monophonic `Vocal` line as two **pitch bands**, and which band a phrase sits in does track
+which singer took it, in every song measured. Moving one chorus down an octave flipped it from the
+woman to the man once, at a fixed seed, with the untouched chorus staying female — a clean result.
+
+It has never reproduced as a lever. A style naming no voices is sung by one singer from beginning to
+end however the plan is written; a style naming two produces two, placed where the model likes. Two
+plans of the same song measured five semitones apart: one came back with two voices, one with a
+single voice, and what differed was the style string. An earlier version of this page claimed a gap
+below about eight semitones meant one singer. A third measurement killed that, and it is retracted.
+
+So the register is a **correlate worth reading and a control worth not promising**. `Satyr Read`
+reports it because it says accurately what a plan is going to do; `recast` can move a section that
+contradicts its marker, and is off by default.
+
+### `Satyr Read (Plan → Map) 🐐`
+
+Reads a plan and changes nothing. Prints the meter, tempo, bar length and total duration; whether the
+plan holds one voice or two and where the two registers sit; and then every phrase with its timing,
+its bar count, its syllable budget and the voice that takes it. `seconds` is the plan's own duration,
+which the model performs a few per cent faster than.
+
+Note the distinction it draws between a band's notes and its seats. The note ranges of the two bands
+**overlap**: a phrase belonging to the man as a whole still reaches up into the woman's notes for a
+syllable or two. What separates cleanly is the phrase *median*, because a phrase goes to one singer
+whole — so that is what classifies a phrase and what a move aims at.
+
+### `Satyr Score (Plan → Plan) 🐐`
+
+Takes a plan and the marked-up lyrics, and reports what the plan will actually do with those words.
+It reads much more than it writes, and that is a finding rather than a design: an earlier version
+rewrote every phrase, and the songs came back sparse and sung by a single voice.
+
+**Matching the words to the sections is the whole foundation, and the obvious way is wrong.** YuE2
+does not write one section per lyric block. It merges neighbours — a measured plan gave one `% verse`
+112 notes, which is a 63-syllable verse plus the 47-syllable pre-chorus after it — inserts sections
+that carry no words at all, and renames what is left by its own reading (a first `[Chorus]` became
+`% pre-chorus`). Pairing them in order therefore puts somebody else's lyrics under nearly every
+section, and everything downstream is then applied to the wrong text. `align` matches them by their
+counts instead, which works because the model writes about one note per syllable: 1.03 measured over
+a whole song, and exactly 47/47 and 39/39 on individual sections.
+
+What the report then tells you, before a render is spent:
+
+- **which block landed where**, so a merge or a dropped section is visible rather than surprising;
+- **a block the plan cannot sing in full** — a bridge given 17 notes for 39 syllables loses well over
+  half its words;
+- **a block the plan will not sing at all** — a measured plan gave an 8-syllable outro no notes;
+- **which register each section uses**, which tracks who sings it without deciding it;
+- **a section whose register contradicts its marker**, which is the case `recast` can act on.
+
+**`recast` is off by default.** When it is on, only a section that disagrees with its marker moves,
+and it moves whole; a move that narrows the gap between the registers is taken back. On one measured
+plan every section already sat where its marker asked — verses low for the man, choruses high for the
+woman — and the right number of edits was zero. Moving phrases individually toward a band centre,
+which the first version did, smeared the two clusters together and made things worse. Treat turning
+it on as an experiment: the register is not what decides the singer.
+
+**`refit` is off by default, and the default is the recommendation.** The idea is sound — the plan's
+note count really is the syllable budget — but the edit is not. Removing a note conserves the bar it
+lives in, so it does not free time, it stretches the notes that remain: a real run lost 96 notes,
+pushed the vocal line from 50% silence to 57%, and sounded like the singer labouring through it. What
+the model itself does is sing a line at a natural rate and rest the remainder of the bar.
+
+The **`lyrics` output passes the text through as written**, and that default is a reversal. The
+markers were being stripped, on the reasoning that YuE2 has no field for a singer and its own guidance
+says to keep instructions out of the lyrics. Listening says otherwise: the model reads them and takes
+the **performance** from them — `powerful belts`, `deep growl`, `vocal duel, intense emotional peak`
+come back as strain and intensity, and a stripped lyric gives a flatter take. What the markers never
+did was decide who sings.
+
+`keep_markers` off still strips them, for the one case that needs it: a stage direction in ROUND
+brackets — `(distorted bass, atmospheric guitar)` — which YuE2 reads as a backing vocal and sings
+aloud. Square-bracket markers are safe either way.
+
+### `Satyr Trim (Plan → Plan) 🐐`
+
+Shortens a plan by cutting the stretches where nobody sings. This is the lever that was confirmed by
+ear first and reasoned about second.
+
+A measured plan ran **4:33 for a lyric AceStep had sung in 3:00**, and 61 of its 171 bars — 98
+seconds, 36% of the song — carried no sung note at all: a 40-second introduction, a 29-second outro,
+an interlude. Dropping only those bars brought it to 3:45 with every one of its 326 sung notes
+untouched, and the take came back shorter and livelier. **The model obeys a bar count**, which is
+what makes the whole suite worth having: the plan's time axis is real.
+
+`intro_seconds`, `outro_seconds` and `between_seconds` set how long each kind of silent stretch may
+run. 0 removes one outright; a number larger than the stretch leaves it alone. Wire `seconds` into
+`Empty YuE2 Latent Audio`.
+
+- **Nothing sung is ever removed.** The unit of the cut is a whole group — one span carried by both
+  voices at once — and only groups whose Vocal line holds no note are candidates. The report prints
+  the sung-note count before and after, and the node refuses to return a plan where they differ.
+  Melody, words, registers and both singers come through as the model wrote them.
+- **Which end survives depends on where the stretch sits.** An introduction leads *into* the singing,
+  so its last bars are kept — they are the approach. Everything else leads *out* of what it follows,
+  so the first bars are kept and the trailing repetition goes.
+- **A stretch is a run of sections, not a section.** An introduction is sometimes one `%` label and
+  sometimes four in a row; a limit applied per label would cut a four-label intro to four times the
+  length asked for.
+- **Sections are classified by what is in them, not by their labels.** A `% verse` the model wrote
+  with no vocal is an instrumental passage whatever it is called, and an `% interlude` that sings is
+  not a gap. A song that opens on a voice has no introduction to cut, however long its first
+  instrumental section is.
+- **Cuts land on group boundaries**, so a plan written in four-bar groups trims four bars at a time
+  and a limit is met from below rather than exactly. One exception to "at most": a limit above zero
+  always keeps one group, so a six-second interlude asked for five seconds is shortened to itself
+  rather than deleted. Zero is how to say delete.
+
+What it does **not** do is make the singing itself denser. The vocal sections of that same plan ran
+1.2–2.0 syllables a second, which is slow, and the bars carrying those words are not touched here —
+only the ones carrying none.
+
+### `Satyr Import (MIDI → Plan) 🐐`
+
+A MIDI file becomes the plan. This is the **only real control over the tune** the suite has: who
+sings is settled in the style string and the plan gets no say, but what they sing is written right
+here, so a melody composed in a DAW can be the one YuE2 performs.
+
+Two parts become the `Vocal` and `Ins` voices. Tempo, meter and key come from the file's own meta
+events, and **MIDI markers become `% section` labels** — the one place a DAW's arrangement markers
+carry straight through. Point `midi_path` at a file (a full path, or a name in ComfyUI's input
+folder) and name the parts, or leave them empty and let the guess run: a name containing *vocal*,
+*lead* or *melody* wins, otherwise it is the order they appear in. The report lists every part with
+its note count and pitch range, so one run tells you what to type.
+
+**A part is a channel, not a track**, and the difference is the whole ball game on a downloaded MIDI.
+A type-0 file — which most exports and nearly every file found on the internet is — keeps the entire
+arrangement in one track and tells the parts apart by their MIDI channel. Reading a track as one line
+therefore hands the melody, the bass, the guitar and the drum kit to the singer all at once, and YuE2
+sings every note of it, at length and with conviction. So channels are split out, named by their
+General MIDI family (*Strings*, *Bass*, *Guitar*), and **channel 10 is marked `[drums]` and never
+chosen automatically** — its note numbers are drum sounds, not pitches, and asking for them by name
+gets a warning rather than a performance.
+
+Two more things the report says about the part it was given. **A Cyrillic name is decoded**, because
+MIDI declares no encoding and a Russian sequencer's track name arrives as mojibake otherwise. And a
+part that **sounds for almost the whole song without a break is flagged**: a sung line breathes, an
+arrangement does not, so a line with no rests in it is a warning that the wrong part was picked.
+
+**Nothing lossy happens quietly**, and there are four lossy steps:
+
+- **Quantising.** Notes are snapped to the `L:` grid, and `grid: auto` picks the coarsest one the
+  music actually fits — a 1/32 grid can write any rhythm and produces a line nobody can check. The
+  report gives the average distance notes had to move: a MIDI quantised in a DAW converts exactly, a
+  live take does not, and 0% versus 6% is the difference between a transcription and an
+  approximation.
+- **Flattening to one line.** ABC's voices are monophonic, so a chord keeps its top note and the
+  report counts what was dropped and what was cut short. A melody under a held pedal tone comes out
+  as the pedal — worth knowing before blaming the model.
+- **One tempo.** A plan carries a single `Q:`, so a tempo map is reduced to its first value and the
+  count of what was ignored is reported. Same for a meter that changes partway.
+- **No chords.** MIDI does not carry chord symbols. Use `mode: melody` in YuE2, which is what its own
+  documentation recommends for anything built on an existing melody.
+
+Two things that look like details and are not:
+
+**A note crossing a barline is one syllable.** ABC has to break it at the bar and tie the halves, and
+a missing tie reads as two ordinary notes — the singer is handed a syllable that does not exist and
+every word after it shifts. Nothing about the text looks wrong. The first draft made this mistake.
+
+**An accidental holds to the end of its bar, across octaves.** After `^F`, every F in that measure
+sounds sharp, so a later natural one has to be written `=F`. Spelling each note against the key
+signature alone is right until a bar contains two spellings of a letter, and then it is a silent
+wrong note. The converter tracks the bar as it writes it.
+
+The check that all of this worked is in the test suite and is one line: convert, parse the result
+with the pack's own reader, and every MIDI pitch must come back. That covers the key signature, the
+accidentals, the octave marks and the letter spelling at once.
+
+**The file also knows half the style.** YuE2 asks for *Language + Genre + Vocal Character + Tempo +
+Instruments*, and a MIDI answers the last two exactly rather than by guesswork: the tempo is written
+in it, and the General MIDI programs name every instrument in the arrangement. Put the half it cannot
+know — language, genre, who is singing — in `style_prefix`, and the `style` output comes back whole:
+
+    Ukrainian, Progressive Alternative Rock, Post-Grunge, dual vocals, powerful melodic female
+    vocal, building tension gritty male vocal, 145 BPM, electric bass, violin, drums
+
+That matters more than it looks, because the style is what YuE2 builds the accompaniment from, and
+*distortion guitar* is a different song from *electric guitar*. Instruments are ordered by how much
+each part actually plays, so a four-note triangle does not displace the guitar, and the list stops at
+six: a style naming a dozen things has stopped describing anything. A meter is mentioned only when it
+is not 4/4.
+
+**What to do with it.** `abc` goes to `YuE2 Generate Music` (or through `Satyr Trim` first) and
+`style` to the same node's style input. Better still, run the plan through **`Satyr Score`** with your
+lyrics: a tune written without the words in mind will not have the right number of notes for them,
+and that report says exactly which section is short. For a cover of something that already exists,
+core's `SheetSage2 Audio to ABC` does the same job from audio — the two are complementary, one for
+what you wrote and one for what you have.
+
+### `Satyr Music (Guided YuE2) 🐐`
+
+A drop-in replacement for `YuE2 Generate Music` that exposes **`cfg_scale`**, and that is the whole
+of it. YuE2's own reference implementation takes a guidance scale — `protocol.py` validates 0–20 —
+and ComfyUI's node never passes one, so guidance is switched off and the second branch is never even
+built. The scale is reachable anyway, because the tokenizer reads it out of its kwargs.
+
+**What the scale amplifies is not the obvious thing, and this is the reason to care.** The negative
+branch is built from the instruction alone, with `[Tags]` and `[Lyrics]` removed, and the ABC is then
+appended to *both* branches. Read against the real tokenizer:
+
+    positive:  Generate a chord-annotated ABC transcription … \n[Tags]\nenglish, female vocal\n[Lyrics]…
+    negative:  Generate a chord-annotated ABC transcription, then generate music with codec tokens…
+
+So the plan cancels out of the difference entirely. Raising the scale does **not** weaken the plan —
+it pushes the style and the words harder against a plan whose authority is unchanged.
+
+**What that buys, measured, is diction.** Words the model tends to swallow come through, and the
+clearest case is a line in round brackets, which it otherwise sings too quietly or drops altogether.
+Raise it when a take is right but a phrase is mumbled. What it does **not** do is change who sings —
+that was the hope this node was built on, and it was tested, and it does not. The result fits the
+mechanism: amplifying the words makes the model articulate what it was given, not rearrange it.
+
+`1.0` is off and is the default, so the node behaves exactly like the core one until it is turned up.
+Anything else runs two branches: roughly twice the VRAM and twice the time.
+
+The node refuses to run if the tokenizer gives the argument back unchanged, rather than silently
+generating with guidance off while reporting otherwise.
+
+---
+
 ## 🔊 `audio_sr/` — Audio SR (48 kHz Upscale) 🔊
 
 > **System Purpose & Overview**  

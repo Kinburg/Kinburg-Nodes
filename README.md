@@ -2,7 +2,7 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.5.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-103-orange.svg)](#-node-index)
+[![nodes](https://img.shields.io/badge/nodes-108-orange.svg)](#-node-index)
 [![tests](https://img.shields.io/badge/tests-2227%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -22,7 +22,7 @@ One folder = one package: ComfyUI reads the node mappings from the root `__init_
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **103** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **108** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -55,6 +55,7 @@ All **103** nodes, grouped by the package they live in. Every package links to i
 | Package | Nodes |
 |---|---|
 | [`siren/` — Siren Suite 🧜](docs/audio.md#-siren--siren-suite-) | `Siren (Music Sampler) 🧜`, `Siren Cast (Voice Plan) 🧜`, `Siren Compare (Audio) 🧜`, `Siren Scope (Audio → Image) 🧜`, `Siren Score (Lyrics → Plan) 🧜`, `Siren Section (Audio Window) 🧜` |
+| [`satyr/` — Satyr Suite 🐐](docs/audio.md#-satyr--satyr-suite-) | `Satyr Import (MIDI → Plan) 🐐`, `Satyr Music (Guided YuE2) 🐐`, `Satyr Read (Plan → Map) 🐐`, `Satyr Score (Plan → Plan) 🐐`, `Satyr Trim (Plan → Plan) 🐐` |
 | [`audio_sr/` — Audio SR (48 kHz Upscale) 🔊](docs/audio.md#-audio_sr--audio-sr-48-khz-upscale-) | `Audio SR (48 kHz Upscale) 🔊` |
 | [`save_song/` — Save Song & Song Tags](docs/audio.md#-save_song--save-song--song-tags) | `Save Song`, `Song Tags` |
 
@@ -185,6 +186,11 @@ All **103** nodes, grouped by the package they live in. Every package links to i
 | Repeat (Open) | `KinburgRepeatOpen` | `Kinburg-Nodes/flow/loops` |
 | Safetensors -> GGUF (llama.cpp) | `SafetensorsToGGUF` | `Kinburg-Nodes/LLM/GGUF` |
 | Sampler Settings | `KinburgSamplerSettings` | `Kinburg-Nodes/Bestiary` |
+| Satyr Import (MIDI → Plan) 🐐 | `KinburgSatyrImport` | `Kinburg-Nodes/Bestiary/Satyr` |
+| Satyr Music (Guided YuE2) 🐐 | `KinburgSatyrMusic` | `Kinburg-Nodes/Bestiary/Satyr` |
+| Satyr Read (Plan → Map) 🐐 | `KinburgSatyrRead` | `Kinburg-Nodes/Bestiary/Satyr` |
+| Satyr Score (Plan → Plan) 🐐 | `KinburgSatyrScore` | `Kinburg-Nodes/Bestiary/Satyr` |
+| Satyr Trim (Plan → Plan) 🐐 | `KinburgSatyrTrim` | `Kinburg-Nodes/Bestiary/Satyr` |
 | Save Clip | `KinburgSaveClip` | `Kinburg-Nodes/video` |
 | Save Song | `KinburgSaveSong` | `Kinburg-Nodes/audio` |
 | Send Image to Chat | `LocalLLMChatSendImage` | `Kinburg-Nodes/LLM` |
