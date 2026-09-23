@@ -90,7 +90,8 @@ def _parse_criteria(text, cap=12):
             continue
         base, k, n = key, key, 2
         while k in seen:
-            k = f"{base}_{n}"; n += 1
+            k = f"{base}_{n}"
+            n += 1
         seen.add(k)
         out.append((k, label, desc))
         if len(out) >= cap:

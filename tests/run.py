@@ -41,6 +41,7 @@ SUITES = [
     ("siren_cast", "py", TESTS / "test_siren_cast.py"),
     ("siren_score", "py", TESTS / "test_siren_score.py"),
     ("lazy_guard", "py", TESTS / "test_lazy_guard.py"),
+    ("gate", "py", TESTS / "test_gate.py"),
     ("diskcache", "py", TESTS / "test_diskcache.py"),
     ("audio_sr", "py", TESTS / "test_audio_sr.py"),
     ("echo_translit", "py", TESTS / "test_echo_translit.py"),

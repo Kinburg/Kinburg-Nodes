@@ -145,11 +145,14 @@ def update_result(db_path, result_id, status=None, rating=None, comment=None, ta
         cur = conn.cursor()
         sets, params = [], []
         if status is not None:
-            sets.append("status = ?"); params.append(str(status))
+            sets.append("status = ?")
+            params.append(str(status))
         if rating is not None:
-            sets.append("rating = ?"); params.append(int(rating or 0))
+            sets.append("rating = ?")
+            params.append(int(rating or 0))
         if comment is not None:
-            sets.append("comment = ?"); params.append(str(comment))
+            sets.append("comment = ?")
+            params.append(str(comment))
         if sets:
             params.append(int(result_id))
             cur.execute(f"UPDATE results SET {', '.join(sets)} WHERE id = ?", params)
@@ -183,7 +186,9 @@ def delete_run(db_path, run_key, remove_images=True):
         for p in imgs:
             try:
                 if p and os.path.isfile(p):
-                    os.remove(p); removed += 1; dirs.add(os.path.dirname(p))
+                    os.remove(p)
+                    removed += 1
+                    dirs.add(os.path.dirname(p))
             except Exception:
                 pass
         for d in dirs:

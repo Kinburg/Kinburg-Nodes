@@ -78,18 +78,21 @@ check("chat_state is still the last optional (widget order unchanged)",
 check("no stray hold_open left behind", "hold_open" not in opt)
 
 # ── the two gate paths are untouched ────────────────────────────────────────────────────────
-calls.clear(); shut.clear()
+calls.clear()
+shut.clear()
 out = node.run(P[0], chat_state=state())
 check("normal turn generates", len(calls) == 1)
 check("normal turn blocks downstream", isinstance(out, dict) and "ui" in out)
 
-calls.clear(); shut.clear()
+calls.clear()
+shut.clear()
 out = node.run(P[0], chat_state=state(approved=True))
 check("approve emits the last reply, no generation",
       isinstance(out, tuple) and out[0] == "LAST" and not calls)
 check("approve unloads (unload_on_approve default on)", shut == [1], shut)
 
-calls.clear(); shut.clear()
+calls.clear()
+shut.clear()
 node.run(P[0], chat_state=state(approved=True), unload_on_approve=False)
 check("approve + keep loaded: no unload", not shut)
 

@@ -31,7 +31,7 @@ class AudioDataset(Dataset):
         self.pad_wav_start_sample = 0  # If none, random choose
         self.trim_wav = False
         self.waveform_only = waveform_only
-        self.add_ons = [eval(x) for x in add_ons]
+        self.add_ons = [globals()[x] for x in add_ons]
         print("Add-ons:", self.add_ons)
 
         self.build_setting_parameters()

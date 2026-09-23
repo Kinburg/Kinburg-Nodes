@@ -1,9 +1,9 @@
 # 🎨 Kinburg-Nodes
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
-[![version](https://img.shields.io/badge/version-3.5.0-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-108-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-2227%20checks-brightgreen.svg)](#-tests)
+[![version](https://img.shields.io/badge/version-3.6.0-blue.svg)](pyproject.toml)
+[![nodes](https://img.shields.io/badge/nodes-109-orange.svg)](#-node-index)
+[![tests](https://img.shields.io/badge/tests-2592%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
@@ -22,7 +22,7 @@ One folder = one package: ComfyUI reads the node mappings from the root `__init_
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **108** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **109** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -98,7 +98,7 @@ All **108** nodes, grouped by the package they live in. Every package links to i
 
 | Package | Nodes |
 |---|---|
-| [`util/` — General Workflow Utilities](docs/utilities.md#-util--general-workflow-utilities) | `Any Switch`, `Any to String`, `Color Picker`, `Combo to String`, `Date String`, `JSON Extract`, `Text Transform`, `Unlim Text Concat` |
+| [`util/` — General Workflow Utilities](docs/utilities.md#-util--general-workflow-utilities) | `Any Gate`, `Any Switch`, `Any to String`, `Color Picker`, `Combo to String`, `Date String`, `JSON Extract`, `Text Transform`, `Unlim Text Concat` |
 | [`timer/` — Execution Timer](docs/utilities.md#-timer--execution-timer) | `Start Timer`, `Stop Timer` |
 | [`gen_info/` — Generation Info & Filter](docs/utilities.md#-gen_info--generation-info--filter) | `Generation Info`, `Generation Info Filter` |
 | [`group_control/` — Group Control 🎚️](docs/utilities.md#-group_control--group-control-) | `Group Control 🎚️` |
@@ -114,6 +114,7 @@ All **108** nodes, grouped by the package they live in. Every package links to i
 
 | Display name | Node id | Category |
 |---|---|---|
+| Any Gate | `KinburgAnyGate` | `Kinburg-Nodes/util` |
 | Any Switch | `KinburgAnySwitch` | `Kinburg-Nodes/util` |
 | Any to String | `AnyToString` | `Kinburg-Nodes/util` |
 | Audio SR (48 kHz Upscale) 🔊 | `KinburgAudioSR` | `Kinburg-Nodes/audio` |

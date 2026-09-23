@@ -133,7 +133,8 @@ def _aggregate_verdicts(verdicts, keys, lo, hi):
     for v in verdicts:
         for t in v["negative_add"]:
             if t.lower() not in seen:
-                seen.add(t.lower()); neg.append(t)
+                seen.add(t.lower())
+                neg.append(t)
     return {"score": overall, "scores": agg_scores, "advice": pick["advice"], "negative_add": neg}
 
 
@@ -145,7 +146,8 @@ def _merge_negative(current, add_list):
     for a in add_list:
         a = str(a).strip()
         if a and a.lower() not in seen:
-            parts.append(a); seen.add(a.lower())
+            parts.append(a)
+            seen.add(a.lower())
     return ", ".join(parts)
 
 

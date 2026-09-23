@@ -49,6 +49,14 @@ slots take any type and auto-grow (the node shows the connected ones plus a spar
 selected `output` and its `selected` slot number. It routes a value — ComfyUI still computes the
 other branches (it's not a lazy gate). Category `Kinburg-Nodes/util`.
 
+**`Any Gate`** is a valve on one link: `input` (any type) in, `output` (the same value) out, plus
+an `enabled` toggle. Closed, the node returns ComfyUI's silent execution blocker instead of the
+value, so every node downstream is skipped — no save, no preview, no error, the run simply ends
+short — and because `input` is **lazy**, the branch *feeding* the gate is not evaluated either: a
+sampler sitting behind a closed gate never runs at all. Open, the node is a plain wire. This is
+the lazy gate `Any Switch` above deliberately is not; reach for it to park a finished branch of a
+workflow for a run or two without bypassing a dozen nodes by hand. Category `Kinburg-Nodes/util`.
+
 **`JSON Extract`** pulls fields out of a JSON string by path into separate `STRING` outputs. You
 write **one path per line** in the `paths` field (each line either a bare path or `path -> alias`;
 blank lines and `# comments` are ignored) and the node grows one **auto-labelled `value_*` output
