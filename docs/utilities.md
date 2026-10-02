@@ -57,6 +57,17 @@ sampler sitting behind a closed gate never runs at all. Open, the node is a plai
 the lazy gate `Any Switch` above deliberately is not; reach for it to park a finished branch of a
 workflow for a run or two without bypassing a dozen nodes by hand. Category `Kinburg-Nodes/util`.
 
+**`Any Unplug`** is the other half of `Any Gate`, and its opposite: the link stays, the value
+does not travel down it. Unplugged, the node downstream still **runs** — it simply finds nothing
+in that one slot, exactly as it behaves with the input left unconnected, so an LLM keeps
+generating with the context wired through here switched off. `when_off` says what "nothing" is,
+since something has to arrive down a link that exists: **`nothing`** (`None`, what an
+unconnected optional input holds — right for images, models, conditioning, config bundles, and
+for text read as `(value or "")`, which is how the `context` input on the Settings node takes
+it), or **`empty text`** (`""`, for a node that strips or joins the string before checking it,
+where `None` would raise). The `input` is lazy here too, so an unplugged branch is never
+computed. Category `Kinburg-Nodes/util`.
+
 **`JSON Extract`** pulls fields out of a JSON string by path into separate `STRING` outputs. You
 write **one path per line** in the `paths` field (each line either a bare path or `path -> alias`;
 blank lines and `# comments` are ignored) and the node grows one **auto-labelled `value_*` output
