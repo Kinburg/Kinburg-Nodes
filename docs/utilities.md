@@ -9,7 +9,7 @@
 ## 🛠️ `util/` — General Workflow Utilities
 
 > **System Purpose & Overview**  
-> Essential general-purpose utility nodes: Date string, dynamic string concat, color picker, type converters, text transform, routing switches, and JSON extraction.
+> Essential general-purpose utility nodes: Date string, dynamic string concat, color picker, type converters, text transform, routing switches, JSON extraction, and a VAE loader at the precision you choose.
 
 **`Date String`** appends the current **date** (and optionally **time**) to a string, with
 selectable formats. Handy for building save paths: e.g. `project/2026-06-20` (a folder per
@@ -84,6 +84,37 @@ the whole document; an object/array value comes out as compact JSON, and prose-w
 tolerated (the first `{…}`/`[…]` is parsed). Missing paths return `default`. Up to 12 paths map to
 outputs (extras are noted in `report`). Pairs with the structured-output LLM nodes (e.g.
 `ideogram4_json`) to route sub-fields into different prompt inputs. Category `Kinburg-Nodes/util`.
+
+**`Load VAE (Precision)`** loads a VAE — a file from `models/vae`, or the VAE inside a checkpoint —
+at the precision you choose (`fp32` by default, `bf16`, `fp16`) instead of the one ComfyUI picks,
+which is fp16 on most cards. ComfyUI casts a VAE's weights as it loads it, so a VAE a loader already
+returned cannot be raised back; this node builds its own copy from the file's original weights. It is
+a separate VAE, so the checkpoint's VAE and every other decoder in the graph are left as they were.
+Wire it into the ordinary VAE Decode / VAE Decode Audio. In a checkpoint it finds the VAE under
+`vae.` (most current models, YuE2 among them), `first_stage_model.` (Stable Diffusion) or
+`pretransform.model.` (Stable Audio), reading a safetensors file key by key so a multi-gigabyte model
+does not load just to get at its VAE. Category `Kinburg-Nodes/model`.
+
+It exists for audio. YuE2's reference pipeline decodes its VAE in fp32, while on an RTX 4070 ComfyUI
+loads and decodes it in fp16. One real song, one latent decoded every way, the difference against fp32:
+
+| decoded in | whole mix | 4-12 kHz | above 12 kHz |
+|---|---|---|---|
+| fp16 (ComfyUI's pick) | -52 dB | -42 dB | -39 dB |
+| bf16 | -34 dB | -24 dB | -21 dB |
+
+fp16 stays below anything a measurement of the whole mix shows. bf16 does not: it dulls the top
+measurably (centroid 792 → 789 Hz, share above 4 kHz 4.0 → 3.9 %) and smears fine high detail you
+can see in a spectrogram. Avoid bf16 for an audio VAE.
+
+The decoder matters more than either. The VAE inside the YuE2 checkpoint (`yue2_3b_bf16.safetensors`)
+and `YuE2-legacy` share their encoder tensor for tensor and have entirely different decoders. On that
+song they matched in RMS and band balance — the energy in 5-10 kHz agreed within 0.4 dB at every
+percentile, loudest moments included — but not in their transients: the built-in one peaked 2 dB
+higher overall (+2.1 dBFS against +0.1), and at each of the eight strongest high-frequency events it
+peaked 1-6.6 dB above `YuE2-legacy` at the same moment. By ear that is sibilants overdone — «с» and «ц»
+come out sharp — where `YuE2-legacy` sounded softer and more natural. One song and one listener, so
+decode a latent both ways before settling on one.
 
 ---
 

@@ -90,6 +90,22 @@ check("six sounding notes, five attacks", len(N.pitches(line, "D#m")) == 6
 check("a rest is no attack", N.attacks('"D#m"z8|', "D#m") == 0)
 check("a folded rest is no attack", N.attacks("Z4|", "") == 0)
 
+# Across lines. The exporter puts at most four bars on a line, so a note held from one group into the
+# next ends one Vocal line with `d4-|` and opens the next with `d4` — still one syllable.
+held, rest = "a4b4c4d4-|", "d4e4f4g4|"
+check("a line read alone counts the far end of a held note as a syllable", N.attacks(rest) == 4)
+check("...and told it opens tied, it does not", N.attacks(rest, tied=True) == 3, N.attacks(rest, tied=True))
+check("the two lines then hold the syllables the voice sings",
+      N.attacks(held) + N.attacks(rest, tied=N.tied_out(held)) == N.attacks(held + rest), N.attacks(held + rest))
+check("a line that ends on a tie says so", N.tied_out(held) is True and N.tied_out(rest) is False)
+check("a rest after the tie breaks it", N.tied_out("a4b4c4d4-|z16|") is False)
+check("...so does a folded empty bar", N.tied_out("a4b4c4d4-|Z|") is False)
+check("a line that is nothing but the held note passes the tie on",
+      N.tied_out("d16-|", tied=True) is True and N.attacks("d16-|", tied=True) == 0)
+check("a line opening on a rest is not tied into, whatever came before",
+      N.attacks("z4d4e4f4|", tied=True) == 3 and N.attacks("Z|d4e4f4g4|", tied=True) == 4)
+check("the pitches are the same either way", N.pitches(rest) == [n.pitch for n in N.read_notes(rest, "", True)])
+
 
 # ------------------------------------------------------------------------------------ shifting
 check("an octave down is exactly twelve",

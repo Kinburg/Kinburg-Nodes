@@ -4,20 +4,19 @@ The node is thin on purpose. Everything worth arguing about lives next door, bes
 it: `notation` reads and edits the ABC, `bands` finds the two registers and moves a phrase between
 them, `rewrite` changes how many syllables a phrase holds, and `layout` decides which words go where.
 
-**It reads far more than it writes, and both switches that write are off by default.** The first
-version rewrote every phrase — moved each one toward its singer's register, cut each one to its
-line's syllables — and the songs came back sparse and sung by a single voice. What the measurements
-since have established is narrower and more useful than what was hoped for:
+**It reads far more than it writes.** The first version rewrote every phrase — moved each one toward
+its singer's register, cut each one to its line's syllables — and the songs came back sparse and sung
+by a single voice. What the measurements since have established is narrower and more useful than what
+was hoped for:
 
 * **How many singers a song has is decided in `style`, and nowhere else.** A style naming no voices
-  is sung by one singer from beginning to end however the plan is written. A style naming two
-  produces two — wherever the model cares to put them.
-* **Register correlates with which singer takes a phrase, but it is not a control.** Moving one
-  chorus down an octave did flip it to the other voice once, at a fixed seed. Nothing since has
-  reproduced that as a usable lever, and two plans measured five semitones apart came back one with
-  two voices and one with a single voice, differing only in their style.
-* **The markers in the lyrics are worth keeping.** They do not say who sings, but the model reads
-  them and takes the performance from them — belts, growls, strain. Stripping them flattens a take.
+  is sung by one singer from beginning to end however the plan is written.
+* **Where they sing follows the register once it agrees with the markers — with a LoRA on the text
+  encoder.** At one seed, a plan that contradicted its markers in five sections came back in a single
+  voice; the same plan with those five moved an octave was sung by exactly the singers marked. On the
+  base model the same correction turned one section of four: there, register is not a control.
+* **The markers in the lyrics are worth keeping.** The model takes the performance from them —
+  belts, growls, strain — and, with the LoRA, who sings where. Stripping them flattens a take.
 
 So what comes out:
 
@@ -25,15 +24,16 @@ So what comes out:
   landed on which section, what register each uses, which block got too few notes to be sung in full,
   which got none. That last one is the failure worth catching: a measured plan gave an eight-syllable
   outro no notes, and no setting on any node would have sung it.
-* **`abc`** — the plan, corrected only where `recast` is on and a section contradicts its marker,
-  and byte-for-byte identical everywhere else. With the defaults it is identical throughout.
+* **`abc`** — the plan with each section that contradicts its marker moved by whole octaves
+  (`recast`), and byte-for-byte identical everywhere else.
 * **`lyrics`** — the words, passed through as written unless `keep_markers` is off.
 
-**The honest limits.** Nothing here decides who sings; that argument is settled in the style string.
-Nothing here makes a badly-shaped plan good — a block the plan gave no notes needs another plan, not
+**The honest limits.** How many singers there are is settled in the style string, and without the
+LoRA so, mostly, is where they sing. Nothing here makes a badly-shaped plan good — a block the plan gave no notes needs another plan, not
 another setting. And the plan's LENGTH, which is where YuE2 most often disappoints, is not touched
 here at all: that is `Satyr Trim`.
 """
+import json
 import time
 
 from ..categories import CAT_SATYR
@@ -56,9 +56,9 @@ class KinburgSatyrScore:
             "required": {
                 "abc": ("STRING", {"forceInput": True, "tooltip": "The plan, from 'YuE2 Generate ABC' or pasted in by hand.\n\nIt is read, not trusted: the header gives the meter, unit and tempo, and everything below is indexed by section and phrase. Lines this node does not decide to change come back byte for byte, so a diff of a run shows the phrases that moved and nothing else."}),
                 "lyrics": ("STRING", {"forceInput": True, "tooltip": "The lyrics with '[Verse 1 - Keen Burg]' style markers — the same format Siren Score reads.\n\nThe section name comes FIRST, then the member's name. A bracketed line that NAMES a member inside a section starts an exchange from that point, and a line wholly in ROUND brackets is a backing vocal: it gets a phrase of its own in the OTHER singer's register, which is how the model writes one when it bothers to.\n\nWire the 'lyrics' OUTPUT of this node into YuE2. By default it is this text unchanged: the markers are worth keeping, because the model takes the performance from them."}),
-                "recast": ("BOOLEAN", {"default": False, "tooltip": "Correct a section whose register contradicts its marker. OFF by default, because register turned out not to be a control.\n\nThe experiment behind it is real: one chorus moved down an octave came back sung by the other singer, at a fixed seed. Every attempt to use that as a lever since has failed, and the style string is why. A style naming no voices is sung by one singer from beginning to end however the plan is written; a style naming two produces two, wherever the model cares to put them. Two plans measured five semitones apart, one sung by two voices and one by one — what differed was the style, not the plan.\n\nSo turning this on is an experiment, not a fix. It moves whole sections only, by whole octaves only, and takes the move back if it narrows the gap between the registers."}),
+                "recast": ("BOOLEAN", {"default": True, "tooltip": "Move each section whose register contradicts its marker by whole octaves, so the plan agrees with the lyrics. ON by default.\n\nWith a LoRA on the text encoder this is what decides who sings. At one seed, a plan that contradicted its markers in five sections came back in ONE voice; the same plan with those five moved was sung by exactly the singers marked, its melody, rhythm and arrangement unchanged. On the base model the same correction turned one section of four — register alone is not what it listens to.\n\nIt moves whole sections only, with the pickup each one opens on, and takes the move back if it narrows the gap between the registers."}),
                 "refit": ("BOOLEAN", {"default": False, "tooltip": "Cut each phrase to as many notes as its words have syllables. OFF by default, and the default is the recommendation.\n\nThe idea is sound — the plan's note count really is the syllable budget, a measured chorus of 47 syllables had been written 47 notes — but the edit is not. Removing a note conserves the bar it lives in, so it does not free time, it STRETCHES the notes that remain: a real run lost 96 notes, pushed the vocal line from 50% silence to 57%, and came back sounding like the singer was labouring through it.\n\nWhat the model itself does is sing a line at a natural rate and rest the remainder of the bar. Until this works the same way, leave it off and shorten the song by cutting bars instead. It is kept for the case where a phrase is far too short for its line and you would rather have the words than the rhythm."}),
-                "keep_markers": ("BOOLEAN", {"default": True, "tooltip": "Pass the lyrics to the 'lyrics' output exactly as written, markers and all. ON by default, because that is what sounded better.\n\nThey were being stripped on the reasoning that YuE2 has no field for a singer and its own guidance says to keep instructions out of the lyrics. Listening says otherwise: the model reads them and takes the PERFORMANCE from them — 'powerful belts', 'deep growl', 'vocal duel, intense emotional peak' come back as strain and intensity, and stripping them flattens the take. Who sings still comes from the style string, so the markers cost nothing.\n\nTurn it off if your lyrics carry stage directions in ROUND brackets: YuE2 reads those as a backing vocal and sings them aloud. Square brackets are safe either way."}),
+                "keep_markers": ("BOOLEAN", {"default": True, "tooltip": "Pass the lyrics to the 'lyrics' output exactly as written, markers and all. ON by default, because that is what sounded better.\n\nThey were being stripped on the reasoning that YuE2 has no field for a singer and its own guidance says to keep instructions out of the lyrics. Listening says otherwise: the model reads them and takes the PERFORMANCE from them — 'powerful belts', 'deep growl', 'vocal duel, intense emotional peak' come back as strain and intensity, and stripping them flattens the take. With a LoRA on the text encoder they also decide who sings where, once 'recast' has made the plan agree with them.\n\nTurn it off if your lyrics carry stage directions in ROUND brackets: YuE2 reads those as a backing vocal and sings them aloud. Square brackets are safe either way."}),
                 "verbose": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Print the report to the console. The same text is always on the 'report' output."}),
             },
             "optional": {
@@ -75,11 +75,12 @@ class KinburgSatyrScore:
                    "with them. It matches each lyric block to the section that carries it — by note "
                    "and syllable counts, because the model merges blocks and inserts wordless "
                    "sections, so pairing them in order gets nearly every one wrong — then says "
-                   "which block is short of notes and which will not be sung at all. Both editing "
-                   "switches are off by default: how many singers a song has is decided by the "
-                   "style string, not by anything in the plan, and cutting notes to fit the words "
-                   "stretches the ones that remain. Read the report before rendering; most of what "
-                   "goes wrong with a plan cannot be edited out, only caught early.")
+                   "which block is short of notes and which will not be sung at all. It also moves "
+                   "each section whose register contradicts its marker by an octave: with a LoRA on "
+                   "the text encoder, that is what brings every section back in the voice marked for "
+                   "it. Cutting notes to fit the words stays off, because it stretches the ones that "
+                   "remain. Read the report before rendering; most of what goes wrong with a plan "
+                   "cannot be edited out, only caught early.")
 
     def run(self, abc, lyrics, recast, refit, keep_markers=True, verbose=True, **kwargs):
         started = time.time()
@@ -217,7 +218,7 @@ class KinburgSatyrMusic:
             "required": {
                 "clip": ("CLIP", {"tooltip": "The YuE2 checkpoint's CLIP output — the same one 'YuE2 Generate Music' takes."}),
                 "style": ("STRING", {"multiline": True, "dynamic_prompts": True, "tooltip": "Language, genre, vocal character, tempo, instruments. One description for the whole song: YuE2 has no way to say that the style changes partway through.\n\nThis is the field 'cfg_scale' amplifies, so it is the field to be precise in. 'dual vocals, powerful melodic female vocal, gritty male vocal' is what puts two singers in the song at all — without it a plan written for two registers still tends to come back in one voice."}),
-                "lyrics": ("STRING", {"multiline": True, "dynamic_prompts": True, "tooltip": "The words, with plain '[Verse]' / '[Chorus]' tags and nothing else. Wire the 'lyrics' output of 'Satyr Score' here — YuE2 sings round brackets and has no field for a singer's name, so a marker left in the text is not ignored, it is sung.\n\nAmplified by 'cfg_scale' along with the style."}),
+                "lyrics": ("STRING", {"multiline": True, "dynamic_prompts": True, "tooltip": "The words. Wire the 'lyrics' output of 'Satyr Score' here: by default that is the text as written, square-bracket markers and all, and they are worth keeping — the model takes the performance from them. Round brackets are the exception: YuE2 sings whatever is inside them.\n\nAmplified by 'cfg_scale' along with the style."}),
                 "abc": ("STRING", {"default": "", "multiline": True, "tooltip": "The plan. Leave it empty and the node falls back to 'off' mode exactly as the core node does.\n\nNote that the ABC is NOT amplified by 'cfg_scale': it sits in both branches of the guidance and cancels out. Raising the scale therefore pushes the style and the words harder while leaving the plan's own authority where it was."}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
                 "mode": (["full", "melody"], {"tooltip": "full: the plan carries chords. melody: melody only, for covers. An empty 'abc' ignores this and uses 'off'."}),
@@ -337,12 +338,93 @@ class KinburgSatyrImport:
         return text, style, report, score.duration()
 
 
+def _plan_state(text):
+    """The editor's carrier: `{"edited": plan text, "upstream": the last plan that came in}`."""
+    try:
+        state = json.loads(text or "{}")
+    except ValueError:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+class KinburgSatyrEdit:
+    """A YuE2 plan → the plan as you left it in the piano-roll editor (✏ on the node)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "abc": ("STRING", {"forceInput": True, "lazy": True, "tooltip": "The plan to edit — from 'YuE2 Generate ABC', 'Satyr Trim' or 'Satyr Import'.\n\nRun the graph up to this node once and the plan is on the node for the editor to open. With 'use_edited' on this input is not evaluated at all, so whatever feeds it does not run — the same freeze as Show Text's saved text."}),
+                "use_edited": ("BOOLEAN", {"default": False, "label_on": "🔒 edited plan (upstream not run)", "label_off": "upstream plan", "tooltip": "Which plan goes out.\n\nOn: the one you saved in the editor, and the upstream is not run at all. Saving in the editor turns this on.\n\nOff: the plan from the 'abc' input, passed through. Your edit is kept on the node — turn this back on to use it again."}),
+                "plan_state": ("STRING", {"default": "", "tooltip": "The edited plan and the last plan that came in, kept by the editor. Not edited by hand."}),
+            },
+            "optional": {
+                "lyrics": ("STRING", {"forceInput": True, "tooltip": "The lyrics with '[Verse 1 - Keen Burg]' markers — the same text Satyr Score reads. Only for the editor: it shows which syllable each Vocal note sings, which singer each section is marked for, and how many notes each section has for its words. The plan going out is not changed by it.\n\nThe words are laid onto the plan exactly the way Satyr Score lays them, so the editor and that node's report agree."}),
+                "voice_1": (VOICE_TYPE, {"tooltip": "A band member — a Character Card's 'voice' output, the same cards Satyr Score takes. With two wired, the editor names the singer of each voice band and marks a section whose register contradicts its marker."}),
+                "voice_2": (VOICE_TYPE,),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "FLOAT")
+    RETURN_NAMES = ("abc", "report", "seconds")
+    FUNCTION = "run"
+    CATEGORY = CAT_SATYR
+    DESCRIPTION = ("Edit a YuE2 plan by hand in a piano roll — both voices, the chords, the bars and "
+                   "the sections — and hear it before YuE2 does. Run the graph up to this node, press "
+                   "✏ on it, change what you want and save: the edited plan goes out from then on and "
+                   "the upstream is not run again. Everything you did not touch is written back "
+                   "exactly as the model wrote it; what you did touch is written the way ComfyUI's "
+                   "own exporter writes plans, which is the text YuE2 learned from. The two voice "
+                   "bands are drawn and each phrase is coloured by its band — that shows who the "
+                   "model wrote it for, not a switch: how many singers a song has is decided by "
+                   "the style string.")
+
+    def check_lazy_status(self, abc=None, use_edited=False, plan_state="", **kwargs):
+        if use_edited and str(_plan_state(plan_state).get("edited") or "").strip():
+            return []
+        return ["abc"]
+
+    def run(self, abc=None, use_edited=False, plan_state="", lyrics=None, **voices):
+        # Core's SheetSage2 exporter, read at call time like Satyr Music's YuE2 constant, so a
+        # ComfyUI without it still loads the rest of this pack.
+        from . import edit as ED
+
+        state = _plan_state(plan_state)
+        edited = str(state.get("edited") or "")
+        if use_edited and edited.strip():
+            plan, source = edited, "edited plan — the upstream was not run"
+            if state.get("editedReport"):
+                source += f"\nlast save: {state['editedReport']}"
+        else:
+            if not str(abc or "").strip():
+                raise RuntimeError("[Satyr Edit] the 'abc' input is empty. Wire it from 'YuE2 Generate "
+                                   "ABC', 'Satyr Trim' or 'Satyr Import'.")
+            plan = abc
+            source = ("upstream plan — 'use_edited' is on, but nothing has been saved from the editor yet"
+                      if use_edited else "upstream plan")
+        score = N.parse(plan)
+        if not score.sections:
+            raise RuntimeError("[Satyr Edit] nothing in the plan reads as a YuE2 score.")
+        model = ED.load(plan)
+        summary = (f"{len(model['bars'])} bars = {int(model['seconds'] // 60)}:{model['seconds'] % 60:04.1f}"
+                   f" at {score.bpm} bpm, {score.meter[0]}/{score.meter[1]}, key {score.key}")
+        report = "\n".join([source, summary] + ["! " + p for p in N.problems(score)]
+                           + ["  " + w for w in model["warnings"]])
+        upstream = abc if abc is not None and str(abc).strip() else None
+        # The lyrics and the voices go to the editor with every run — wired or not, so unwiring them
+        # clears them there too.
+        ui = {"satyr_plan": [{"upstream": upstream, "summary": summary if upstream is not None else None,
+                              "lyrics": str(lyrics or ""), "voices": _voices_in_order(voices)}]}
+        return {"ui": ui, "result": (plan, report, model["seconds"])}
+
+
 NODE_CLASS_MAPPINGS = {
     "KinburgSatyrScore": KinburgSatyrScore,
     "KinburgSatyrRead": KinburgSatyrRead,
     "KinburgSatyrTrim": KinburgSatyrTrim,
     "KinburgSatyrMusic": KinburgSatyrMusic,
     "KinburgSatyrImport": KinburgSatyrImport,
+    "KinburgSatyrEdit": KinburgSatyrEdit,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KinburgSatyrScore": "Satyr Score (Plan → Plan) 🐐",
@@ -350,6 +432,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KinburgSatyrTrim": "Satyr Trim (Plan → Plan) 🐐",
     "KinburgSatyrMusic": "Satyr Music (Guided YuE2) 🐐",
     "KinburgSatyrImport": "Satyr Import (MIDI → Plan) 🐐",
+    "KinburgSatyrEdit": "Satyr Edit (Plan → Plan) 🐐",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

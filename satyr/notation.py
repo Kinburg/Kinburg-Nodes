@@ -18,7 +18,8 @@ code review. An octave shift is a letter-case change and cannot change a pitch c
 
 **A tie is one syllable.** `attacks()` counts note onsets, not note glyphs: `d2-d2` is one sung
 syllable held across a barline, and counting it twice is how a phrase silently acquires a syllable
-that the singer then has to steal from the next line.
+that the singer then has to steal from the next line. That holds across LINES too — a note held from
+one group into the next — but a line read alone cannot know it opens on one, so `tied` tells it.
 
 Two invariants of the format are worth knowing before editing anything. Both voices carry the same
 number of bars in every group — `Z4` against four written bars is the normal way that is spelled —
@@ -103,16 +104,31 @@ class Note:
         return f"<rest {self.units}>" if self.rest else f"<{self.pitch} {self.units}{'-' if self.tie_out else ''}>"
 
 
-def read_notes(line, key=""):
+def read_notes(line, key="", tied=False):
     """One music line → its notes and rests, in order, with MIDI pitches.
 
     Accidentals propagate the way YuE2's own exporter writes them: by LETTER across octaves, reset at
     every barline. That differs from some ABC readers, which scope an accidental to one octave, and
     getting it wrong would move a note by a semitone — harmless for banding, but this is also what
     the linter reports, so it should be right.
+
+    `tied` says the line opens on the far end of a tie from the line before it. The exporter puts at
+    most four bars on a line, so a note held from one group into the next is `d4-|` at the end of one
+    Vocal line and `d4` at the start of the next — one syllable, which a line read on its own counts
+    twice. `tied_out` says what the next line's `tied` is.
     """
+    return _read(line, key, tied)[0]
+
+
+def tied_out(line, tied=False):
+    """Does this line end on a tie into the next one? Pass it on as the next line's `tied`."""
+    return _read(line, "", tied)[1]
+
+
+def _read(line, key, tied):
+    """`read_notes`, and whether a tie is still pending when the line ends."""
     signature = key_accidentals(key)
-    notes, tie_pending = [], False
+    notes, tie_pending = [], bool(tied)
     for measure in split_measures(line):
         bar = {}
         full = FULL_REST.match(measure.strip())
@@ -140,12 +156,13 @@ def read_notes(line, key=""):
                      + 12 * octaves.count("'") - 12 * octaves.count(",") + offset)
             notes.append(Note(pitch, units, tie_out, tie_pending, False))
             tie_pending = tie_out
-    return notes
+    return notes, tie_pending
 
 
-def attacks(line, key=""):
-    """How many syllables this line can carry: onsets only, ties counted once."""
-    return sum(1 for n in read_notes(line, key) if not n.rest and not n.tie_in)
+def attacks(line, key="", tied=False):
+    """How many syllables this line can carry: onsets only, ties counted once — a note carried in
+    from the line before (`tied`) included."""
+    return sum(1 for n in read_notes(line, key, tied) if not n.rest and not n.tie_in)
 
 
 def pitches(line, key=""):

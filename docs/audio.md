@@ -444,8 +444,8 @@ seconds and leave the check to you.
 
 > **System Purpose & Overview**
 > Reads a YuE2 plan against the lyrics and says what it will and will not sing, before a render is
-> spent on it — and corrects the one thing an edit can safely correct. Reading a plan (Satyr Read)
-> and checking one against the words (Satyr Score).
+> spent on it — and corrects the one thing an edit can safely correct. Reading a plan (Satyr Read),
+> checking one against the words (Satyr Score), and changing one by hand in a piano roll (Satyr Edit).
 
 YuE2 composes before it performs: it writes an ABC score — a vocal melody, an instrumental melody,
 chord symbols, section labels — and then renders that score into audio. The score is an ordinary
@@ -454,9 +454,9 @@ piece of YuE2's conditioning that can be edited by hand. It is also the only con
 a **time axis**: `M:` and `L:` and `Q:` make a bar's length arithmetic, so a plan states the song's
 duration rather than wishing for it. `style` and `lyrics` are one flat blob each for the whole track.
 
-**Who sings is decided in `style`, and the plan does not get a say.** This is the conclusion of a
-long and mostly negative investigation, and it is worth stating first because it is what the suite
-turned out not to be able to do.
+**How many singers a song has is decided in `style`; where they sing, with a LoRA on the text
+encoder, by a plan whose registers agree with the lyrics' markers.** It took a long and mostly
+negative investigation to get there, and the base model still gives the plan little say.
 
 There is no field for a voice — no reference singer, no per-section timbre — and the ABC has exactly
 two hardcoded voices, `Vocal` and `Ins`. Asked in `style` for two singers, the model writes both into
@@ -464,15 +464,20 @@ the one monophonic `Vocal` line as two **pitch bands**, and which band a phrase 
 which singer took it, in every song measured. Moving one chorus down an octave flipped it from the
 woman to the man once, at a fixed seed, with the untouched chorus staying female — a clean result.
 
-It has never reproduced as a lever. A style naming no voices is sung by one singer from beginning to
-end however the plan is written; a style naming two produces two, placed where the model likes. Two
-plans of the same song measured five semitones apart: one came back with two voices, one with a
-single voice, and what differed was the style string. An earlier version of this page claimed a gap
-below about eight semitones meant one singer. A third measurement killed that, and it is retracted.
+On the base model it never reproduced as a lever. A style naming no voices is sung by one singer from
+beginning to end however the plan is written; a style naming two produces two, placed where the model
+likes. Two plans of the same song measured five semitones apart: one came back with two voices, one
+with a single voice, and what differed was the style string. An earlier version of this page claimed a
+gap below about eight semitones meant one singer. A third measurement killed that, and it is retracted.
 
-So the register is a **correlate worth reading and a control worth not promising**. `Satyr Read`
-reports it because it says accurately what a plan is going to do; `recast` can move a section that
-contradicts its marker, and is off by default.
+**With a LoRA on the text encoder it works** — a YuE2 genre LoRA at strength 2.0 on the CLIP, with
+`cfg_scale` 2.0 — measured at one seed with nothing else changed. YuE2
+had placed its registers by habit, verses low and choruses high, against the markers in five sections
+of nine, and that plan came back in one voice. With those five moved an octave, the same song was
+sung by exactly the singers marked, its melody, rhythm and arrangement unchanged. Without the LoRA,
+of the four sections marked for the woman only the one `recast` had moved came back in her voice,
+and it sat no higher than the three that did not — so on the base model the register is still a
+correlate, not a control.
 
 ### `Satyr Read (Plan → Map) 🐐`
 
@@ -480,6 +485,13 @@ Reads a plan and changes nothing. Prints the meter, tempo, bar length and total 
 plan holds one voice or two and where the two registers sit; and then every phrase with its timing,
 its bar count, its syllable budget and the voice that takes it. `seconds` is the plan's own duration,
 which the model performs a few per cent faster than.
+
+A syllable budget counts note onsets, so a held note is one syllable however it is tied — including a
+note held from one group into the next, which the exporter writes as `d4-|` at the end of one line
+and `d4` at the start of the next. That is the earlier phrase's syllable. Read line by line it was
+counted again at the start of the later phrase, one too many at every such boundary, and `Satyr
+Score` matched the lyrics against those inflated counts — with `refit` on, it took a note out of a
+section that already held exactly its words.
 
 Note the distinction it draws between a band's notes and its seats. The note ranges of the two bands
 **overlap**: a phrase belonging to the man as a whole still reaches up into the woman's notes for a
@@ -501,21 +513,31 @@ section, and everything downstream is then applied to the wrong text. `align` ma
 counts instead, which works because the model writes about one note per syllable: 1.03 measured over
 a whole song, and exactly 47/47 and 39/39 on individual sections.
 
+**A section's words start at its pickup, not its barline.** YuE2 writes an upbeat the way any song has
+one: a chorus opening «Ми не-втом-ні!» was planned as three quick notes in the last beat of the
+section before, «ні» on the downbeat, then a breath. Counted by barline, that song's two choruses and
+its outro each came out three notes short and the sections before them three over; counted from the
+pickup, all three were exact. So a run of notes in the last bar of a section, after at least a beat of
+rest, that carries straight on into the next section's first note counts for the next section — in
+the matching, the report, and both edits: `refit` leaves a pickup exactly as written, and `recast`
+moves one with the section it opens.
+
 What the report then tells you, before a render is spent:
 
 - **which block landed where**, so a merge or a dropped section is visible rather than surprising;
 - **a block the plan cannot sing in full** — a bridge given 17 notes for 39 syllables loses well over
   half its words;
 - **a block the plan will not sing at all** — a measured plan gave an 8-syllable outro no notes;
-- **which register each section uses**, which tracks who sings it without deciding it;
+- **which register each section uses** — with the LoRA, what decides who sings it once it agrees
+  with the marker;
 - **a section whose register contradicts its marker**, which is the case `recast` can act on.
 
-**`recast` is off by default.** When it is on, only a section that disagrees with its marker moves,
-and it moves whole; a move that narrows the gap between the registers is taken back. On one measured
-plan every section already sat where its marker asked — verses low for the man, choruses high for the
-woman — and the right number of edits was zero. Moving phrases individually toward a band centre,
-which the first version did, smeared the two clusters together and made things worse. Treat turning
-it on as an experiment: the register is not what decides the singer.
+**`recast` is on by default.** Only a section that disagrees with its marker moves, and it moves
+whole, by octaves, with its pickup; a move that narrows the gap between the registers is taken back.
+Moving phrases individually toward a band centre, which the first version did, smeared the two
+clusters together and made things worse. With a LoRA on the text encoder this is the edit that put
+every section with its singer above; on the base model expect little from it. The report's first
+line gives the registers as sent, after the move; its finding gives the gap the plan came with.
 
 **`refit` is off by default, and the default is the recommendation.** The idea is sound — the plan's
 note count really is the syllable budget — but the edit is not. Removing a note conserves the bar it
@@ -527,8 +549,8 @@ The **`lyrics` output passes the text through as written**, and that default is 
 markers were being stripped, on the reasoning that YuE2 has no field for a singer and its own guidance
 says to keep instructions out of the lyrics. Listening says otherwise: the model reads them and takes
 the **performance** from them — `powerful belts`, `deep growl`, `vocal duel, intense emotional peak`
-come back as strain and intensity, and a stripped lyric gives a flatter take. What the markers never
-did was decide who sings.
+come back as strain and intensity, and a stripped lyric gives a flatter take. On their own the markers
+never decided who sings; with the LoRA, a plan that agrees with them does.
 
 `keep_markers` off still strips them, for the one case that needs it: a stage direction in ROUND
 brackets — `(distorted bass, atmospheric guitar)` — which YuE2 reads as a backing vocal and sings
@@ -650,6 +672,127 @@ and that report says exactly which section is short. For a cover of something th
 core's `SheetSage2 Audio to ABC` does the same job from audio — the two are complementary, one for
 what you wrote and one for what you have.
 
+### `Satyr Edit (Plan → Plan) 🐐`
+
+A plan, edited by hand in a piano roll — no notation, blocks on a grid. Run the graph up to the node
+once, press **✏ Open the editor** on it, and the plan opens full-screen: both voices (`Vocal` orange
+and pink, `Ins` teal), the section lane, the bar ruler with the time and any key change, and the
+chord lane. **Space** plays from the cursor with plain tones — a triangle for the voice, a filtered
+saw for `Ins`, a quiet pad for the chords; nothing is downloaded — and a click in the ruler moves the
+cursor. The wheel scrolls, Shift+wheel scrolls sideways, Ctrl+wheel zooms, and the strip at the bottom
+is the whole song with the visible part framed; click it to jump.
+
+**Editing** — every edit is one step of **undo** (Ctrl+Z / Ctrl+Y).
+
+**🔒 Vocal rhythm** is on when the editor opens: sung notes go up and down, nothing else. YuE2 wrote
+that rhythm for the words' stresses, and on a real render every sung note added, removed or split
+moved the pauses inside the lines — the words came out phrased as if they were written differently.
+So an edit that would change the Vocal rhythm is refused, and the status line says why; whole bars may
+still come and go, and `Ins` moves freely. Unlock it to change the rhythm anyway.
+
+- **Notes.** Click to select (Shift adds), drag across empty space to select a box, Ctrl+A for all.
+  Drag a note up or down by semitones; the arrows nudge (Shift+↑/↓ an octave). With the rhythm
+  unlocked a note also drags sideways on the grid or stretches by its end, ←/→ nudge it, Del or a
+  right-click deletes, a double-click on empty space draws a note into the voice set in **Draw into**,
+  on the **Grid** (1/16 … a bar), and a double-click on a note **joins** it to the note right before it
+  — one syllable carried onto a new pitch — or splits it off again. A voice sings one note at a time,
+  so a note dropped on others cuts them back rather than overlapping them. **Ctrl+C / Ctrl+V** copy
+  notes: pick a phrase, copy it, click the ruler where it should go and paste — voices and pitches as
+  they were, cutting back what it lands on.
+- **Bars.** Drag along the ruler to pick bars, then **Delete** them (both voices, all chords — the
+  way to shorten an interlude by hand), **Duplicate** them, or **Insert** as many empty ones before.
+- **Sections.** Click one in the section lane to rename it (YuE2's own vocabulary), duplicate it,
+  delete it or move it one place earlier or later.
+- **Transpose** ±1 / ±12 moves whatever is selected: picked notes alone; picked bars or a section
+  with their chords and key — a modulation, with the old key back right after it; or, with nothing
+  picked, the whole song, its key and every chord, respelled the way SheetSage2 spells that key.
+- **Chords.** Double-click the chord lane to type one from that beat (empty: no chord from there);
+  right-click one to remove it. **♩=** sets the tempo.
+- Hide a voice with its toggle and it can neither be played nor touched.
+
+**The words.** Wire the same `lyrics` — and `voice_1` / `voice_2` — that go into Satyr Score, and the
+editor shows which syllable each `Vocal` note sings: on the note itself where it fits, and in the
+lyrics lane under the chords (zoomed out, each line is written from its first note).
+
+**The lyric goes onto the whole song, and the sections follow the words.** That is how YuE2 sang on a
+real render, where the plan's own labels would have misled: it had written the intro's lines into the
+first bars it labelled `verse`, sung the first pre-chorus over a long break with no notes, a bridge
+over an interlude with no notes at all, and a chorus of 52 syllables whole before that interlude. So
+the editor lays the lyric line after line onto the song's phrases — and onto its silences of two
+bars or more, where the model sings over the music — in the runs whose counts agree best: a line
+broken by a breath spans two phrases, two short lines share one. Inside a run a syllable goes on each
+note, the last held over any notes left (drawn **~**), or several on the longer notes when there are
+too few. Measured against that render, the first lines landed within half a second of where the
+model sang them. A word with no vowel, like «в», is sung with the next word and shown on its first
+syllable.
+
+The section lane then has two rows. On top, the song's sections **by its words** — each lyric block
+from where its words begin, with who it is marked for and its notes against its syllables (amber when
+far apart, red when its notes sit in the other singer's band, ⚠); click one to pick its notes. Under
+it, thin, the plan's own sections as YuE2 labelled them — click one to rename, move, duplicate or
+delete it, or to pin what it sings. **Sings:** is for where the counts cannot tell: the notes before a
+last chorus that could carry the end of a bridge, or the chorus's first words — pin the interlude to
+the bridge and they are the chorus's. A section pinned to a block sings that block and no other;
+pinned to nothing, it sings nothing. Pinned sections show 📌. The pins are the editor's: the saved
+plan carries none.
+
+**Who sings where.** The singers lane, over the lyrics lane, lays the lyric's runs — the lines one
+voice sings in a row, or one bracketed backing line — where they are sung, in the colour of the band
+the lyrics' singer belongs in, and outlines in red a run whose notes sit in the other singer's band.
+Click a run to pick its notes; **+12 / −12** then hands them to the other voice, and the rhythm stays
+exactly as the model wrote it.
+
+**The lyric sheet.** **Lyrics** shows the whole lyric beside the plan, as written, markers and all; drag
+its edge to make it wider or narrower (the width is kept) — it never covers the plan. The lines whose
+notes are on screen are lit, the line at the cursor brighter; click a line to go to it and pick its
+notes.
+
+**Why the rhythm is locked, measured.** An earlier version read the plan as one syllable per note
+straight through the song, saw the words drift, and added notes until every section had a note per
+syllable. The render was worse for it: the notes invented for the intro came out as fragments, and
+the added and split notes moved the pauses inside the lines. The model had sung its words where
+they fit all along; it writes a plan's rhythm for its lines, and notes added by hand only get in the
+way.
+
+The band line names the singer each band belongs to. Hovering a note says what it sings, in which
+line; **dragging across the lyrics lane picks the notes that sing those words** — then Transpose
+moves exactly those. **ⓘ** lists what Satyr Score would report. The
+words follow the notes while you drag them and are laid on afresh after every edit; the plan going
+out is not changed by them. The lyrics and voices are kept on the node, so a frozen run still shows
+them.
+
+**💾 Save** writes the plan back to the node and turns `use_edited` on. What the save kept and what it
+re-rendered is shown in the editor, on the node, in its `report` and in the console. From then on the node sends the
+edited plan and does not evaluate `abc` at all, so whatever feeds it — `YuE2 Generate ABC`, an LLM —
+does not run again: the same freeze as Show Text's saved text. Turn `use_edited` off and the upstream
+plan passes through again; the edit stays on the node until **discard the edit**. The editor always
+opens on what the node sends: the edit while `use_edited` is on, the upstream plan otherwise. The
+upstream plan is kept in the workflow (`plan_state`), so a reload does not force a re-run to open it.
+
+**What you did not touch comes back as the text it was.** A group — one span both voices carry at
+once — whose bars, notes, chords, key and meter are all unchanged, in the same context, is written
+back as its original lines, byte for byte, so a diff of a save shows the bars you changed and nothing
+else. Saved without an edit, a plan comes back identical, line ends included. **What you did touch is
+written the way ComfyUI's own SheetSage2 exporter writes plans** — at most four bars a group, the chord
+restated at every barline, key-relative spelling (`^^F` rather than `=G` in D# minor), long notes split
+into lengths the format has and tied, empty bars folded to `Z` — because that is the text YuE2 learned
+from. Forcing every bar of an exporter-written plan through this writer reproduces the exporter's
+text byte for byte; the suite checks exactly that, key changes inside a bar included.
+
+**A note is one sung event, however it is spelled**, which is what the syllable budget needs. A note
+held across a barline, or from one group into the next, is one note and one syllable; the editor shows
+it as one block, and the writer splits and ties it again. A tie onto a different pitch — one syllable
+carried onto a new note — is kept as such and marked on the block.
+
+**The band line.** When a plan has two voice bands the line between them is drawn dashed and every
+`Vocal` phrase is coloured by the side its median sits on — pink above, orange below. It shows who
+the model wrote each phrase for, which is the useful reading; it is not a switch. Moving a phrase
+across it flipped the singer once at a fixed seed and has not worked as a lever since — how many
+singers a song has is settled by the style string.
+
+`report` says which plan went out and its length, key and tempo, with anything structurally wrong;
+`seconds` is its duration, for `Empty YuE2 Latent Audio`.
+
 ### `Satyr Music (Guided YuE2) 🐐`
 
 A drop-in replacement for `YuE2 Generate Music` that exposes **`cfg_scale`**, and that is the whole
@@ -699,11 +842,21 @@ the mid channel through the model and carries side through untouched, so only wh
 above the roll-off is centred. (`sum to mono` is still there to A/B against. Never run L and R
 separately: two independent diffusion passes decorrelate and the invented top comes out phasey.)
 
-**`match_level`** puts the output's energy *below 10 kHz* back where the input's was — not an overall
-match, since the model genuinely adds energy up top and matching totals would turn the track down to
-pay for it. Below the roll-off the model measured transparent (-0.4 dB at 8-12 kHz), so drift there is
-drift: on the same take it was -1.2 dB at 0-4 kHz and -1.7 dB at 4-8 kHz, which reads as the mix
-losing body.
+**The input is kept below a crossover, the model is used only above it.** `crossover = auto` measures
+where the input's spectrum ends (the highest frequency within 60 dB of its 1-4 kHz level, as a median
+over frames so a hard start out of silence cannot fake a wide band) and splits 1 kHz below that:
+`LP(input) + (model − LP(model))` with one linear-phase Kaiser filter and its exact complement. The
+join has no hole, no bump and no delay, and everything under it is the input's own audio — the model
+cannot touch the body of the mix. On an AceStep mix that puts the split at about 11 kHz. `manual` takes
+`crossover_khz`; `off` is the old behaviour, the model's output everywhere. The report prints where
+the input and the output end. The idea of a complementary crossover comes from *Refine* in Johannes
+Plenio's [Plenio Music Production System](https://github.com/jplenio/Plenio-Music-Production-System);
+the implementation here is our own.
+
+**`match_level`** (only with the crossover off) puts the output's energy *below 10 kHz* back where the
+input's was. That is what the crossover replaced: on the same take the model drifted -1.2 dB at
+0-4 kHz and -1.7 dB at 4-8 kHz, which reads as the mix losing body — a level fix corrects the dB but
+not the content the model rewrote down there.
 
 What the model actually does, measured on that take (Raw → SR, energy per band):
 `8-12 kHz -0.4 dB` · `12-16 kHz +3.3 dB` · `16-20 kHz **+30.6 dB**` · `20-24 kHz **+55.9 dB**`. So it
@@ -753,10 +906,10 @@ loads.
 
 ---
 
-## 💾 `save_song/` — Save Song & Song Tags
+## 💾 `save_song/` — Save Song, Song Tags & Remaster
 
 > **System Purpose & Overview**  
-> Save generated audio tracks with metadata and artwork integration.
+> Bring a finished track to a loudness target, then save it with metadata and artwork integration.
 
 **`Save Song`** saves an **`audio`** clip (required) as a song, with an optional **`image`**
 cover and optional **`lyrics`** text (an input socket — wire a STRING in). The **`quality`** dropdown picks the audio format and
@@ -800,6 +953,32 @@ were verified by writing files and reading them back with ffmpeg — cover byte-
 
 One trap that is invisible until the tags go missing: **FLAC keeps its comments on the container,
 Opus on the stream**. Set Opus's on the container and they vanish with no error at all.
+
+**`Remaster (Loudness) 🎚️`** goes before Save Song (after Audio SR, if you use it) and brings a finished
+take to a loudness target — **-14 LUFS** by default, what Spotify and YouTube normalise to — with its
+**true peaks** held under a ceiling of **-1 dBTP**. Neither music model masters what it writes, so
+without it every song is saved at whatever level it came out at. There is no compressor, on purpose:
+the takes arrive already mixed. Outputs the `audio` and a `report`. Category `Kinburg-Nodes/audio`.
+
+- **Loudness** is BS.1770-4 integrated loudness, torchaudio's implementation. The report also gives
+  the **loudness range** (EBU Tech 3342, from 3 s short-term loudness on the same K-weighting) before
+  and after, which shows how much of the song's dynamics the limiter took.
+- **True peak** is read from the signal oversampled four times (twice from 96 kHz up). A waveform
+  swings higher between samples than at them, and an MP3 or Opus encoder reproduces that swing, so the
+  ceiling holds the true peak rather than the sample values; -1 leaves room for the encoder.
+- **The limiter sees the whole song at once.** What every sample needs is known in advance, so the
+  gain comes down over the 5 ms before a peak instead of clipping its front edge, recovers at 40 dB a
+  second after it, and is one gain for both channels, so the stereo image stays put. Limiting takes a
+  little loudness off, so the gain is nudged up and the limiter rerun until the target is met.
+- **`max_limiting`** (6 dB) caps how much the limiter may take off a peak. A dynamic take can need far
+  more to reach -14; then the node stops at the loudest level the cap allows, and the report says how
+  far short it fell and what the target would have needed. `0` makes it a plain true-peak normaliser.
+
+A loud take is turned down the same way. Silence, or a clip shorter than one 0.4 s gating block,
+passes through unchanged. Five minutes of stereo at 48 kHz takes about five seconds on the CPU. The
+idea of a mastering step that stops short instead of squashing comes from Johannes Plenio's
+[Plenio Music Production System](https://github.com/jplenio/Plenio-Music-Production-System); the
+implementation here is our own.
 
 ---
 

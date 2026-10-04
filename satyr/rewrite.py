@@ -91,9 +91,10 @@ def _onsets(tokens, tied_in=False):
     return out, tied
 
 
-def _scan(grids):
-    """Per-measure onset indices for a whole line, threading ties across the barlines."""
-    out, tied = [], False
+def _scan(grids, tied=False):
+    """Per-measure onset indices for a whole line, threading ties across the barlines — and in from
+    the line before, when `tied` says the line opens on the far end of one."""
+    out = []
     for g in grids:
         if g is None:
             out.append([])
@@ -104,9 +105,9 @@ def _scan(grids):
     return out
 
 
-def _tie_state(grids):
-    """Whether each measure is tied into from the one before it."""
-    out, tied = [], False
+def _tie_state(grids, tied=False):
+    """Whether each measure is tied into from the one before it (the first: from the line before)."""
+    out = []
     for g in grids:
         out.append(tied)
         if g is None:
@@ -218,7 +219,7 @@ def _drop_one(tokens, tied_in=False):
     return False
 
 
-def refit(line, want):
+def refit(line, want, tied=False, keep=0):
     """Rewrite one music line to carry `want` syllables. Returns (line, reached, cost).
 
     `reached` is what the line actually holds afterwards, which is the answer when the target was
@@ -226,21 +227,27 @@ def refit(line, want):
     a bar that does not scan. `cost` counts the three operations separately, because they do not cost
     the same: a `split` repeats a note the phrase already had and takes nothing away, a `merged`
     gives up one pitch, and a `dropped` gives up a note entirely.
+
+    `tied` says the line opens on the far end of a note held over from the line before. That note is
+    the earlier line's syllable, so it is neither counted here nor touched.
+
+    `keep` is how many bars at the end of the line stay exactly as written — still counted in `want`
+    and `reached`, never rewritten. A pickup into the next section lives there.
     """
     cost = {"split": 0, "merged": 0, "dropped": 0}
     measures = N.split_measures(line)
     if not measures or want < 0:
-        return line, N.attacks(line), cost
+        return line, N.attacks(line, tied=tied), cost
     grids = [None if N.FULL_REST.match(m.strip()) else _tokens(m) for m in measures]
-    have = sum(len(c) for c in _scan(grids))
+    have = sum(len(c) for c in _scan(grids, tied))
     if have == want or all(g is None for g in grids):
         return line, have, cost
 
     # Work on whichever measure is currently densest (to thin) or sparsest (to fill), so the change
     # is spread over the phrase instead of mangling one bar.
     while have != want:
-        counts = _scan(grids)
-        live = [i for i, g in enumerate(grids) if g is not None]
+        counts = _scan(grids, tied)
+        live = [i for i, g in enumerate(grids) if g is not None and i < len(grids) - keep]
         if not live:
             break
         filling = have < want
@@ -251,12 +258,12 @@ def refit(line, want):
         else:
             # A measure's first note may be the far end of a tie, so whether it can start a merge
             # depends on what the measure before it did.
-            ties = _tie_state(grids)
+            ties = _tie_state(grids, tied)
             moved = next((True for i in live if _merge_one(grids[i], ties[i])), False)
             if moved:
                 cost["merged"] += 1
             else:
-                ties = _tie_state(grids)
+                ties = _tie_state(grids, tied)
                 moved = next((True for i in live if _drop_one(grids[i], ties[i])), False)
                 cost["dropped"] += 1 if moved else 0
         if not moved:

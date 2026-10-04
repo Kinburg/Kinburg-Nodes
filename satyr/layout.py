@@ -14,14 +14,13 @@ hypothetical; it is what this module did, and the songs came back sparse and sun
 `align` matches them by their counts instead, which is possible because the model writes about one
 note per syllable (1.03 measured over a whole song, and exactly 47/47 and 39/39 on single sections).
 
-**Register is a correlate, not a control, and `recast` is off by default because of it.** Moving one
-chorus down an octave did flip it from the woman to the man once, at a fixed seed, and that
-experiment stands. But every attempt since to use it as a lever has failed, and the reason turned up
-in the style string: a song whose style names no voices is sung by one singer start to finish however
-the plan is written, and a style naming two produces two wherever the model cares to put them. Two
-plans measured five semitones apart, one sung by two voices and one by one — the style differed, the
-plans did not. So `recast` still corrects a section that contradicts its marker and still takes the
-move back if it narrows the gap, but it should not be expected to decide who sings.
+**Register decides who sings once it agrees with the markers — with a LoRA on the text encoder.**
+At one seed, a plan whose sections contradicted their markers in five places came back in a single
+voice, and the same plan with those five moved an octave was sung by exactly the singers marked, its
+melody, rhythm and arrangement unchanged. That is why `recast` is on by default. On the base model it
+is not a control: a song whose style names no voices is sung by one singer however the plan is
+written, and the same correction turned one section of four, sitting no higher than the three that
+did not turn. That was the September verdict, and on the base model it still holds.
 
 **The most useful thing this produces is not an edit but a verdict.** `_findings` says, before a
 render is spent, whether the plan has two separated registers at all, which lyric block landed where,
@@ -35,6 +34,8 @@ half takes the upper band. An absolute rule does not survive a real roster: "mal
 right beside a soprano and wrong beside a bass, and the same tenor has to come out on either side
 depending on who else is singing.
 """
+from fractions import Fraction
+
 from ..siren.cast import _gender_of
 from ..siren.score import _PARENS, _split_sections
 from ..siren.score import _syllables as syllables
@@ -137,8 +138,9 @@ def strip_markers(blocks):
     belts]`, `[Burg - deep growl]`, `vocal duel, intense emotional peak` turn into strain and
     intensity in the take, and stripping them removes that while giving nothing back.
 
-    What the markers do NOT decide is who sings. That comes from the style string, so they cost
-    nothing to leave in.
+    On their own the markers do not decide who sings: how many singers there are comes from the
+    style string, and where they sing follows a plan that agrees with the markers, with a LoRA on the
+    text encoder. So they cost nothing to leave in.
 
     Kept for the one case that still wants it: a lyric carrying stage directions in ROUND brackets,
     which YuE2 reads as a backing vocal and will sing aloud. Square-bracket markers are safe.
@@ -306,6 +308,130 @@ def allot(total, weights, floor=0):
     return [floor + p for p in parts]
 
 
+class Pickup:
+    """The notes a section ends on that open the NEXT section's words: how many syllables they sing,
+    and the phrase whose last bar they close."""
+
+    __slots__ = ("onsets", "phrase")
+
+    def __init__(self, onsets, phrase):
+        self.onsets, self.phrase = onsets, phrase
+
+    def __repr__(self):
+        return f"<Pickup {self.onsets} on line {self.phrase.line}>"
+
+
+def _beat(score):
+    """`L:` units in one beat of the meter: a quarter in 4/4, an eighth in 6/8."""
+    return max(1, round(Fraction(1, score.meter[1]) / score.unit))
+
+
+def _lead(line, tied):
+    """Rest before a line's first note, in `L:` units; 0 when it opens on a held note, None when a whole
+    bar of rest comes first or no note comes at all."""
+    if tied:
+        return 0
+    total = 0
+    for measure in N.split_measures(line):
+        if N.FULL_REST.match(measure.strip()):
+            return None
+        for m in N.ELEMENT.finditer(measure):
+            if m.group("letter") == "z":
+                total += int(m.group("units") or 1)
+            elif m.group("letter"):
+                return total
+    return None
+
+
+def _tail(line, tied, beat):
+    """The run of notes a line ends on, when all of it sits in the line's last bar after a breath of at
+    least a beat: (syllables it holds, where it starts in the text, rest after it). None otherwise.
+
+    A run reaching back over the barline is the end of a longer phrase, not a pickup — and so is one
+    whose breath cannot be seen because the bar before it is on another line.
+    """
+    cut = line.rstrip().rstrip("|").rfind("|") + 1
+    if not cut:
+        return None
+    tie, els = N.tied_out(line[:cut], tied), []
+    for m in N.ELEMENT.finditer(line, cut):
+        if m.group("letter") == "z":
+            els.append((None, int(m.group("units") or 1), m.start()))
+            tie = False
+        elif m.group("letter"):
+            els.append((tie, int(m.group("units") or 1), m.start()))
+            tie = bool(m.group("tie"))
+    notes = [i for i, (held, _, _) in enumerate(els) if held is not None]
+    if not notes:
+        return None
+    gap, first = 0, notes[-1]
+    for i in range(notes[-1], -1, -1):
+        held, units, _ = els[i]
+        if held is None:
+            gap += units
+        elif gap >= beat:
+            break
+        else:
+            gap, first = 0, i
+    else:
+        # The run opens the bar, so its breath is whatever rest the bar before ends on.
+        if els[first][0]:
+            return None
+        before = N.split_measures(line[:cut])
+        if gap < beat and not (before and N.FULL_REST.match(before[-1].strip())):
+            trail = 0
+            for m in N.ELEMENT.finditer(before[-1] if before else ""):
+                if m.group("letter") == "z":
+                    trail += int(m.group("units") or 1)
+                elif m.group("letter"):
+                    trail = 0
+            if gap + trail < beat:
+                return None
+    run = els[first:notes[-1] + 1]
+    return (sum(1 for held, _, _ in run if held is False), els[first][2],
+            sum(units for _, units, _ in els[notes[-1] + 1:]))
+
+
+def _pickup(score, here, there, beat):
+    """The pickup between two neighbouring sections' Vocal phrases, or None."""
+    if not here or not there or here[-1].silent or there[0].silent:
+        return None
+    tail = _tail(score.lines[here[-1].line], here[-1].tied, beat)
+    lead = _lead(score.lines[there[0].line], there[0].tied)
+    if tail is None or lead is None or tail[2] + lead >= beat:
+        return None
+    return Pickup(tail[0], here[-1])
+
+
+def sections(score, phrases):
+    """Each plan section as (label, its Vocal phrases, the pickup it opens on, the pickup it ends on).
+
+    **A section's words start where its first phrase does, and that is often before its barline.**
+    YuE2 writes an upbeat the way any song has one: a chorus opening "Ми не-втом-ні!" was planned as
+    three quick notes in the last beat of the section before, the fourth on the chorus's downbeat,
+    then a breath. Counted by barline that chorus held three notes fewer than its 52 syllables and the
+    verse before it three more — and the same song's other chorus and its outro were off the same
+    way. Counted from the pickup, all three came out exact. So a run of notes in the last bar of a
+    section, after a breath of at least a beat, that carries straight on into the next section's first
+    note belongs to the next section's words. The plan's labels stay where they are; YuE2 does not read
+    them for timing anyway.
+    """
+    at, out = 0, []
+    for section in score.sections:
+        count = sum(1 for group in section.groups if group.vocal is not None)
+        out.append((section.label, phrases[at:at + count]))
+        at += count
+    beat = _beat(score)
+    ends = [_pickup(score, a, b, beat) for (_, a), (_, b) in zip(out, out[1:])] + [None]
+    return [(label, ph, ends[i - 1] if i else None, ends[i]) for i, (label, ph) in enumerate(out)]
+
+
+def held(phrases, opens=None, lends=None):
+    """Syllables a section's notes carry: its own onsets, plus the pickup it opens on, less the one it
+    ends on, which sings the next section's words."""
+    return sum(p.notes for p in phrases) + (opens.onsets if opens else 0) - (lends.onsets if lends else 0)
+
+
 #: Semitones of separation below which a recast is taken back. This is a guard against an edit
 #: making things worse, NOT a prediction about the result: an earlier version of this comment claimed
 #: 8 was where two singers start to blur, and a third measurement killed that outright. Two plans sat
@@ -317,11 +443,13 @@ SAFE_GAP = 8
 class Spot:
     """One plan section, the lyric blocks that landed on it, and who should be singing there."""
 
-    __slots__ = ("label", "phrases", "blocks", "holds", "wants", "voice", "band", "was", "octaves")
+    __slots__ = ("label", "phrases", "blocks", "opens", "lends", "holds", "wants", "voice", "band", "was",
+                 "octaves")
 
-    def __init__(self, label, phrases, blocks):
+    def __init__(self, label, phrases, blocks, opens=None, lends=None):
         self.label, self.phrases, self.blocks = label, phrases, blocks
-        self.holds = sum(p.notes for p in phrases)
+        self.opens, self.lends = opens, lends      # the pickup it opens on, and the one it ends on
+        self.holds = held(phrases, opens, lends)
         self.wants = sum(b.syllables for b in blocks)
         self.voice = next((u.voice for b in blocks for u in b.units if u.voice), "")
         self.band = None            # the register the marker asks for
@@ -352,10 +480,10 @@ def plan(score, lyrics, voices, refit=False, recast=True):
     (`align`), because everything afterwards is applied to whichever words that match chose — and a
     positional pairing hands nearly every section somebody else's.
 
-    Recasting is a **correction**, not a rewrite. Measured on two real plans, YuE2 places the voices
-    correctly on its own more often than not: on one of them every section already sat in the band
-    its marker asked for, verses low for the man and choruses high for the woman. So only a section
-    whose register contradicts its marker moves, and it moves whole. The earlier version pushed every
+    Recasting is a **correction**, not a rewrite. YuE2 places its registers by habit, verses low and
+    choruses high: on one measured plan that matched every marker, on two later ones it contradicted
+    four and five sections of nine. So only a section whose register contradicts its marker moves,
+    and it moves whole. The earlier version pushed every
     phrase toward a band centre, which on a plan whose registers were already close smeared the two
     clusters together — and a plan without two separated clusters is a song in one voice.
     """
@@ -365,13 +493,10 @@ def plan(score, lyrics, voices, refit=False, recast=True):
     phrases = B.read(score)
     bands = B.find(phrases)
 
-    at, sliced = 0, []
-    for section in score.sections:
-        count = sum(1 for group in section.groups if group.vocal is not None)
-        sliced.append((section.label, phrases[at:at + count]))
-        at += count
-    pairing = align([b.syllables for b in found], [sum(p.notes for p in ph) for _, ph in sliced])
-    spots = [Spot(label, ph, [found[i] for i in idx]) for (label, ph), idx in zip(sliced, pairing)]
+    parts = sections(score, phrases)
+    pairing = align([b.syllables for b in found], [held(ph, o, e) for _, ph, o, e in parts])
+    spots = [Spot(label, ph, [found[i] for i in idx], o, e) for (label, ph, o, e), idx in zip(parts, pairing)]
+    beat = _beat(score)
 
     for spot in spots:
         spot.was = _settled(spot)
@@ -384,8 +509,7 @@ def plan(score, lyrics, voices, refit=False, recast=True):
         if not steps:
             continue
         spot.octaves = max(set(steps), key=steps.count)
-        for phrase in spot.sung:
-            score.replace(phrase.line, N.shift_octaves(score.lines[phrase.line], spot.octaves))
+        _move(score, spot, spot.octaves, beat)
 
     # A correction that leaves the registers closer together than it found them cannot have helped,
     # so it is made, measured and taken back. This is hygiene rather than a promise: narrowing the
@@ -395,12 +519,9 @@ def plan(score, lyrics, voices, refit=False, recast=True):
         kept = after.two and after.separation() >= min(bands.separation(), SAFE_GAP)
         if not kept:
             for spot in spots:
-                if not spot.octaves:
-                    continue
-                for phrase in spot.sung:
-                    score.replace(phrase.line,
-                                  N.shift_octaves(score.lines[phrase.line], -spot.octaves))
-            moved = ", ".join(f"'{s.label}'" for s in spots if s.octaves)
+                if spot.octaves:
+                    _move(score, spot, -spot.octaves, beat)
+            moved =", ".join(f"'{s.label}'" for s in spots if s.octaves)
             spread = "into one register" if not after.two else \
                 f"from {bands.separation():.0f} to {after.separation():.0f} semitones apart"
             notes.append(f"{moved} disagreed with the markers, but moving it pushed the two "
@@ -413,20 +534,40 @@ def plan(score, lyrics, voices, refit=False, recast=True):
     return score, spots, notes + _findings(score, spots, bands)
 
 
+def _move(score, spot, octaves, beat):
+    """Shift a section by whole octaves — with the pickup it opens on, which sits at the end of the
+    section before, and without the one it ends on, which the next section's singer sings."""
+    for phrase in spot.sung:
+        line = score.lines[phrase.line]
+        cut = _tail(line, phrase.tied, beat)[1] if spot.lends and spot.lends.phrase is phrase else len(line)
+        score.replace(phrase.line, N.shift_octaves(line[:cut], octaves) + line[cut:])
+    if spot.opens:
+        phrase = spot.opens.phrase
+        line = score.lines[phrase.line]
+        cut = _tail(line, phrase.tied, beat)[1]
+        score.replace(phrase.line, line[:cut] + N.shift_octaves(line[cut:], octaves))
+
+
 def _refit(score, spots):
-    """Cut each section's phrases to the syllables its blocks actually hold."""
+    """Cut each section's phrases to the syllables its blocks actually hold.
+
+    Pickups are left exactly as written: the one a section opens on already sings its first
+    syllables from the bar before, and the last bar of a section ending on one belongs to the next.
+    """
     said = []
     for spot in spots:
         sung = spot.sung
         if not sung or not spot.wants:
             continue
         weights = [R.capacity(score.lines[p.line]) for p in sung]
-        for phrase, want in zip(sung, allot(spot.wants, weights, floor=0)):
-            line, reached, _ = R.refit(score.lines[phrase.line], want)
+        own = max(0, spot.wants - (spot.opens.onsets if spot.opens else 0))
+        for phrase, want in zip(sung, allot(own, weights, floor=0)):
+            lent = spot.lends.onsets if spot.lends and spot.lends.phrase is phrase else 0
+            line, reached, _ = R.refit(score.lines[phrase.line], want + lent, phrase.tied, keep=1 if lent else 0)
             score.replace(phrase.line, line)
-            if reached != want:
+            if reached - lent != want:
                 said.append(f"'{spot.label}': a phrase was asked for {want} syllables and holds "
-                            f"{reached}")
+                            f"{reached - lent}")
     return said
 
 
@@ -443,10 +584,11 @@ def _findings(score, spots, bands):
                    "singer — how many voices a song has is decided by the style string — but there "
                    "is nothing here for a marker to disagree with")
     else:
-        out.append(f"the plan uses two registers, {bands.separation():.0f} semitones apart. Which "
-                   f"one a phrase sits in tracked which singer took it in every measured song, but "
-                   f"it has not proved to be a control — the style string decides how many voices "
-                   f"there are, and in practice when each of them sings")
+        out.append(f"the plan came with two registers, {bands.separation():.0f} semitones apart. With "
+                   f"a LoRA on the text encoder the singers follow them where they agree with the "
+                   f"markers, which is what recast makes them do, and a plan that contradicts its "
+                   f"markers came back in one voice. The base model mostly keeps one voice whatever "
+                   f"the plan says")
     for spot in spots:
         where = f"'{spot.label}' at {_mmss(spot.seconds(score))}"
         named = " + ".join(b.label for b in spot.blocks) or "nothing"
@@ -477,7 +619,7 @@ def report(score, spots, notes, bands=None):
     out = [f"{score.bar_count()} bars = {_mmss(score.duration())} at {score.bpm} bpm"]
     if bands.two:
         low, high = bands.seats[B.LOW], bands.seats[B.HIGH]
-        out.append(f"two voices: lower sits {low[0]:.0f}-{low[1]:.0f}, "
+        out.append(f"two voices as sent: lower sits {low[0]:.0f}-{low[1]:.0f}, "
                    f"upper {high[0]:.0f}-{high[1]:.0f}, "
                    f"{bands.separation():.0f} semitones apart")
     else:

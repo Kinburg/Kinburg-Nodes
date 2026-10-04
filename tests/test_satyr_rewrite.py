@@ -60,6 +60,17 @@ check("and costs nothing", cost == {"split": 0, "merged": 0, "dropped": 0}, cost
 PLAIN = '"B"a2g2f2e2-|"B"e2f4z2|'
 check("a plain phrase is stable too", R.refit(PLAIN, N.attacks(PLAIN, "D#m"))[0] == PLAIN)
 
+# The same bug one level up: a line that opens on the far end of a note held over from the LINE
+# before. That note is the earlier phrase's syllable, so this phrase holds three, not four.
+OPENS_HELD = "d4e4f4g4|"
+same, reached, cost = R.refit(OPENS_HELD, 3, tied=True)
+check("a line opening on a held-over note, asked for what it holds, is left alone",
+      same == OPENS_HELD and reached == 3 and cost == {"split": 0, "merged": 0, "dropped": 0}, (same, reached, cost))
+check("...which, read without the tie, it would not have been", R.refit(OPENS_HELD, 3)[0] != OPENS_HELD)
+short, reached, _ = R.refit(OPENS_HELD, 2, tied=True)
+check("shortening it never touches the held-over note", short.startswith("d4") and reached == 2
+      and units(short) == units(OPENS_HELD), short)
+
 
 # ------------------------------------------------------------------------------------ conserving
 BAR = "g2fg2f3|"                               # 2+1+2+3 = 8 units, four onsets

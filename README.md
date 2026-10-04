@@ -2,8 +2,8 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.6.1-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-110-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-2607%20checks-brightgreen.svg)](#-tests)
+[![nodes](https://img.shields.io/badge/nodes-113-orange.svg)](#-node-index)
+[![tests](https://img.shields.io/badge/tests-2985%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
@@ -22,7 +22,7 @@ One folder = one package: ComfyUI reads the node mappings from the root `__init_
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **110** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **113** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -55,9 +55,9 @@ All **110** nodes, grouped by the package they live in. Every package links to i
 | Package | Nodes |
 |---|---|
 | [`siren/` — Siren Suite 🧜](docs/audio.md#-siren--siren-suite-) | `Siren (Music Sampler) 🧜`, `Siren Cast (Voice Plan) 🧜`, `Siren Compare (Audio) 🧜`, `Siren Scope (Audio → Image) 🧜`, `Siren Score (Lyrics → Plan) 🧜`, `Siren Section (Audio Window) 🧜` |
-| [`satyr/` — Satyr Suite 🐐](docs/audio.md#-satyr--satyr-suite-) | `Satyr Import (MIDI → Plan) 🐐`, `Satyr Music (Guided YuE2) 🐐`, `Satyr Read (Plan → Map) 🐐`, `Satyr Score (Plan → Plan) 🐐`, `Satyr Trim (Plan → Plan) 🐐` |
+| [`satyr/` — Satyr Suite 🐐](docs/audio.md#-satyr--satyr-suite-) | `Satyr Edit (Plan → Plan) 🐐`, `Satyr Import (MIDI → Plan) 🐐`, `Satyr Music (Guided YuE2) 🐐`, `Satyr Read (Plan → Map) 🐐`, `Satyr Score (Plan → Plan) 🐐`, `Satyr Trim (Plan → Plan) 🐐` |
 | [`audio_sr/` — Audio SR (48 kHz Upscale) 🔊](docs/audio.md#-audio_sr--audio-sr-48-khz-upscale-) | `Audio SR (48 kHz Upscale) 🔊` |
-| [`save_song/` — Save Song & Song Tags](docs/audio.md#-save_song--save-song--song-tags) | `Save Song`, `Song Tags` |
+| [`save_song/` — Save Song, Song Tags & Remaster](docs/audio.md#-save_song--save-song-song-tags--remaster) | `Remaster (Loudness) 🎚️`, `Save Song`, `Song Tags` |
 
 ### 🎬 Video Generation & Storyboarding
 
@@ -98,7 +98,7 @@ All **110** nodes, grouped by the package they live in. Every package links to i
 
 | Package | Nodes |
 |---|---|
-| [`util/` — General Workflow Utilities](docs/utilities.md#-util--general-workflow-utilities) | `Any Gate`, `Any Switch`, `Any Unplug`, `Any to String`, `Color Picker`, `Combo to String`, `Date String`, `JSON Extract`, `Text Transform`, `Unlim Text Concat` |
+| [`util/` — General Workflow Utilities](docs/utilities.md#-util--general-workflow-utilities) | `Any Gate`, `Any Switch`, `Any Unplug`, `Any to String`, `Color Picker`, `Combo to String`, `Date String`, `JSON Extract`, `Load VAE (Precision)`, `Text Transform`, `Unlim Text Concat` |
 | [`timer/` — Execution Timer](docs/utilities.md#-timer--execution-timer) | `Start Timer`, `Stop Timer` |
 | [`gen_info/` — Generation Info & Filter](docs/utilities.md#-gen_info--generation-info--filter) | `Generation Info`, `Generation Info Filter` |
 | [`group_control/` — Group Control 🎚️](docs/utilities.md#-group_control--group-control-) | `Group Control 🎚️` |
@@ -163,6 +163,7 @@ All **110** nodes, grouped by the package they live in. Every package links to i
 | List Insert | `ListInsert` | `Kinburg-Nodes/flow/list` |
 | List Output | `KinburgListEmit` | `Kinburg-Nodes/flow/loops` |
 | List Remove | `ListRemove` | `Kinburg-Nodes/flow/list` |
+| Load VAE (Precision) | `KinburgVAELoaderPrecision` | `Kinburg-Nodes/model` |
 | Local LLM (GGUF) | `LocalLLMGGUF` | `Kinburg-Nodes/LLM` |
 | Local LLM Chat (GGUF) | `LocalLLMChatGGUF` | `Kinburg-Nodes/LLM` |
 | Local LLM Model Info 🔍 | `LocalLLMModelInfo` | `Kinburg-Nodes/LLM` |
@@ -184,10 +185,12 @@ All **110** nodes, grouped by the package they live in. Every package links to i
 | Phantas 🎞 | `KinburgPhantas` | `Kinburg-Nodes/Bestiary/Phantas` |
 | Prompt Presets | `PromptPresets` | `Kinburg-Nodes/prompt` |
 | Prompt Variations | `PromptVariations` | `Kinburg-Nodes/prompt` |
+| Remaster (Loudness) 🎚️ | `KinburgRemaster` | `Kinburg-Nodes/audio` |
 | Repeat (Close) | `KinburgRepeatClose` | `Kinburg-Nodes/flow/loops` |
 | Repeat (Open) | `KinburgRepeatOpen` | `Kinburg-Nodes/flow/loops` |
 | Safetensors -> GGUF (llama.cpp) | `SafetensorsToGGUF` | `Kinburg-Nodes/LLM/GGUF` |
 | Sampler Settings | `KinburgSamplerSettings` | `Kinburg-Nodes/Bestiary` |
+| Satyr Edit (Plan → Plan) 🐐 | `KinburgSatyrEdit` | `Kinburg-Nodes/Bestiary/Satyr` |
 | Satyr Import (MIDI → Plan) 🐐 | `KinburgSatyrImport` | `Kinburg-Nodes/Bestiary/Satyr` |
 | Satyr Music (Guided YuE2) 🐐 | `KinburgSatyrMusic` | `Kinburg-Nodes/Bestiary/Satyr` |
 | Satyr Read (Plan → Map) 🐐 | `KinburgSatyrRead` | `Kinburg-Nodes/Bestiary/Satyr` |

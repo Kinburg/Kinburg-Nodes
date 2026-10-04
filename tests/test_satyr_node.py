@@ -137,9 +137,11 @@ solo, _, said = score_node.run(PLAN, LYRICS, recast=True, refit=True, verbose=Fa
                                voice_1=VOICES["voice_1"])
 check("one wired voice recasts nothing", solo == score_node.run(
     PLAN, LYRICS, recast=False, refit=True, verbose=False, voice_1=VOICES["voice_1"])[0])
-check("recast is off unless asked for",
-      Nodes.KinburgSatyrScore.INPUT_TYPES()["required"]["recast"][1]["default"] is False)
-check("and so is refit",
+# Measured at one seed with a LoRA on the text encoder: the plan as YuE2 wrote it came back in one
+# voice, the same plan recast was sung by exactly the singers marked.
+check("recast is on by default",
+      Nodes.KinburgSatyrScore.INPUT_TYPES()["required"]["recast"][1]["default"] is True)
+check("refit stays off",
       Nodes.KinburgSatyrScore.INPUT_TYPES()["required"]["refit"][1]["default"] is False)
 check("and says why", "nothing to alternate" in said)
 

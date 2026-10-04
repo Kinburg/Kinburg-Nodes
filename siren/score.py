@@ -146,7 +146,8 @@ _JOINERS = {"and", "with", "together", "both", "plus", "feat", "ft", "duet", "vs
 
 # -------------------------------------------------------------------------------- text inspection
 _VOWELS = re.compile(r"[aeiouyAEIOUY]+")
-_LETTERS = re.compile(r"[^\W\d_]+", re.UNICODE)
+#: A word: letters, with an apostrophe inside it kept — `б'ється` is one word, not `б` and `ється`.
+_LETTERS = re.compile(r"[^\W\d_]+(?:['’ʼ][^\W\d_]+)*", re.UNICODE)
 #: Every Cyrillic vowel. `й` and `ь` are deliberately absent: they are consonants and carry no
 #: syllable, so `край` is one and `свій` is one.
 _CYRILLIC_VOWELS = set("аеєиіїоуюяёыэАЕЄИІЇОУЮЯЁЫЭ")
@@ -169,17 +170,29 @@ def _syllables(text):
     This is what section lengths are computed from, because syllables are what a singer spends time
     on — a line of four words and a line of twelve do not take the same number of bars, and counting
     lines pretends they do."""
-    total = 0
-    for word in _LETTERS.findall(str(text or "")):
-        cyrillic = sum(1 for ch in word if ch in _CYRILLIC_VOWELS)
-        if cyrillic:
-            total += cyrillic
-            continue
-        n = len(_VOWELS.findall(word))
-        if n > 1 and word[-1] in "eE":
-            n -= 1
-        total += n
-    return total
+    return sum(len(_nuclei(word)) for word in _LETTERS.findall(str(text or "")))
+
+
+def _nuclei(word):
+    """The (start, end) of each syllable's vowel in one word — the rule `_syllables` counts by."""
+    cyrillic = [(i, i + 1) for i, ch in enumerate(word) if ch in _CYRILLIC_VOWELS]
+    if cyrillic:
+        return cyrillic
+    groups = [m.span() for m in _VOWELS.finditer(word)]
+    if len(groups) > 1 and word[-1] in "eE":
+        groups.pop()
+    return groups
+
+
+def _syllable_chunks(word):
+    """One word cut into exactly the syllables `_syllables` counts: `сирени` → си·ре·ни.
+
+    For showing which syllable lands on which note, so the count and the cut can never disagree — they
+    are the same nuclei. A lone consonant between two vowels opens the next syllable, a cluster gives
+    its first consonant to the one before (`серце` → сер·це). A word with no vowel has no syllable."""
+    nuclei = _nuclei(word)
+    cuts = [0] + [e0 if s1 - e0 <= 1 else e0 + 1 for (_, e0), (s1, _) in zip(nuclei, nuclei[1:])]
+    return [word[a:b] for a, b in zip(cuts, cuts[1:] + [len(word)])] if nuclei else []
 
 
 def _vocalish(text):

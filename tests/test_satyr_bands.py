@@ -129,6 +129,54 @@ check("exactly half an octave away still moves", B.octaves_to(halfway, B.LOW, re
 check("and lands below the split", 75 + 12 * B.octaves_to(halfway, B.LOW, real) < real.split)
 
 
+# ------------------------------------------------------------------------------------ held over
+# The exporter writes at most four bars to a line, so a note held from one group into the next ends
+# one Vocal line `F2-|` and opens the next `F2`. That is the first phrase's syllable; read line by
+# line it was counted again at the start of the second, one too many at every such boundary.
+HELD = """X:1
+T:
+M:4/4
+L:1/8
+Q:1/4=120
+V: Vocal clef=treble name="Vocal Melody" snm="Vocal"
+V: Ins clef=treble name="Ins Melody" snm="Inst."
+K:C
+% verse
+V: Vocal
+C2D2E2F2-|
+V: Ins
+Z|
+% chorus
+V: Vocal
+F2G2A2B2|
+V: Ins
+Z|
+% chorus
+V: Vocal
+c4z2B2-|
+V: Ins
+Z|
+% outro
+V: Vocal
+z8|
+V: Ins
+Z|
+% outro
+V: Vocal
+B8|
+V: Ins
+Z|
+"""
+held = B.read(N.parse(HELD))
+check("a note held into the next group is the first phrase's syllable, not the second's",
+      [p.notes for p in held] == [4, 3, 2, 0, 1], [p.notes for p in held])
+check("...and the phrase it runs into knows it opens on it",
+      [p.tied for p in held] == [False, True, False, True, False], [p.tied for p in held])
+check("...so the phrases add up to what the voice actually sings",
+      sum(p.notes for p in held) == N.attacks("".join(N.parse(HELD).lines[p.line] for p in held)))
+check("a group of rests in between breaks the tie: the note after it is a new syllable", held[4].notes == 1)
+
+
 # ------------------------------------------------------------------------------------ applying
 edited = N.parse(SCORE)
 fresh = B.read(edited)

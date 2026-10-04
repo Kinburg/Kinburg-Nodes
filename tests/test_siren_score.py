@@ -315,6 +315,25 @@ check("...and English's silent final 'e' is not counted",
       score._syllables("time the same") == 3 and score._syllables("e") == 1,
       score._syllables("time the same"))
 
+# The cut Satyr Edit shows under the notes. It must give exactly as many pieces as the count, or the
+# words drawn on the notes drift away from the syllables the plan was counted against.
+CUTS = {"сирени": ["си", "ре", "ни"], "серце": ["сер", "це"], "знає": ["зна", "є"], "свою": ["сво", "ю"],
+        "загартує": ["за", "гар", "ту", "є"], "край": ["край"], "beautiful": ["beau", "ti", "ful"],
+        "stone": ["stone"], "e": ["e"], "rhythm": ["rhythm"], "hmm": []}
+for word, want in CUTS.items():
+    check(f"'{word}' is cut {'·'.join(want) or '(no syllable)'}", score._syllable_chunks(word) == want,
+          score._syllable_chunks(word))
+check("an apostrophe stays inside its word", score._LETTERS.findall("Серце б'ється, м’ята, пірʼя")
+      == ["Серце", "б'ється", "м’ята", "пірʼя"], score._LETTERS.findall("Серце б'ється, м’ята, пірʼя"))
+check("...and is cut with it", score._syllable_chunks("б'ється") == ["б'єт", "ься"], score._syllable_chunks("б'ється"))
+for line in ("Сирени ритм став частиною дня", "Синій БЛЮКРИЙ... він не мигтить.", "time the same",
+             "Наша сила, наша воля — загартує серце!", "the beautiful agreement of free stone",
+             "Серце б'ється там, де ти вирішив"):
+    words = score._LETTERS.findall(line)
+    check(f"'{line}' cuts into exactly the syllables it counts, nothing lost",
+          sum(len(score._syllable_chunks(w)) for w in words) == score._syllables(line)
+          and all("".join(score._syllable_chunks(w)) == w for w in words if score._syllable_chunks(w)))
+
 # ------------------------------------------------------------- lengths run backwards from the target
 # The old model asked for a singing RATE and let the song come out however long it came out. That put
 # the slack between the words and the wanted length INSIDE the vocal sections, where the model fills

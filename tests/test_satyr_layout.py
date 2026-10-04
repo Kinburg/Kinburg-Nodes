@@ -214,6 +214,77 @@ check("and none is reported as kept", all(s.octaves == 0 for s in spots))
 check("with the reason named", any("taken back" in s for s in said), said)
 check("recast off leaves the plan alone",
       L.plan(N.parse(PLAN), DISAGREES, PAIR, recast=False)[0].text() == PLAN)
+# The header is the plan as sent, after the move; the finding is the plan as it came. A real report
+# printed "7 semitones apart" in one and "5" in the other with nothing to say which was which.
+told = L.report(*L.plan(N.parse(PLAN), DISAGREES, PAIR))
+check("the report says which registers are after the move and which before",
+      "two voices as sent" in told and "came with two registers" in told, told)
+
+
+# A note held from the verse into the chorus is the verse's syllable. Read line by line it was the
+# chorus's too, so the chorus looked one syllable roomier than it is — and with `refit` on, a chorus
+# already holding exactly its words lost a note to "fix" it.
+HELD = score_of(("verse", "C2D2E2F2-|"), ("chorus", "F2c2d2e2|"))
+FITS = words(("Verse - Burg", 4), ("Chorus - Keen", 3))
+done, spots, _ = L.plan(N.parse(HELD), FITS, PAIR, refit=True, recast=False)
+check("a note held over a section boundary belongs to the section it started in",
+      [s.holds for s in spots] == [4, 3], [s.holds for s in spots])
+check("...so a chorus already holding its words is not refit", done.text() == HELD,
+      [line for line in done.text().splitlines() if "c2" in line])
+
+
+# ------------------------------------------------------------------------------------ pickups
+# The author's song started every chorus on "Ми не-втом | ні!": three quick notes in the last beat of
+# the section before, the fourth on the downbeat, then a breath. Counted by barline those choruses
+# were three notes short and the verses three over; counted from the pickup, both came out exact.
+# Here: a verse whose last bar ends on a two-note pickup (E F after a beat of rest) into a chorus
+# that opens on its downbeat. 4/4 at L:1/8, so a beat is two units.
+VERSE_UP = "CCDDEEFF|C2D2z2EF|"
+UPBEAT = score_of(("verse", VERSE_UP), ("chorus", "c2z2d2e2|"))
+parts = L.sections(N.parse(UPBEAT), B.read(N.parse(UPBEAT)))
+check("a run after a breath, in a section's last beat and straight into the next, is a pickup",
+      parts[0][3] is not None and parts[0][3].onsets == 2 and parts[1][2] is parts[0][3], parts)
+check("...its notes count for the section they open",
+      [L.held(ph, o, e) for _, ph, o, e in parts] == [10, 5], [L.held(ph, o, e) for _, ph, o, e in parts])
+_, spots, said = L.plan(N.parse(UPBEAT), words(("Verse - Burg", 10), ("Chorus - Keen", 5)), PAIR, recast=False)
+check("...so the words match exactly, as Satyr Score reports them", [s.holds for s in spots] == [10, 5]
+      and not any("room for" in s for s in said), [s.holds for s in spots])
+for name, verse, chorus in (("with no breath before it", "CCDDEEFF|C2D2E2FG|", "c2z2d2e2|"),
+                            ("with a breath after it", "CCDDEEFF|C2D2EFz2|", "c2z2d2e2|"),
+                            ("when the next section opens on a rest", VERSE_UP, "z2c2d2e2|"),
+                            ("when it reaches back over the barline", "CCDDz2EF|GAFEC2D2|", "c2z2d2e2|")):
+    plain = score_of(("verse", verse), ("chorus", chorus))
+    got = L.sections(N.parse(plain), B.read(N.parse(plain)))
+    check(f"no pickup {name}", got[0][3] is None and got[1][2] is None, got)
+TIED = score_of(("verse", "CCDDEEFF|C2D2z2EF-|"), ("chorus", "F2z2d2e2|"))
+got = L.sections(N.parse(TIED), B.read(N.parse(TIED)))
+check("a pickup held over the barline still opens the next section",
+      [L.held(ph, o, e) for _, ph, o, e in got] == [10, 4], [L.held(ph, o, e) for _, ph, o, e in got])
+
+# refit leaves the pickup exactly as written, whichever side of it needs the change.
+done, spots, said = L.plan(N.parse(UPBEAT), words(("Verse - Burg", 10), ("Chorus - Keen", 6)), PAIR,
+                           refit=True, recast=False)
+music = [x for x in done.text().splitlines() if x[:1] in ("C", "c") and "|" in x]
+check("a chorus short of one gains it in its own bars, its pickup counted",
+      music[0] == VERSE_UP and N.attacks(music[1]) == 4, music)
+WHOLE = N.parse(score_of(("verse", "CCDDEEz2|EFGAC2D2|"), ("chorus", "c2z2d2e2|")))
+check("...and a whole-bar run after a breath is a pickup too",
+      L.sections(WHOLE, B.read(WHOLE))[0][3].onsets == 6)
+done, spots, said = L.plan(N.parse(UPBEAT), words(("Verse - Burg", 8), ("Chorus - Keen", 5)), PAIR,
+                           refit=True, recast=False)
+verse = [x for x in done.text().splitlines() if x.startswith("C")][0]
+check("a verse two over loses them before its last bar, which holds the next section's pickup",
+      verse.endswith("|C2D2z2EF|") and N.attacks(verse) == 10, verse)
+after = L.sections(N.parse(done.text()), B.read(N.parse(done.text())))
+check("...and the pickup is still one", after[0][3] is not None and after[0][3].onsets == 2)
+
+# recast moves a section with its pickup, and leaves the next section's pickup where it is.
+MOVES = score_of(("verse", VERSE_UP), ("chorus", "C2z2D2E2|"), ("outro", "ccddeeff|"))
+moved, spots, said = L.plan(N.parse(MOVES), words(("Verse - Burg", 10), ("Chorus - Keen", 5),
+                                                    ("Outro - Keen", 8)), PAIR, recast=True)
+music = [x for x in moved.text().splitlines() if x and x[0] in "CcEe" and "|" in x]
+check("a recast section takes its pickup with it, and the bars before stay put",
+      spots[1].octaves == 1 and music[0] == "CCDDEEFF|C2D2z2ef|" and music[1] == "c2z2d2e2|", music)
 
 
 # ------------------------------------------------------------------------------------ findings

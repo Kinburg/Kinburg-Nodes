@@ -48,6 +48,12 @@ CHUNK_QUANTUM = 5.12
 # Cast is exactly the sort of thing that gets wired here).
 SEED_MAX = 0xffffffff
 
+XO_AUTO = "auto (measure the input)"
+XO_MANUAL = "manual (crossover_khz)"
+XO_OFF = "off (the model everywhere)"
+CROSSOVER = [XO_AUTO, XO_MANUAL, XO_OFF]
+XO_MARGIN = 1000.0         # auto puts the crossover this far below where the input's spectrum ends
+
 ST_MS = "mid/side (keep the image)"
 ST_MONO = "sum to mono"
 STEREO = [ST_MS, ST_MONO]
@@ -171,6 +177,56 @@ def _low_band_gain(out, ref, sr, upto=10000.0):
     return float((a / b) ** 0.5)
 
 
+def _bandwidth(x, sr, floor_db=60.0):
+    """Where the input's spectrum ends: the highest frequency still within `floor_db` of the 1-4 kHz
+    level, from a Hann-windowed average spectrum. None for silence or a clip shorter than one frame.
+
+    Referenced to 1-4 kHz rather than to the peak because the peak of a mix is its bass, which moves
+    with the arrangement; the 1-4 kHz level is where every mix has its body. On the AceStep take in the
+    notes this lands at ~12 kHz, where the -40 dB point measured 11.8."""
+    mono = x.reshape(-1, x.shape[-1]).to(torch.float32).mean(0)
+    n = 8192
+    if mono.shape[0] < n:
+        return None
+    spec = torch.stft(mono, n, hop_length=n // 2, window=torch.hann_window(n),
+                      center=False, return_complex=True).abs().pow(2)
+    live = spec.mean(0) > 1e-8 * n          # frames of silence would pull the level down
+    if not bool(live.any()):
+        return None
+    # Median over frames, not mean: the one frame where a hard cut out of silence lands splatters
+    # energy across the whole band, and a mean lets it read a 12 kHz mix as 16 kHz.
+    power = spec[:, live].median(1).values
+    freqs = torch.fft.rfftfreq(n, 1.0 / sr)
+    ref = power[(freqs >= 1000) & (freqs < 4000)].mean()
+    above = freqs[power > ref * 10 ** (-floor_db / 10)]
+    return float(above.max()) if above.numel() else None
+
+
+def _lowpass(x, sr, cutoff, transition=1000.0, atten_db=90.0):
+    """Linear-phase low-pass of `x` along its last axis, -6 dB at `cutoff`, with the filter's delay
+    taken out so the result lines up with the input sample for sample. Kaiser-windowed sinc, convolved
+    by FFT — a 4-minute song is ten million samples and a direct convolution would crawl."""
+    beta = 0.1102 * (atten_db - 8.7)
+    taps = int((atten_db - 8.0) / (2.285 * 2 * torch.pi * transition / sr)) | 1
+    t = torch.arange(taps, dtype=torch.float64) - taps // 2
+    kernel = 2 * cutoff / sr * torch.sinc(2 * cutoff / sr * t)
+    kernel = kernel * torch.kaiser_window(taps, periodic=False, beta=beta, dtype=torch.float64)
+    kernel = kernel / kernel.sum()
+    size = x.shape[-1] + taps - 1
+    got = torch.fft.irfft(torch.fft.rfft(x.to(torch.float64), size) * torch.fft.rfft(kernel, size), size)
+    return got[..., taps // 2: taps // 2 + x.shape[-1]].to(x.dtype)
+
+
+def _crossover(original, invented, sr, cutoff):
+    """The input below `cutoff`, the model above it: `LP(original) + (invented - LP(invented))`.
+
+    The two halves are the same filter and its exact complement, so they cannot leave a hole or a bump
+    at the join, and `_crossover(x, x)` is `x`. Below the cutoff the model's output simply does not
+    reach the result: the low band is the input's own, unchanged to within the filter's ripple (90 dB
+    stop band = 0.0003 dB). This replaces fixing the model's low-band drift after the fact."""
+    return _lowpass(original, sr, cutoff) + invented - _lowpass(invented, sr, cutoff)
+
+
 def _fades(overlap, device=None):
     """The two halves of a Hann window — one to fade a chunk in, one to fade the last one out.
 
@@ -260,7 +316,7 @@ class KinburgAudioSR:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "audio": ("AUDIO", {"tooltip": "The mix to extend. Resampled to 48 kHz and summed to mono first — AudioSR is a mono model, so a stereo image does not survive this. Upscale before you widen, not after."}),
+                "audio": ("AUDIO", {"tooltip": "The mix to extend. Resampled to 48 kHz first; a stereo mix is handled as 'stereo' says."}),
                 "checkpoint": (_model_files(), {"tooltip": "A checkpoint from ComfyUI/models/AudioSR. 'basic' is for music, 'speech' for voice — the variant is read from the file name, so keep the shipped names.\n\nThe fp32 files are about 6 GB each; see 'dtype' if that is tight."}),
                 "steps": ("INT", {"default": 50, "min": 10, "max": 500, "tooltip": "DDIM steps per chunk. This is the whole cost: total work is chunks x steps, and the progress bar counts exactly that.\n\n50 is a sane working value; upstream's own default is 200, which is four times the wait for a difference you will struggle to hear on a mix."}),
                 "guidance_scale": ("FLOAT", {"default": 3.5, "min": 1.0, "max": 20.0, "step": 0.1, "tooltip": "How hard the model is held to the input. Higher stays closer to what you fed it; lower invents more top end. 3.5 is upstream's default."}),
@@ -268,10 +324,12 @@ class KinburgAudioSR:
                 "chunk_seconds": ("FLOAT", {"default": 15.36, "min": 5.12, "max": 30.72, "step": 0.01, "tooltip": "How much audio goes through the model at once. The default is 3 x 5.12 s because the batch builder pads every chunk up to a multiple of 5.12 s — a length that is not a multiple of it pays for denoising silence.\n\nLonger chunks mean fewer joins and more VRAM."}),
                 "overlap_seconds": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 5.0, "step": 0.1, "tooltip": "How much neighbouring chunks share, crossfaded with a Hann pair (which sums to 1, so the join neither dips nor doubles).\n\n0 is a hard butt-join, which is upstream's default and is audible on sustained material. 1 s is cheap insurance; more only costs compute, since overlapped audio is processed twice."}),
                 "stereo": (STEREO, {"tooltip": "What to do with a stereo mix, since AudioSR is a mono model.\n\n• mid/side (recommended) — only the mid channel goes through the model; side is carried through untouched and the two are recombined. The image survives. Everything invented above the source's roll-off lands in the centre, because side has no content up there — highs come out centred, which is how plenty of records sit.\n\n• sum to mono — what the model wants, and what the wrapper this replaces did. Measured on a real take: an L/R correlation of +0.45 and a side/mid RMS of 0.61 became 1.00 and 0.00. The whole image, gone. Here to A/B against.\n\nMono in is untouched either way. Never run L and R separately: two independent diffusion passes decorrelate, and the invented top comes out phasey instead of wide."}),
-                "match_level": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Put the output's energy BELOW 10 kHz back where the input's was.\n\nNot an overall level match — the model genuinely adds energy up top, and matching totals would turn the whole track down to pay for it. Below the roll-off it measured transparent (-0.4 dB at 8-12 kHz), so drift down there is drift: on the take we measured it was -1.2 dB at 0-4 kHz and -1.7 dB at 4-8 kHz, which reads as the mix losing body. The gain applied is printed."}),
+                "match_level": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Only with 'crossover' off — with a crossover the low band IS the input's, so there is no drift to correct.\n\nPut the output's energy BELOW 10 kHz back where the input's was.\n\nNot an overall level match — the model genuinely adds energy up top, and matching totals would turn the whole track down to pay for it. Below the roll-off it measured transparent (-0.4 dB at 8-12 kHz), so drift down there is drift: on the take we measured it was -1.2 dB at 0-4 kHz and -1.7 dB at 4-8 kHz, which reads as the mix losing body. The gain applied is printed."}),
                 "dtype": (DTYPES, {"advanced": True, "tooltip": "Compute precision. fp32 is what the checkpoints ship as and what to keep unless VRAM says otherwise; fp16 roughly halves the model's footprint, bf16 is the safer half-precision on RTX 30-series and up."}),
                 "keep_loaded": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Hold the model in VRAM between runs. On is right while you iterate; off frees about 6 GB after every run and pays the load time again next time."}),
                 "verbose": ("BOOLEAN", {"default": True, "advanced": True, "tooltip": "Print the report to the console. The same text is always on the 'report' output."}),
+                "crossover": (CROSSOVER, {"tooltip": "Where the model is allowed to change the sound.\n\n• auto (recommended) — measures where the input's spectrum ends and keeps the input as it is below a point 1 kHz under that; only the top is the model's. On an AceStep mix that is about 11 kHz.\n\n• manual — the same, at 'crossover_khz'.\n\n• off — the model's output everywhere, as before. Measured on a real take, the model drifts the low end (-1.2 dB at 0-4 kHz, -1.7 dB at 4-8 kHz); 'match_level' then corrects the level of it, but not the content.\n\nThe split is a linear-phase filter and its exact complement, so the join has no hole, no bump and no phase shift, and everything below it is the input's own audio."}),
+                "crossover_khz": ("FLOAT", {"default": 11.0, "min": 1.0, "max": 23.0, "step": 0.1, "advanced": True, "tooltip": "The crossover for 'manual'. Below it the input is kept, above it the model's output is used. Set it a little under where the input runs out — the model's top end then continues the input's own rather than replacing a band the input still had."}),
             },
         }
 
@@ -290,7 +348,8 @@ class KinburgAudioSR:
                    "actually goes.")
 
     def run(self, audio, checkpoint, steps, guidance_scale, seed, chunk_seconds, overlap_seconds,
-            stereo=ST_MS, match_level=True, dtype="fp32", keep_loaded=True, verbose=True):
+            stereo=ST_MS, match_level=True, dtype="fp32", keep_loaded=True, verbose=True,
+            crossover=XO_AUTO, crossover_khz=11.0):
         # speechbrain, imported by some other pack, makes inspect.getmodule() raise process-wide on
         # Windows — and this node's stack calls into inspect. See util/imports.py.
         defuse_lazy_modules()
@@ -334,6 +393,16 @@ class KinburgAudioSR:
                          f" → {stereo}")
         total = int(work.shape[-1])
         seconds_in = total / SR
+        band_in = _bandwidth(work, SR)
+        cutoff = None
+        if crossover == XO_MANUAL:
+            cutoff = float(crossover_khz) * 1000.0
+        elif crossover == XO_AUTO:
+            if band_in is None:
+                notes.append("the input is too short or too quiet to measure where its spectrum ends — "
+                             "the crossover is off for this run")
+            else:
+                cutoff = min(max(band_in - XO_MARGIN, 2000.0), 22000.0)
 
         chunk_n = int(round(float(chunk_seconds) * SR))
         over_n = int(round(float(overlap_seconds) * SR))
@@ -404,15 +473,27 @@ class KinburgAudioSR:
         secs = time.perf_counter() - t_sample
         out = torch.nan_to_num(out / weight.clamp(min=1e-6))
 
-        # Level BEFORE the image goes back on: the model's drift is in the mid channel, and matching
-        # it there keeps mid and side in the proportion the mix was written with. Matching after the
-        # recombination would scale side too and leave the width where the drift put it.
-        if match_level:
+        # Both BEFORE the image goes back on: the model's output is the mid channel, and splitting or
+        # levelling it there keeps mid and side in the proportion the mix was written with. Done after
+        # the recombination, side would be filtered or scaled too and the width would move.
+        lines.append(f"  input spectrum ends at {band_in / 1000:.1f} kHz" if band_in is not None
+                     else "  input spectrum: not measurable")
+        if cutoff is not None:
+            out = _crossover(work, out, SR, cutoff)
+            lines.append(f"  crossover at {cutoff / 1000:.1f} kHz ({crossover.split(' ')[0]}): below it "
+                         f"the input is kept as it was, above it is the model's")
+            if band_in is not None and cutoff >= 20000.0:
+                notes.append(f"the input already reaches {band_in / 1000:.1f} kHz — only the content "
+                             f"above {cutoff / 1000:.1f} kHz could change, so there was little for the model to do")
+        elif match_level:
             gain = _low_band_gain(out, work, SR)
             out = out * gain
             lines.append(f"  level: {20 * torch.log10(torch.tensor(gain)).item():+.2f} dB to put "
                          f"the sub-10 kHz energy back where the input had it")
         out = _from_work(out, side)
+        band_out = _bandwidth(out, SR)
+        if band_out is not None:
+            lines.append(f"  output spectrum ends at {band_out / 1000:.1f} kHz")
         peak_out = float(out.abs().max())
         if peak_out > 1.0:
             out = out / peak_out

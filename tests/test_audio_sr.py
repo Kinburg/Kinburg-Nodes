@@ -161,6 +161,53 @@ check("silence in or out cannot produce a divide-by-zero",
       asr._low_band_gain(torch.zeros(1, 1, 128), ref, SR) == 1.0
       and asr._low_band_gain(ref, torch.zeros(1, 1, 128), SR) == 1.0)
 
+# ------------------------------------------------------------------------------------ the crossover
+def _band_db(x, lo, hi):
+    """Energy of `x` between lo and hi Hz, in dB."""
+    spec = torch.fft.rfft(x.reshape(-1).to(torch.float64))
+    bins = torch.fft.rfftfreq(x.reshape(-1).shape[0], 1.0 / SR)
+    return 10 * torch.log10((spec[(bins >= lo) & (bins < hi)].abs() ** 2).sum() + 1e-30).item()
+
+
+torch.manual_seed(0)
+noise = torch.randn(1, 1, SR * 3, dtype=torch.float32)
+dull = asr._lowpass(noise, SR, 12000.0)            # an AceStep-like mix: nothing above ~12 kHz
+bw = asr._bandwidth(dull, SR)
+check("the bandwidth of a mix cut at 12 kHz is read as about 12 kHz",
+      bw is not None and 11500 < bw < 13000, bw)
+check("...and full-band noise is read as full band", asr._bandwidth(noise, SR) > 22000,
+      asr._bandwidth(noise, SR))
+check("silence and a clip shorter than one frame have no bandwidth",
+      asr._bandwidth(torch.zeros(1, 1, SR), SR) is None and asr._bandwidth(noise[..., :1000], SR) is None)
+quiet_start = torch.cat([torch.zeros(1, 1, SR * 10), dull], dim=-1)
+check("ten seconds of silence in front do not move the measurement",
+      abs(asr._bandwidth(quiet_start, SR) - bw) < 200, asr._bandwidth(quiet_start, SR))
+
+check("the filter keeps the length and lines up sample for sample — no delay left in",
+      asr._lowpass(noise, SR, 11000.0).shape == noise.shape
+      and torch.corrcoef(torch.stack([asr._lowpass(noise, SR, 11000.0).reshape(-1),
+                                      asr._lowpass(noise, SR, 11000.0, transition=2000.0).reshape(-1)]))[0, 1] > 0.99)
+same = asr._crossover(noise, noise, SR, 11000.0)
+check("a crossover of a signal with itself is that signal — the two halves sum to exactly 1",
+      float((same - noise).abs().max()) < 1e-5, float((same - noise).abs().max()))
+
+drifted = noise * 0.8 + 0.3 * torch.randn_like(noise)  # the model: wrong level AND different content low down
+joined = asr._crossover(dull, drifted, SR, 11000.0)
+low_err = _band_db(joined - dull, 0, 10000) - _band_db(dull, 0, 10000)
+check("below the crossover the input comes through, the model's low band does not (error under -60 dB)",
+      low_err < -60, round(low_err, 1))
+check("above the input's edge the result is the model's top end, at the model's level",
+      abs(_band_db(joined, 14000, 23000) - _band_db(drifted, 14000, 23000)) < 0.1,
+      (_band_db(joined, 14000, 23000), _band_db(drifted, 14000, 23000)))
+check("the join is flat: a band straddling the crossover is neither a hole nor a bump",
+      abs(_band_db(asr._crossover(noise, noise * 1.0, SR, 11000.0), 10500, 11500)
+          - _band_db(noise, 10500, 11500)) < 0.01)
+
+defaults = asr.KinburgAudioSR.INPUT_TYPES()["required"]
+check("the crossover is on by default, measured from the input", defaults["crossover"][0][0] == asr.XO_AUTO)
+check("the new inputs come LAST, so a saved workflow's widget values still line up",
+      list(defaults)[-2:] == ["crossover", "crossover_khz"], list(defaults)[-2:])
+
 # ------------------------------------------------------------------------------------ node wiring
 check("the variant is read off the file name, since the two ship different configs",
       (asr._variant("audiosr_speech_fp32.safetensors"), asr._variant("audiosr_basic_fp32.safetensors"),

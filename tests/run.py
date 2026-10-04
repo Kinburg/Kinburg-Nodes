@@ -45,6 +45,8 @@ SUITES = [
     ("unplug", "py", TESTS / "test_unplug.py"),
     ("diskcache", "py", TESTS / "test_diskcache.py"),
     ("audio_sr", "py", TESTS / "test_audio_sr.py"),
+    ("remaster", "py", TESTS / "test_remaster.py"),
+    ("vae_loader", "py", TESTS / "test_vae_loader.py"),
     ("echo_translit", "py", TESTS / "test_echo_translit.py"),
     ("echo_subs", "py", TESTS / "test_echo_subs.py"),
     ("echo_track", "py", TESTS / "test_echo_track.py"),
@@ -59,6 +61,7 @@ SUITES = [
     ("satyr_trim", "py", TESTS / "test_satyr_trim.py"),
     ("satyr_music", "py", TESTS / "test_satyr_music.py"),
     ("satyr_midi", "py", TESTS / "test_satyr_midi.py"),
+    ("satyr_edit", "py", TESTS / "test_satyr_edit.py"),
     ("docs", "py", TESTS / "test_docs.py"),
     ("chat.js", "js", TESTS / "js" / "build_chat.mjs"),
     ("dream_board.js", "js", TESTS / "js" / "build_dream_board.mjs"),
@@ -67,6 +70,7 @@ SUITES = [
     ("card_presets.js", "js", TESTS / "js" / "build_card_presets.mjs"),
     ("ouroboros_log.js", "js", TESTS / "js" / "build_ouroboros_log.mjs"),
     ("llm_server_log.js", "js", TESTS / "js" / "build_llm_server_log.mjs"),
+    ("satyr_edit.js", "js", TESTS / "js" / "build_satyr_edit.mjs"),
 ]
 
 

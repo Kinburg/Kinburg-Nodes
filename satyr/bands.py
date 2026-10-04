@@ -40,13 +40,14 @@ class Phrase:
     """One line of the Vocal voice: where it sits in time, how many syllables it can hold, and who
     sings it."""
 
-    __slots__ = ("section", "line", "start_bar", "bars", "notes", "pitches", "band")
+    __slots__ = ("section", "line", "start_bar", "bars", "notes", "pitches", "band", "tied")
 
-    def __init__(self, section, line, start_bar, bars, notes, pitches):
+    def __init__(self, section, line, start_bar, bars, notes, pitches, tied=False):
         self.section, self.line = section, line
         self.start_bar, self.bars = start_bar, bars
         self.notes, self.pitches = notes, pitches
         self.band = None
+        self.tied = tied        # opens on the far end of a note held over from the phrase before
 
     @property
     def silent(self):
@@ -79,16 +80,21 @@ def read(score):
 
     Silent phrases are kept rather than dropped: an intro of nothing but rests is a real part of the
     song's shape, and a caller lining phrases up against lyric lines needs to see the holes.
+
+    The tie state runs on from one line to the next, so a note held from one group into the next is
+    the earlier phrase's syllable and not a second one at the start of the later phrase.
     """
-    out, bar = [], 0
+    out, bar, tied = [], 0, False
     for section in score.sections:
         for group in section.groups:
             if group.vocal is None:
+                tied = False
                 continue
             line = score.lines[group.vocal]
             width = N.bars(line)
             out.append(Phrase(section.label, group.vocal, bar, width,
-                              N.attacks(line, score.key), N.pitches(line, score.key)))
+                              N.attacks(line, score.key, tied), N.pitches(line, score.key), tied))
+            tied = N.tied_out(line, tied)
             bar += width
     return out
 
