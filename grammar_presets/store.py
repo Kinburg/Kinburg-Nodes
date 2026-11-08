@@ -1,9 +1,13 @@
-"""Grammar Presets store — built-in GBNF grammars + a user-editable layer on disk.
+"""Prompt Presets store — named prompts, each with an optional GBNF grammar.
 
-A built-in template forces an LLM's output into a fixed shape, so feeding a **vision** model a
-photo returns exactly that structure (e.g. a Character Card / Entity Card as JSON). Users add
-their own named grammars (persisted to ``data/store.json``). The chosen grammar wires into a
-**Local LLM (GGUF)** node's ``grammar_override`` input.
+A preset is a ``prompt`` and a ``grammar``, and either may be empty. The two are kept together
+because a pair is one contract: the grammar forces the output's sections (``===PROMPT===``,
+``===NOTES===`` …) and the prompt tells the model what goes in each. An empty field resolves to "",
+which the Local LLM (GGUF) node already reads as "not set" — an empty ``system_override`` keeps the
+config's system prompt, an empty ``grammar_override`` means no grammar.
+
+The built-in grammars below are read-only. Saving one under its own name writes a user entry on top
+of it; deleting that entry brings the original back. User presets persist to ``data/store.json``.
 
 Guarded so the package still imports without ComfyUI present (registry scan, tests).
 """
@@ -11,7 +15,7 @@ import json
 import os
 import threading
 
-# The "no grammar" option — resolves to "" (an empty grammar_override = no constraint).
+# The "no preset" option — every output resolves to "".
 NONE = "🚫 None"
 
 # Built-in grammars. JSON is the most robust shape to constrain (and to parse / read as context);
@@ -112,72 +116,91 @@ def _store_path():
 
 
 def _load_user():
-    """User grammars as {name: text}; {} when absent/corrupt."""
+    """User presets as {name: {"prompt": str, "grammar": str}}; {} when absent/corrupt.
+
+    Also reads the file Grammar Presets wrote (``{"grammars": {name: text}}``) as grammar-only
+    presets; the next save rewrites it in the new shape.
+    """
     try:
         with open(_store_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         data = {}
+    if isinstance(data.get("presets"), dict):
+        return {name: {"prompt": str(p.get("prompt") or ""), "grammar": str(p.get("grammar") or "")}
+                for name, p in data["presets"].items() if isinstance(name, str) and isinstance(p, dict)}
     g = data.get("grammars") if isinstance(data.get("grammars"), dict) else {}
-    return {name: text for name, text in g.items() if isinstance(name, str) and isinstance(text, str)}
+    return {name: {"prompt": "", "grammar": text}
+            for name, text in g.items() if isinstance(name, str) and isinstance(text, str)}
 
 
-def _save_user(grammars):
+def _save_user(presets):
     p = _store_path()
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"grammars": grammars}, f, ensure_ascii=False, indent=2)
+        json.dump({"presets": presets}, f, ensure_ascii=False, indent=2)
     os.replace(tmp, p)
 
 
-def grammars_merged():
-    """Built-in grammars with the user's own layered on top."""
-    out = dict(DEFAULTS)
-    out.update(_load_user())
+def _merged(user):
+    out = {name: {"prompt": "", "grammar": text} for name, text in DEFAULTS.items()}
+    out.update(user)
     return out
 
 
+def _order(user):
+    return [NONE] + list(DEFAULTS) + sorted((n for n in user if n not in DEFAULTS), key=str.lower)
+
+
 def list_names():
-    """Dropdown values: NONE first, then built-ins, then user-added (not already built-in)."""
-    names = [NONE] + list(DEFAULTS.keys())
-    for name in _load_user():
-        if name not in DEFAULTS:
-            names.append(name)
-    return names
+    """Dropdown values: NONE first, then the built-ins, then the user's own A→Z."""
+    return _order(_load_user())
 
 
 def get(name):
-    """The selected preset's grammar text ("" for NONE / unknown)."""
-    if not name or name == NONE:
-        return ""
-    return grammars_merged().get(name, "")
+    """The preset ``{"prompt", "grammar"}`` saved under `name`; None when there is none."""
+    return _merged(_load_user()).get(name)
 
 
 def full_data():
-    """Everything the frontend needs."""
+    """Everything the dropdowns and the library list need. The texts are left out: the editor
+    fetches the one preset it opens."""
+    user = _load_user()
     return {
         "none": NONE,
-        "order": list_names(),
-        "grammars": grammars_merged(),
-        "builtins": list(DEFAULTS.keys()),
+        "order": _order(user),
+        "presets": {name: {"builtin": name in DEFAULTS,
+                           "edited": name in DEFAULTS and name in user,
+                           "prompt": bool(p["prompt"].strip()),
+                           "grammar": bool(p["grammar"].strip())}
+                    for name, p in _merged(user).items()},
     }
 
 
-def upsert_grammar(name, text, delete=False):
-    """Add/update (or delete) a user grammar. Built-ins can't be deleted."""
+def upsert(name, prompt="", grammar="", delete=False, old_name=""):
+    """Add/update, rename or delete a user preset.
+
+    Saving under a built-in's name writes an edited copy over it; deleting that copy restores the
+    original, and a built-in with no copy can't be deleted. ``old_name`` renames: the entry is
+    written under ``name`` and the old key dropped under the same lock, so a crash between two
+    calls can't leave the library holding both.
+    """
     name = (name or "").strip()
     if not name or name == NONE:
-        raise ValueError("grammar name is required")
+        raise ValueError("preset name is required")
+    old_name = (old_name or "").strip()
     with _LOCK:
         user = _load_user()
         if delete:
             if name in DEFAULTS and name not in user:
-                raise ValueError("cannot delete a built-in grammar")
+                raise ValueError("cannot delete a built-in preset")
             user.pop(name, None)
         else:
-            if not (text or "").strip():
-                raise ValueError("grammar text is required")
-            user[name] = text
+            if not (prompt or "").strip() and not (grammar or "").strip():
+                raise ValueError("a preset needs a prompt, a grammar, or both")
+            if old_name and old_name != name:
+                user.pop(old_name, None)
+            user[name] = {"prompt": prompt or "", "grammar": grammar or ""}
         _save_user(user)
     return full_data()

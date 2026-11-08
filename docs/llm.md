@@ -658,8 +658,8 @@ own criteria without editing the shipped file (it survives a git pull). Category
 > **System Purpose & Overview**  
 > Save and recall Character and Entity card presets dynamically from disk.
 
-**`Card Save`** closes the loop Grammar Presets opens: wire an LLM's JSON card output (constrained
-by a Grammar Presets grammar) into its `json_string` input and the parsed character / entity lands
+**`Card Save`** closes the loop Prompt Presets opens: wire an LLM's JSON card output (constrained
+by a Prompt Presets card grammar) into its `json_string` input and the parsed character / entity lands
 in the **Card Presets** library — no JSON Extract → 12-wire dance into a Character Card (the
 grammar's keys already mirror the card fields 1:1). `card_type` is `auto` (detects character vs
 entity from the keys) / `character` / `entity`; **`save_as`** names the preset (empty → uses the
@@ -696,19 +696,34 @@ changes.
 
 ---
 
-## 📝 `grammar_presets/` — Grammar Presets
+## 📝 `grammar_presets/` — Prompt Presets
 
 > **System Purpose & Overview**  
-> Pre-built GBNF grammar selection library for forcing structured LLM outputs (JSON, markdown, prompt schemas).
+> A library of named prompts, each with an optional GBNF grammar, picked from one fixed-size dropdown.
 
-**`Grammar Presets`** is a dropdown of **GBNF grammars** → one `grammar` STRING output. It ships
-with templates that force an LLM's output into a fixed shape — **Character Card (JSON)**,
-**Entity Card (JSON)**, **Siren Song Config (text)** and **Siren Voice Plan (table)** — and you can
-add / edit / delete your own (**➕ Add grammar**, persisted on disk). Wire the `grammar` output into
-a **Local LLM (GGUF)** node's `grammar_override` input, feed that node a **photo** + a short prompt
-("fill the card from this image"), and the vision model returns exactly that structure straight from
-the picture — no multi-image-context gymnastics. Pair it with **Card Save** (below) to drop that
-generated card straight into your library.
+**`Prompt Presets`** picks a saved preset and emits its `grammar`, its `prompt` and its `name`. A
+preset is a prompt, a GBNF grammar, or both: a system prompt that asks for `===PROMPT===` /
+`===NOTES===` sections and the grammar that enforces them are saved as **one entry**, so the two
+can't drift apart. Wire `grammar` into a **Local LLM (GGUF)** node's `grammar_override` and `prompt`
+into its `system_override`. An empty field emits `""`, which that node already reads as *not set*:
+a grammar-only preset keeps the Settings node's system prompt, and a prompt-only preset runs
+without a grammar. The node keeps its old class id `GrammarPresets` (it was Grammar Presets), so
+saved workflows load unchanged.
+
+The library lives **on disk, not in the workflow** (`grammar_presets/data/store.json`). A workflow
+that picks a preset this machine doesn't have stops with *no preset named …* rather than running
+without its grammar. **🗂 Manage** opens the **prompt library** on the preset the node has picked:
+search, **➕ New**, **✏️ edit** (prompt and grammar side by side), **⧉ duplicate**, and delete in
+two clicks. Rename a preset in the editor and every Prompt Presets node that picked it follows.
+Typing in the node's open dropdown searches it.
+
+It ships with read-only grammars — **Character Card (JSON)**, **Entity Card (JSON)**, **Siren Song
+Config (text)** and **Siren Voice Plan (table)**. Saving one under its own name keeps your edit
+over it (marked *✎ edited*), **↺** drops the edit and restores the original, and a new name saves
+a copy beside it. The card grammars are what let a **photo** fill a card: wire `grammar` into a
+Local LLM (GGUF) node, feed it the picture and a short prompt ("fill the card from this image"), and
+the vision model returns exactly that structure. Pair it with **Card Save** (above) to drop that
+card straight into your library.
 
 **Song Config** is the LLM pass that turns a brief into Siren Cast's inputs: a caption block (`*Genre:*` / `*Instruments:*`), a blank
 line, then the metas as `key: value`. `keyscale` / `language` / `timesignature` are pinned to the
@@ -766,6 +781,12 @@ downstream and the **LLM doesn't re-run**. This uses ComfyUI's *lazy evaluation*
 a randomized seed. The edited text rides in a hidden, serialized `saved_text` widget (so it
 reaches the backend and is stored in the workflow); edit it and re-queue to push changes without
 regenerating. Leave the toggle off for the original behavior. Category `Kinburg-Nodes/util`.
+
+**`Show Text (Lite)`** is the same node without the file side — no `save_path`, `autosave` or
+**💾 Save .md** — so it is three rows shorter. It also has no STRING input at all, so a text link
+dragged out onto the canvas to create it always lands on `value` (the full node's goes to
+`save_path`, which takes a STRING link before a `*` one). Everything else is shared: the markdown /
+raw toggle, **📋 Copy**, the `use_saved_text` freeze and the `text` output. Same category.
 
 ---
 

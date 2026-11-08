@@ -37,6 +37,13 @@ patch in `web/combo_to_string.js` allows the link and pushes the selected value 
 `string` output carries the value — e.g. `ru` — wherever you need it. Category
 `Kinburg-Nodes/util`.
 
+**`String to Combo`** goes the other way: wire a text into its `string` input and its `combo`
+output connects to any dropdown input — a KSampler's `sampler_name` or `scheduler` — so an
+LLM, a Text Transform or a switch can pick the option. Surrounding whitespace is stripped (an LLM's
+trailing newline), and the rest must match one of the target's options exactly. ComfyUI does not
+check a linked dropdown's value against its list, so a typo fails in the target node, not here.
+Category `Kinburg-Nodes/util`.
+
 **`Text Transform`** does string find/replace, regex, trim and case in one node —
 `replace`, `regex_replace`, `regex_extract`, `regex_findall`, `strip`, `collapse_whitespace`,
 `lower`/`upper`/`title`, with `ignorecase` / `multiline` / `dotall` flags. The regex is

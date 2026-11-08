@@ -1,4 +1,4 @@
-"""PromptServer routes for Prompt Presets — read the merged store, add/delete user
+"""PromptServer routes for Prompt Constructor — read the merged store, add/delete user
 presets, save/delete setups.
 
   GET  /kinburg/presets/data     -- merged presets + built-in name lists + saved setups

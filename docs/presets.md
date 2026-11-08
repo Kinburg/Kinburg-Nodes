@@ -206,12 +206,12 @@ defaults, rename (presets follow), delete, and a raw view of the stored recipe. 
 
 ---
 
-## 💬 `prompt_presets/` — Prompt Presets
+## 💬 `prompt_presets/` — Prompt Constructor
 
 > **System Purpose & Overview**  
-> Save and manage reusable prompt snippet libraries.
+> Assemble a prompt from five slots of reusable snippets.
 
-**`Prompt Presets`** is five **flexible preset slots**, each emitting a `STRING` prompt fragment
+**`Prompt Constructor`** (class id `PromptPresets`) is five **flexible preset slots**, each emitting a `STRING` prompt fragment
 (five outputs). Each slot has **two dropdowns** — a **category** selector and a **preset**
 selector (the presets of the chosen category) — so any slot can draw from any category. Out of
 the box the five slots default to the classic **Camera / Aesthetics / Light / Medium /
@@ -229,7 +229,7 @@ category+preset); the **⚙ setup** selector at the top re-applies any saved set
 and **🗑 Manage** lists your setups and custom presets for deletion (built-ins can't be removed).
 Custom presets, categories and setups are persisted on disk (`prompt_presets/data/store.json`,
 git-ignored) via `PromptServer` routes under `/kinburg/presets`, so they survive restarts and
-appear across all `Prompt Presets` nodes without an object-info reload. Category
+appear across all `Prompt Constructor` nodes without an object-info reload. Category
 `Kinburg-Nodes/prompt`.
 
 ---
@@ -259,8 +259,9 @@ Set/Get Accumulator → **Image Compare**, to render and compare every variant a
 
 Stack any number of LoRAs (with their trigger words) onto a model in one node. **`Lora Trigger
 Loader`** is pure config: a searchable LoRA dropdown, `strength_model` + `strength_clip`, and an
-optional `trigger` word; its single `lora` output (type `KINBURG_LORA`) carries that spec —
-nothing is loaded yet. **`Lora Unlim Accumulator`** takes a `model` (+ optional `clip`) and a
+optional `trigger` word; its `lora` output (type `KINBURG_LORA`) carries that spec —
+nothing is loaded yet — and its `name` output is the LoRA's bare file name, without folder or
+extension (`flux/portrait.safetensors` → `portrait`). **`Lora Unlim Accumulator`** takes a `model` (+ optional `clip`) and a
 `prompt` (input only — wire it in), plus an auto-growing list of `lora_*` inputs fed by the
 loaders (the `clip` input sits above the first LoRA). It loads and applies each LoRA in slot
 order — to the model with `strength_model`, and to CLIP with `strength_clip` when a CLIP is

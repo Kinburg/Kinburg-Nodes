@@ -1,7 +1,9 @@
-"""PromptServer routes for Grammar Presets.
+"""PromptServer routes for Prompt Presets.
 
-  GET  /kinburg/grammars/data    -- built-in + user grammars, and the built-in name list
-  POST /kinburg/grammars/preset  -- {name, text, delete?} add/update/delete a user grammar
+  GET  /kinburg/grammars/data    -- preset names in dropdown order; per preset whether it is a
+                                    built-in, an edited built-in, and which fields it fills
+  GET  /kinburg/grammars/preset  -- ?name=X : one preset's prompt and grammar (what the editor opens on)
+  POST /kinburg/grammars/preset  -- {name, prompt, grammar, old_name?, delete?} add/update/rename/delete
 
 Guarded so the package still imports without ComfyUI/aiohttp present.
 """
@@ -20,6 +22,17 @@ try:
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)}, status=500)
 
+    @routes.get("/kinburg/grammars/preset")
+    async def _get(request):
+        name = request.query.get("name") or ""
+        try:
+            p = store.get(name)
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
+        if p is None:
+            return web.json_response({"ok": False, "error": f"no preset named '{name}'"}, status=404)
+        return web.json_response({"ok": True, "name": name, **p})
+
     @routes.post("/kinburg/grammars/preset")
     async def _preset(request):
         try:
@@ -27,10 +40,12 @@ try:
         except Exception:
             return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
         try:
-            data = store.upsert_grammar(
+            data = store.upsert(
                 body.get("name") or "",
-                body.get("text") or "",
+                body.get("prompt") or "",
+                body.get("grammar") or "",
                 delete=bool(body.get("delete")),
+                old_name=body.get("old_name") or "",
             )
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)

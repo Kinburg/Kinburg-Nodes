@@ -1,8 +1,8 @@
 """LoRA pair — pick LoRAs (with trigger words) and stack them onto a model in one node.
 
 * `Lora Trigger Loader` is pure config: a searchable LoRA dropdown, a strength, and an optional
-  trigger word. Its single `lora` output (type KINBURG_LORA) carries the spec {name, strength,
-  trigger} — nothing is loaded here.
+  trigger word. Its `lora` output (type KINBURG_LORA) carries the spec {name, strength,
+  trigger} — nothing is loaded here — and `name` is the bare file name (no folder, no extension).
 * `Lora Unlim Accumulator` takes a model (+ optional CLIP) and a prompt, plus an auto-growing
   list of `lora_*` specs. It loads and applies each LoRA to the model (and CLIP when connected),
   appends the non-empty trigger words to the prompt, and outputs the patched model/CLIP/prompt —
@@ -12,6 +12,7 @@
 Heavy ComfyUI imports live inside the methods so the package still imports (and the Registry can
 enumerate nodes) without ComfyUI present.
 """
+import os
 import re
 from ..categories import CAT_LORA
 
@@ -42,14 +43,17 @@ class LoraTriggerLoader:
             },
         }
 
-    RETURN_TYPES = (LORA_TYPE,)
-    RETURN_NAMES = ("lora",)
+    RETURN_TYPES = (LORA_TYPE, "STRING")
+    RETURN_NAMES = ("lora", "name")
+    OUTPUT_TOOLTIPS = ("The LoRA spec for Lora Unlim Accumulator.",
+                       "The LoRA's file name without folder or extension: 'flux/portrait.safetensors' -> 'portrait'.")
     FUNCTION = "run"
     CATEGORY = CAT_LORA
 
     def run(self, lora_name, strength_model, strength_clip, trigger=""):
         return ({"name": lora_name, "strength_model": float(strength_model),
-                 "strength_clip": float(strength_clip), "trigger": (trigger or "").strip()},)
+                 "strength_clip": float(strength_clip), "trigger": (trigger or "").strip()},
+                os.path.splitext(os.path.basename(lora_name))[0])
 
 
 class LoraUnlimAccumulator:

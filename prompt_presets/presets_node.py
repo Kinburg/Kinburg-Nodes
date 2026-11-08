@@ -1,4 +1,4 @@
-"""Prompt Presets — five flexible preset slots, one prompt-fragment STRING output each.
+"""Prompt Constructor — five flexible preset slots, one prompt-fragment STRING output each.
 
 Each slot has TWO dropdowns: a **category** selector and a **preset** selector (the presets of
 the chosen category). Out of the box the five slots default to the classic camera / aesthetics /
@@ -46,4 +46,4 @@ class PromptPresets:
 
 
 NODE_CLASS_MAPPINGS = {"PromptPresets": PromptPresets}
-NODE_DISPLAY_NAME_MAPPINGS = {"PromptPresets": "Prompt Presets"}
+NODE_DISPLAY_NAME_MAPPINGS = {"PromptPresets": "Prompt Constructor"}

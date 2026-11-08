@@ -24,6 +24,9 @@ picks the output source:
     to push changes downstream without regenerating.
 The edited text rides in a hidden, serialized ``saved_text`` widget (same pattern as the Chat
 node's ``history_json``) so it reaches ``run()`` and survives a workflow reload / restart.
+
+**Show Text (Lite)** is the same node without the file side — no ``save_path``, ``autosave`` or
+💾 Save — so it is three rows shorter. Display, editing, freeze and the ``text`` output are shared.
 """
 import os
 import json
@@ -167,5 +170,21 @@ class KinburgShowText:
         return {"ui": {"kinburg_showtext": [text]}, "result": (text,)}
 
 
-NODE_CLASS_MAPPINGS = {"KinburgShowText": KinburgShowText}
-NODE_DISPLAY_NAME_MAPPINGS = {"KinburgShowText": "Show Text (Markdown)"}
+class KinburgShowTextLite(KinburgShowText):
+    # run() is inherited: without the autosave input it stays at its False default, so nothing is written.
+    @classmethod
+    def INPUT_TYPES(cls):
+        types = super().INPUT_TYPES()
+        optional = types["optional"]
+        del optional["save_path"]
+        del optional["autosave"]
+        # A link dropped onto a new node takes the first free input of its exact type before a `*`
+        # one, so a STRING output would grab the hidden carrier's socket instead of `value` — and
+        # nobody can see it to reconnect. Its own socket type keeps the text widget and leaves the
+        # node with no STRING input at all.
+        optional["saved_text"] = ("SAVED_TEXT", {**optional["saved_text"][1], "widgetType": "STRING"})
+        return types
+
+
+NODE_CLASS_MAPPINGS = {"KinburgShowText": KinburgShowText, "KinburgShowTextLite": KinburgShowTextLite}
+NODE_DISPLAY_NAME_MAPPINGS = {"KinburgShowText": "Show Text (Markdown)", "KinburgShowTextLite": "Show Text (Lite)"}

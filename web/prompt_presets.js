@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-// Prompt Presets — five FLEXIBLE slots. Each slot has two dropdowns: a category selector
+// Prompt Constructor — five FLEXIBLE slots. Each slot has two dropdowns: a category selector
 // (cat_i) and a preset selector (preset_i, the presets of the chosen category). Categories and
 // presets are served live from the backend store, so edits appear without an object_info
 // reload. Buttons add presets, manage categories, save the current slots as a "setup", and

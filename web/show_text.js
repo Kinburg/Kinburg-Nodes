@@ -8,8 +8,9 @@ import { api } from "../../scripts/api.js";
 //     survives switching between workflow tabs — unlike the core Preview Text node.
 //   • 💾 Save posts the text to /kinburg/showtext/save (writes a .md file); 📋 Copy
 //     copies it to the clipboard; a header shows a char/line counter.
+// Show Text (Lite) is the same node minus save_path / autosave, so it gets no 💾 button.
 
-const CLASS = "KinburgShowText";
+const CLASSES = ["KinburgShowText", "KinburgShowTextLite"];
 const wv = (node, name) => node.widgets?.find((w) => w.name === name);
 
 // Hide the serialized `saved_text` carrier widget (single-line, so no stray DOM textarea).
@@ -229,7 +230,7 @@ function setupNode(node) {
   root.addEventListener("wheel", (e) => e.stopPropagation());
 
   // Frontend-only controls, placed just above the display.
-  node.addWidget("button", "💾 Save .md", null, () => saveToDisk(node), { serialize: false });
+  if (wv(node, "save_path")) node.addWidget("button", "💾 Save .md", null, () => saveToDisk(node), { serialize: false });
   node.addWidget("button", "📋 Copy", null, () => copyText(node), { serialize: false });
   node.addDOMWidget("kb_display", "kinburg_showtext", root, { serialize: false });
 
@@ -248,7 +249,7 @@ function setupNode(node) {
 app.registerExtension({
   name: "Kinburg.ShowText",
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData.name !== CLASS) return;
+    if (!CLASSES.includes(nodeData.name)) return;
 
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {

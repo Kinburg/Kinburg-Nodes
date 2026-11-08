@@ -2,8 +2,8 @@
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
 [![version](https://img.shields.io/badge/version-3.6.1-blue.svg)](pyproject.toml)
-[![nodes](https://img.shields.io/badge/nodes-113-orange.svg)](#-node-index)
-[![tests](https://img.shields.io/badge/tests-2985%20checks-brightgreen.svg)](#-tests)
+[![nodes](https://img.shields.io/badge/nodes-115-orange.svg)](#-node-index)
+[![tests](https://img.shields.io/badge/tests-3016%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![ComfyUI Manager](https://img.shields.io/badge/ComfyUI--Manager-installable-8A2BE2.svg)](https://github.com/ltdrdata/ComfyUI-Manager)
@@ -22,7 +22,7 @@ One folder = one package: ComfyUI reads the node mappings from the root `__init_
 <!-- BEGIN GENERATED index — tools/gen_readme_index.py -->
 ## 📍 Node Index
 
-All **113** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
+All **115** nodes, grouped by the package they live in. Every package links to its full documentation under [`docs/`](docs).
 
 ### 🧠 LLM & Vision Systems
 
@@ -35,8 +35,8 @@ All **113** nodes, grouped by the package they live in. Every package links to i
 | [`context/` — Character Card, Entity Card, Context Collector](docs/llm.md#-context--character-card-entity-card-context-collector) | `Character Card`, `Context Collector`, `Entity Card` |
 | [`vision_judge/` — Vision LLM Judge & Criteria Builder](docs/llm.md#-vision_judge--vision-llm-judge--criteria-builder) | `Criteria Builder 📋`, `Vision LLM Judge` |
 | [`card_presets/` — Card Save & Card Presets](docs/llm.md#-card_presets--card-save--card-presets) | `Card Presets`, `Card Save` |
-| [`grammar_presets/` — Grammar Presets](docs/llm.md#-grammar_presets--grammar-presets) | `Grammar Presets` |
-| [`show_text/` — Show Text (Markdown)](docs/llm.md#-show_text--show-text-markdown) | `Show Text (Markdown)` |
+| [`grammar_presets/` — Prompt Presets](docs/llm.md#-grammar_presets--prompt-presets) | `Prompt Presets` |
+| [`show_text/` — Show Text (Markdown)](docs/llm.md#-show_text--show-text-markdown) | `Show Text (Lite)`, `Show Text (Markdown)` |
 | [`gguf_convert/` — Safetensors → GGUF Converters](docs/llm.md#-gguf_convert--safetensors--gguf-converters) | `Diffusion Safetensors -> GGUF (city96)`, `Safetensors -> GGUF (llama.cpp)` |
 
 ### 🐍 Iterative Samplers & Optimizers
@@ -78,7 +78,7 @@ All **113** nodes, grouped by the package they live in. Every package links to i
 | Package | Nodes |
 |---|---|
 | [`model_presets/` — Model Capture & Settings Management](docs/presets.md#-model_presets--model-capture--settings-management) | `Model Capture 📥`, `Model Select 🎛`, `Settings Save 💾`, `Settings Select ⚙` |
-| [`prompt_presets/` — Prompt Presets](docs/presets.md#-prompt_presets--prompt-presets) | `Prompt Presets` |
+| [`prompt_presets/` — Prompt Constructor](docs/presets.md#-prompt_presets--prompt-constructor) | `Prompt Constructor` |
 | [`prompt_variations/` — Prompt Variations](docs/presets.md#-prompt_variations--prompt-variations) | `Prompt Variations` |
 | [`lora/` — Lora Trigger Loader & Accumulator](docs/presets.md#-lora--lora-trigger-loader--accumulator) | `Lora Trigger Loader`, `Lora Unlim Accumulator` |
 
@@ -98,7 +98,7 @@ All **113** nodes, grouped by the package they live in. Every package links to i
 
 | Package | Nodes |
 |---|---|
-| [`util/` — General Workflow Utilities](docs/utilities.md#-util--general-workflow-utilities) | `Any Gate`, `Any Switch`, `Any Unplug`, `Any to String`, `Color Picker`, `Combo to String`, `Date String`, `JSON Extract`, `Load VAE (Precision)`, `Text Transform`, `Unlim Text Concat` |
+| [`util/` — General Workflow Utilities](docs/utilities.md#-util--general-workflow-utilities) | `Any Gate`, `Any Switch`, `Any Unplug`, `Any to String`, `Color Picker`, `Combo to String`, `Date String`, `JSON Extract`, `Load VAE (Precision)`, `String to Combo`, `Text Transform`, `Unlim Text Concat` |
 | [`timer/` — Execution Timer](docs/utilities.md#-timer--execution-timer) | `Start Timer`, `Stop Timer` |
 | [`gen_info/` — Generation Info & Filter](docs/utilities.md#-gen_info--generation-info--filter) | `Generation Info`, `Generation Info Filter` |
 | [`group_control/` — Group Control 🎚️](docs/utilities.md#-group_control--group-control-) | `Group Control 🎚️` |
@@ -147,7 +147,6 @@ All **113** nodes, grouped by the package they live in. Every package links to i
 | Get Accumulator (prompts) | `GetAccumPrompts` | `Kinburg-Nodes/flow/accumulators` |
 | Get Accumulator (texts) | `GetAccumTexts` | `Kinburg-Nodes/flow/accumulators` |
 | Get by Index | `KinburgGetByIndex` | `Kinburg-Nodes/flow/loops` |
-| Grammar Presets | `GrammarPresets` | `Kinburg-Nodes/LLM/presets` |
 | Group Control 🎚️ | `KinburgGroupControl` | `Kinburg-Nodes/util` |
 | Image Batch Insert | `ImageBatchInsert` | `Kinburg-Nodes/image` |
 | Image Batch Remove | `ImageBatchRemove` | `Kinburg-Nodes/image` |
@@ -183,7 +182,8 @@ All **113** nodes, grouped by the package they live in. Every package links to i
 | Ouroboros Live Log 🐍📜 | `KinburgOuroborosLog` | `Kinburg-Nodes/Bestiary/Ouroboros` |
 | Phantas Storyboard 🎞 | `KinburgPhantasStoryboard` | `Kinburg-Nodes/Bestiary/Phantas` |
 | Phantas 🎞 | `KinburgPhantas` | `Kinburg-Nodes/Bestiary/Phantas` |
-| Prompt Presets | `PromptPresets` | `Kinburg-Nodes/prompt` |
+| Prompt Constructor | `PromptPresets` | `Kinburg-Nodes/prompt` |
+| Prompt Presets | `GrammarPresets` | `Kinburg-Nodes/LLM/presets` |
 | Prompt Variations | `PromptVariations` | `Kinburg-Nodes/prompt` |
 | Remaster (Loudness) 🎚️ | `KinburgRemaster` | `Kinburg-Nodes/audio` |
 | Repeat (Close) | `KinburgRepeatClose` | `Kinburg-Nodes/flow/loops` |
@@ -208,6 +208,7 @@ All **113** nodes, grouped by the package they live in. Every package links to i
 | Set Accumulator (texts) | `SetAccumTexts` | `Kinburg-Nodes/flow/accumulators` |
 | Settings Save 💾 | `KinburgSettingsSave` | `Kinburg-Nodes/model` |
 | Settings Select ⚙ | `KinburgSettingsSelect` | `Kinburg-Nodes/model` |
+| Show Text (Lite) | `KinburgShowTextLite` | `Kinburg-Nodes/util` |
 | Show Text (Markdown) | `KinburgShowText` | `Kinburg-Nodes/util` |
 | Siren (Music Sampler) 🧜 | `KinburgSirenSampler` | `Kinburg-Nodes/Bestiary/Siren` |
 | Siren Cast (Voice Plan) 🧜 | `KinburgSirenCast` | `Kinburg-Nodes/Bestiary/Siren` |
@@ -218,6 +219,7 @@ All **113** nodes, grouped by the package they live in. Every package links to i
 | Song Tags | `KinburgSongTags` | `Kinburg-Nodes/audio` |
 | Start Timer | `StartTimer` | `Kinburg-Nodes/util` |
 | Stop Timer | `StopTimer` | `Kinburg-Nodes/util` |
+| String to Combo | `StringToCombo` | `Kinburg-Nodes/util` |
 | Text Transform | `KinburgTextTransform` | `Kinburg-Nodes/util` |
 | Token Counter (GGUF) | `KinburgTokenCounter` | `Kinburg-Nodes/LLM` |
 | Unlim Image Batch | `UnlimImageBatch` | `Kinburg-Nodes/image` |

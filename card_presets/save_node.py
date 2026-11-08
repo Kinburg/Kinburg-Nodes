@@ -1,6 +1,6 @@
 """Card Save — turn an LLM's JSON card into a saved preset (and a ready Markdown block).
 
-Closes the loop that Grammar Presets opens: wire **Grammar Presets → Local LLM (GGUF)
+Closes the loop that Prompt Presets opens: wire **Prompt Presets → Local LLM (GGUF)
 (grammar_override) + photo → Card Save**, and the character / entity the model read off the
 picture lands straight in the **Card Presets** library — no JSON Extract → 12-wire dance into a
 Character Card. The grammar's JSON keys already mirror the card fields 1:1, so this node just
@@ -51,7 +51,7 @@ class CardSave:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "json_string": ("STRING", {"multiline": True, "default": "", "tooltip": "The card JSON — wire a Local LLM (GGUF) output constrained by a Grammar Presets grammar, or paste. Prose around the JSON is tolerated (first {…} is parsed)."}),
+                "json_string": ("STRING", {"multiline": True, "default": "", "tooltip": "The card JSON — wire a Local LLM (GGUF) output constrained by a Prompt Presets card grammar, or paste. Prose around the JSON is tolerated (first {…} is parsed)."}),
                 "card_type": ([_AUTO, "character", "entity"], {"default": _AUTO, "tooltip": "auto = detect from the JSON keys (a name+description with no character attributes → entity, else character). Force it if auto guesses wrong."}),
             },
             "optional": {
