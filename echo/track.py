@@ -457,6 +457,14 @@ def shot_lyrics(track, spans, instrumental="(instrumental - no words)", quote='"
     * **The singer is named on every line.** A duet where both voices are quoted anonymously reads
       as one person talking to themselves, and the cast block is the mechanism that holds identity
       across frames; the two have to agree about who is present.
+    * **A line across a cut is split at the cut**, word by word — each shot quotes the words whose
+      middle falls inside it. Quoted whole on both sides it reads as the line being sung twice,
+      and a storyboard that stamps the words onto the shot makes it so. A line with no word
+      timings cannot be split and is listed whole for both.
+
+    A sung shot also opens with its **section** in brackets (`3. [Chorus] Nina - "…"`), the one
+    most of its lines belong to: a planner that knows shot 3 and shot 9 are both the chorus can
+    give them the same place.
     """
     rows = []
     for i, (start, end) in enumerate(spans, 1):
@@ -464,14 +472,20 @@ def shot_lyrics(track, spans, instrumental="(instrumental - no words)", quote='"
         if not here:
             rows.append(f"{i}. {instrumental}")
             continue
-        parts = []
+        parts, labels = [], []
         for ln in here:
-            text = " ".join(str(ln.get("text") or "").split())
+            words = ln.get("words") or []
+            text = "".join(w["text"] for w in words if start <= (w["start"] + w["end"]) / 2 < end) \
+                if words else str(ln.get("text") or "")
+            text = " ".join(text.split())
             if not text:
                 continue
+            labels.append(" ".join(str(ln.get("label") or "").split()))
             voice = " ".join(str(ln.get("voice") or "").split())
             parts.append(f"{voice} - {quote}{text}{quote}" if voice else f"{quote}{text}{quote}")
-        rows.append(f"{i}. " + ("; ".join(parts) if parts else instrumental))
+        label = max(set(labels), key=labels.count) if labels else ""
+        rows.append(f"{i}. " + (f"[{label}] " if label else "")
+                    + ("; ".join(parts) if parts else instrumental))
     return rows
 
 

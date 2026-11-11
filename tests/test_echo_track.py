@@ -462,6 +462,9 @@ check("both singers of a shot are named",
       "Nina - " in rows[0] and "Gru - " in rows[0], rows[0])
 check("the words are quoted verbatim", "Воно не стихне під гуркіт небес!" in rows[0], rows[0])
 check("shots are numbered from 1", rows[0].startswith("1. ") and rows[2].startswith("3. "), rows)
+check("a sung shot opens with its section, so a planner can keep a place per section",
+      rows[0].startswith("1. [Verse 1] ") and rows[1].startswith("2. [Chorus] "), rows)
+check("...and an instrumental one has none", rows[2] == "3. (instrumental - no words)", rows[2])
 
 # The rule Phantas depends on and that nothing else enforces: the planner emits weights and the
 # frame grid is applied afterwards, so a model shown seconds starts reasoning in them.
@@ -474,6 +477,17 @@ check("NO timestamps reach the planner, in any shape",
 straddle = T.shot_lyrics(SUNG, [(0.0, 4.0), (4.0, 8.0)])
 check("a line across a cut is listed on both sides",
       "стихне" in straddle[0] and "стихне" in straddle[1], straddle)
+# With word timings the line is split at the cut instead — quoted whole on both sides, a storyboard
+# that stamps the words makes the singer sing it twice.
+TIMED = {"total": 20.0, "lines": [
+    {"start": 2.0, "end": 6.0, "voice": "Burg", "label": "Verse 1", "section": 0, "text": "one two three four",
+     "words": [{"text": "one ", "start": 2.0, "end": 3.0}, {"text": "two ", "start": 3.0, "end": 4.0},
+               {"text": "three ", "start": 4.0, "end": 5.0}, {"text": "four", "start": 5.0, "end": 6.0}]}]}
+check("a timed line across a cut is split at it, each word quoted once",
+      T.shot_lyrics(TIMED, [(0.0, 4.0), (4.0, 8.0)])
+      == ['1. [Verse 1] Burg - "one two"', '2. [Verse 1] Burg - "three four"'])
+check("...and a shot that holds no whole word of it is not given the line",
+      T.shot_lyrics(TIMED, [(0.0, 5.6), (5.6, 8.0)])[1] == "2. (instrumental - no words)")
 # ...but only when it really is on both sides.
 check("a line that merely grazes a boundary is not double-counted everywhere",
       "СТАЛЕВЕ" not in straddle[0] and "СТАЛЕВЕ" not in straddle[1], straddle)

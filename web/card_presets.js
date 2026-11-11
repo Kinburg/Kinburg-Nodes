@@ -11,6 +11,9 @@ import { api } from "../../scripts/api.js";
 // forbids it. Its editor draws the card's fields from a schema the backend reads off the card
 // NODES' own INPUT_TYPES, so a field added to Character Card shows up here without touching this
 // file, labelled exactly as the rendered block labels it.
+//
+// A card can also hold one picture (a character sheet, a location). The editor takes it from a
+// file, a paste or a drop, and sends it with Save as a data: URL; the backend stores it by hash.
 
 const NONE = "🚫 None";
 const ALL_TAGS = "🏷 All";
@@ -53,6 +56,18 @@ async function fetchPreset(name) {
 }
 
 const fieldsFor = (type) => (STORE.schema || FALLBACK_SCHEMA)[type] || FALLBACK_SCHEMA[type] || [];
+
+// A card's picture is "" (none), the file name the library stores it under, or a data: URL picked
+// in the editor and not saved yet.
+const pictureSrc = (pic) => (!pic ? "" : pic.startsWith("data:") ? pic
+  : api.apiURL(`/kinburg/cards/picture?file=${encodeURIComponent(pic)}`));
+const imagesIn = (list) => [...(list || [])].filter((f) => (f.type || "").startsWith("image/"));
+const readPicture = (file) => new Promise((ok, fail) => {
+  const r = new FileReader();
+  r.onload = () => ok(r.result);
+  r.onerror = () => fail(r.error);
+  r.readAsDataURL(file);
+});
 
 // --------------------------------------------------------------------------------- reader nodes
 const wv = (node, name) => node.widgets?.find((w) => w.name === name);
@@ -147,7 +162,7 @@ function arm(btn, label, run) {
   };
 }
 
-function modalShell(width = "640px", z = 10000) {
+function modalShell(width = "640px", z = 10000, onClose = null) {
   const overlay = mk("div");
   css(overlay, { position: "fixed", inset: "0", background: "rgba(0,0,0,0.55)", zIndex: z,
     display: "flex", alignItems: "center", justifyContent: "center" });
@@ -155,7 +170,7 @@ function modalShell(width = "640px", z = 10000) {
   css(box, { background: "#222", color: "#eee", border: "1px solid #444", borderRadius: "8px",
     padding: "16px", minWidth: width, maxWidth: "820px", maxHeight: "84vh", overflow: "auto",
     font: "13px sans-serif", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" });
-  const close = () => overlay.remove();
+  const close = () => { overlay.remove(); onClose?.(); };
   overlay.appendChild(box);
   overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
   document.body.appendChild(overlay);
@@ -194,8 +209,9 @@ function copyName(base) {
 // The body a Save click posts. `edited` is merged ONTO the stored values rather than replacing
 // them, so switching a card's type in the editor doesn't throw away the fields of the type it came
 // from. Pure, because rename is the one thing in this dialog that can quietly break a saved
-// workflow, and it is worth asserting on directly.
-function editorPayload(entry, { key, type, tags, edited }) {
+// workflow, and it is worth asserting on directly. `picture` is left out (= keep the stored one)
+// unless the editor has one to send.
+function editorPayload(entry, { key, type, tags, edited, picture }) {
   const body = {
     name: String(key || "").trim(),
     type: type === "entity" ? "entity" : "character",
@@ -203,14 +219,39 @@ function editorPayload(entry, { key, type, tags, edited }) {
     tags: tags == null ? "" : tags,
   };
   if (!entry.isNew && entry.key && entry.key !== body.name) body.old_name = entry.key;
+  if (picture !== undefined) body.picture = picture;
   return body;
 }
 
 // ---------------------------------------------------------------------------------- card editor
-// `entry` = {key, type, tags, values, isNew}. `afterSave(name)` runs on a successful save, so the
-// library behind it can re-render on the card that was just written.
+// `entry` = {key, type, tags, values, picture, isNew}. `afterSave(name)` runs on a successful save,
+// so the library behind it can re-render on the card that was just written.
 function cardEditor(entry, afterSave) {
-  const { box, close } = modalShell("560px", 10001);
+  // The picture is sent only once it changed, or for a new card — a duplicate then shares its
+  // original's file by name. While the editor is open it takes every image paste, in the capture
+  // phase: ComfyUI's own handler would otherwise drop a Load Image node on the canvas behind it.
+  let picture = entry.picture || "";
+  let pictureChanged = false;
+  let showPicture = () => {};
+  const setPicture = (v) => { picture = v; pictureChanged = true; showPicture(); };
+  const takeImage = async (e, files) => {
+    const f = imagesIn(files)[0];
+    if (!f) return;
+    e.preventDefault(); e.stopPropagation();
+    setPicture(await readPicture(f));
+  };
+  const onPaste = (e) => takeImage(e, e.clipboardData?.files);
+
+  const { overlay, box, close } = modalShell("560px", 10001,
+    () => document.removeEventListener("paste", onPaste, true));
+  document.addEventListener("paste", onPaste, true);
+  // Same for a dropped file anywhere over the editor — the canvas would take it otherwise.
+  overlay.addEventListener("dragover", (e) => {
+    if (![...(e.dataTransfer?.types || [])].includes("Files")) return;
+    e.preventDefault(); e.stopPropagation();
+  });
+  overlay.addEventListener("drop", (e) => takeImage(e, e.dataTransfer?.files));
+
   let type = entry.type === "entity" ? "entity" : "character";
   let keyTouched = !entry.isNew;               // a new card takes its key from the Name field
   let previewTimer = null;
@@ -274,6 +315,33 @@ function cardEditor(entry, afterSave) {
       render();
     });
 
+    const picRow = line("Picture",
+      "A character sheet or a location, for video models that take reference images. Choose a file, or paste (Ctrl+V) / drop one anywhere on this editor.");
+    const thumb = mk("img", "max-height:96px;max-width:240px;border:1px solid #444;border-radius:4px");
+    const noPic = mk("span", "flex:1;opacity:0.6", "(none — 📁, paste or drop)");
+    const picker = mk("input", "display:none");
+    picker.type = "file";
+    picker.accept = "image/*";
+    picker.addEventListener("change", (e) => {
+      const files = [...(picker.files || [])];
+      picker.value = "";                       // so picking the same file twice still fires
+      takeImage(e, files);
+    });
+    const choose = mk("button", ICON, "📁");
+    choose.title = "Choose a picture file";
+    choose.onclick = () => picker.click();
+    const unpic = mk("button", DANGER, "✕");
+    unpic.title = "Remove the picture from this card";
+    unpic.onclick = () => setPicture("");
+    picRow.append(thumb, noPic, choose, unpic, picker);
+    showPicture = () => {
+      thumb.src = pictureSrc(picture);
+      thumb.style.display = picture ? "" : "none";
+      noPic.style.display = picture ? "none" : "";
+      unpic.disabled = !picture;
+    };
+    showPicture();
+
     box.appendChild(mk("div", "border-top:1px solid #383838;margin:12px 0 10px"));
 
     // -- the card's own fields, straight off the card node's schema -----------------------------
@@ -318,7 +386,8 @@ function cardEditor(entry, afterSave) {
     cancel.onclick = close;
     const save = mk("button", PRIMARY, entry.isNew ? "Create" : "Save");
     save.onclick = async () => {
-      const body = editorPayload(entry, { key: keyInput.value, type, tags: tagInput.value, edited: edited() });
+      const body = editorPayload(entry, { key: keyInput.value, type, tags: tagInput.value, edited: edited(),
+                                          picture: pictureChanged || entry.isNew ? picture : undefined });
       if (!body.name) { flash(save, "✕ name required", false); return; }
       try {
         await postJSON("/kinburg/cards/save", body);
@@ -350,6 +419,7 @@ async function libraryDialog(focusName) {
         type: p.type,
         tags: p.tags,
         values: p.values,
+        picture: p.picture,
         isNew: !!duplicate,
       }, (savedAs) => { if (!duplicate && focusName === name) focusName = savedAs; render(); });
     } catch (e) { alert(e.message); }
@@ -411,8 +481,8 @@ async function libraryDialog(focusName) {
         }
 
         const s = mk("span", "flex:0 0 32%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
-          `${icon(p.type)} ${nm}`);
-        s.title = nm;
+          `${icon(p.type)} ${nm}${p.picture ? " 🖼" : ""}`);
+        s.title = p.picture ? `${nm} — has a picture` : nm;
         row.appendChild(s);
 
         const tagInput = mk("input", INPUT + ";flex:1");

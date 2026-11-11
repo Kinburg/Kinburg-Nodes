@@ -11,20 +11,92 @@ Cards enter the library three ways, all funnelling through :func:`upsert`:
   * **Character Card / Entity Card** — their ``save_preset_as`` field (typed or wired-in values).
   * the Manage dialog — create / edit / rename / duplicate / retag / delete entries.
 
+A card may also keep one **picture** — a character sheet, a location — for video models that take
+reference images. It lives next to ``store.json`` as ``pictures/<hash>.png`` and the preset holds
+only the file name: the same pixels always land on the same file, so a duplicate shares it and a
+rename never moves it. A picture no card points at any more is deleted on the next save.
+
 Guarded so the package still imports without ComfyUI present (registry scan, tests).
 """
+import base64
+import binascii
+import hashlib
+import io
 import json
 import os
+import re
 import threading
+
+from PIL import Image
 
 NONE = "🚫 None"
 ALL_TAGS = "🏷 All"  # loader filter sentinel — "don't filter by tag"
 
 _LOCK = threading.Lock()
+_PICTURE_RE = re.compile(r"^[0-9a-f]{16}\.png$")
 
 
 def _store_path():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "store.json")
+
+
+def _pictures_dir():
+    return os.path.join(os.path.dirname(_store_path()), "pictures")
+
+
+def picture_path(name):
+    """Absolute path of a stored picture, or None — for anything that is not one of ours, too, so a
+    name sent by the browser can never reach outside the pictures folder."""
+    if not isinstance(name, str) or not _PICTURE_RE.match(name):
+        return None
+    path = os.path.join(_pictures_dir(), name)
+    return path if os.path.isfile(path) else None
+
+
+def picture_from_tensor(image):
+    """First frame of a ComfyUI IMAGE batch as a PIL image. Tensor methods only, so this module
+    still imports without torch."""
+    return Image.fromarray(image[0].clamp(0, 1).mul(255).round().byte().cpu().numpy())
+
+
+def picture_from_data_url(url):
+    """A picture the library dialog sent as a ``data:image/…;base64,…`` URL."""
+    head, _, payload = str(url).partition(",")
+    if not head.startswith("data:image/") or not head.endswith(";base64"):
+        raise ValueError("picture must be a data:image/…;base64 URL")
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(payload)))
+        img.load()
+    except (OSError, binascii.Error) as e:
+        raise ValueError(f"picture is not a readable image: {e}")
+    return img
+
+
+def _write_picture(img):
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    data = buf.getvalue()
+    name = hashlib.sha1(data).hexdigest()[:16] + ".png"
+    path = os.path.join(_pictures_dir(), name)
+    if not os.path.isfile(path):
+        os.makedirs(_pictures_dir(), exist_ok=True)
+        with open(path + ".tmp", "wb") as f:
+            f.write(data)
+        os.replace(path + ".tmp", path)
+    return name
+
+
+def _prune_pictures(presets):
+    folder = _pictures_dir()
+    if not os.path.isdir(folder):
+        return
+    keep = {p.get("picture") for p in presets.values()}
+    for f in os.listdir(folder):
+        if _PICTURE_RE.match(f) and f not in keep:
+            try:
+                os.remove(os.path.join(folder, f))
+            except OSError:  # held open (Windows) — it goes on the next save instead
+                pass
 
 
 def _norm_tags(tags):
@@ -47,7 +119,7 @@ def _norm_tags(tags):
 
 
 def _load():
-    """{name: {"type": "character"|"entity", "values": {...}, "tags": [...]}}."""
+    """{name: {"type": "character"|"entity", "values": {...}, "tags": [...], "picture"?: file}}."""
     try:
         with open(_store_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -62,6 +134,8 @@ def _load():
                 "values": p["values"],
                 "tags": _norm_tags(p.get("tags")) or [],  # tolerate old presets with no tags
             }
+            if _PICTURE_RE.match(str(p.get("picture") or "")):
+                out[name]["picture"] = p["picture"]
     return out
 
 
@@ -174,28 +248,34 @@ def full_data():
         "all_tags": ALL_TAGS,
         "order": [NONE] + sorted(presets.keys()),
         "tags": all_tags(),
-        "presets": {name: {"type": p.get("type", "character"), "tags": p.get("tags") or []}
+        "presets": {name: {"type": p.get("type", "character"), "tags": p.get("tags") or [],
+                           **({"picture": p["picture"]} if p.get("picture") else {})}
                     for name, p in presets.items()},
         # Values are deliberately NOT here: the dialog fetches the one card it is about to edit.
         "schema": field_schema(),
     }
 
 
-def upsert(name, card_type, values, tags=None, delete=False, old_name=None):
+def upsert(name, card_type, values, tags=None, delete=False, old_name=None, picture=None):
     """Add/update (or delete) a saved card preset.
 
     ``tags=None`` leaves an existing preset's tags untouched (and means "no tags" on create),
     so re-saving the same card from a node that doesn't set tags never wipes tags added later.
     Pass a list / comma-separated string to set them (``[]`` clears).
 
+    ``picture`` follows the same rule: ``None`` keeps the card's picture, ``""`` removes it, a PIL
+    image replaces it, and the file name of a picture already stored (a duplicate) shares it.
+
     ``old_name`` renames: the entry is written under ``name`` and the old key dropped in the same
-    lock, inheriting its tags when none are given. One call, so a crash between two can't leave
-    the library holding both copies.
+    lock, inheriting its tags and picture when none are given. One call, so a crash between two
+    can't leave the library holding both copies.
     """
     name = (name or "").strip()
     if not name or name == NONE:
         raise ValueError("preset name is required")
     old_name = (old_name or "").strip()
+    if isinstance(picture, str) and picture and not picture_path(picture):
+        raise ValueError(f"no stored picture named '{picture}'")
     with _LOCK:
         presets = _load()
         if delete:
@@ -208,12 +288,21 @@ def upsert(name, card_type, values, tags=None, delete=False, old_name=None):
             new_tags = _norm_tags(tags)
             if new_tags is None:  # keep existing tags (or none for a brand-new preset)
                 new_tags = prev.get("tags") or []
+            if picture is None:
+                pic = prev.get("picture") or ""
+            elif isinstance(picture, str):
+                pic = picture
+            else:
+                pic = _write_picture(picture)
             presets[name] = {
                 "type": ctype,
                 "values": values if isinstance(values, dict) else {},
                 "tags": new_tags,
             }
+            if pic:
+                presets[name]["picture"] = pic
         _save(presets)
+        _prune_pictures(presets)
     return full_data()
 
 

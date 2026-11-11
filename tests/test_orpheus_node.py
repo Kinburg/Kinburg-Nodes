@@ -264,6 +264,34 @@ check("an unsung section is not a boundary",
       N._sections_of({"sections": [{"sung": False, "start": 1.0, "end": 9.0}]}) == [])
 check("a junk timing falls back to the plan rather than raising",
       run(plan=PLAN, timing={"sections": "nonsense"})["shot_count"] == count2)
+
+# ------------------------------------------------------------------ cut_on = lines: no split line
+# Back-to-back 3.5 s lines with 0.5 s of breath between them, deliberately off the bar grid.
+def sung_lines():
+    lines = [{"start": 10.3 + 4.0 * k, "end": 13.8 + 4.0 * k, "voice": "Nina", "section": k // 4,
+              "label": "Verse 1" if k < 4 else "Chorus", "text": f"рядок {k}", "words": [],
+              "score": 0.9, "found": 2} for k in range(8)]
+    sections = [{"index": i, "label": l, "voice": "Nina", "sung": True, "start": 10.3 + 16.0 * i,
+                 "end": 25.8 + 16.0 * i} for i, l in enumerate(("Verse 1", "Chorus"))]
+    return {"total": TOTAL, "sections": sections, "lines": lines, "quiet": [], "collisions": []}
+
+
+def split_lines(result, timing):
+    cuts = cut_times(result["cues"])[:-1]
+    return [ln["text"] for ln in timing["lines"] if any(ln["start"] < c < ln["end"] for c in cuts)]
+
+
+TL = sung_lines()
+check("on the bar grid some line is cut in two - the thing 'lines' is for",
+      len(split_lines(run(timing=TL), TL)) > 0)
+by_line = run(timing=TL, cut_on="lines", pace=4.0)
+check("cut_on = lines: no cut falls inside a sung line", split_lines(by_line, TL) == [], by_line["cues"])
+check("...so no line is quoted in two shots",
+      all(by_line["lyrics"].count(f'"рядок {k}"') == 1 for k in range(8)), by_line["lyrics"])
+check("...a shot may be shorter than H3's trained minimum, down to a line",
+      by_line["shot_count"] > run(timing=TL, pace=7.0)["shot_count"])
+check("...and without a timing it says so and cuts on bars",
+      "needs Echo's 'timing'" in run(cut_on="lines")["report"])
 check("the Echo report line survives a cp1251 console", echo["report"].encode("cp1251") is not None)
 
 check.done()

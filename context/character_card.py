@@ -63,14 +63,16 @@ class CharacterCard:
         fields["notes"] = ("STRING", {"multiline": True, "default": "", "tooltip": "Anything else (personality, accessories, scars…). Added as a '- Notes:' line at the end of the card."})
         fields["save_preset_as"] = ("STRING", {"default": "", "tooltip": "Type a name to save this card to the Card Presets library on the next run. Works whether the fields are typed OR wired in from outside (saved at run time). Empty = don't save. (Re-runs overwrite the same name.)"})
         fields["tags"] = ("STRING", {"default": "", "tooltip": "Comma-separated tags for filtering the library in Card Presets (e.g. 'heroes, medieval'). Only used when save_preset_as is set. Empty = leave existing tags untouched."})
-        return {"required": fields}
+        return {"required": fields, "optional": {
+            "picture": ("IMAGE", {"tooltip": "Saved WITH the card when save_preset_as is set — a character sheet (front / back / profile / close-up) for video models that take reference images. Card Presets gives it back on its 'picture' output. Only the first image of a batch is kept. Not wired = the saved card keeps the picture it already has."}),
+        }}
 
     RETURN_TYPES = ("STRING", VOICE_TYPE)
     RETURN_NAMES = ("card", "voice")
     FUNCTION = "run"
     CATEGORY = CAT_LLM_CONTEXT
 
-    def run(self, name="", notes="", save_preset_as="", tags="", **kwargs):
+    def run(self, name="", notes="", save_preset_as="", tags="", picture=None, **kwargs):
         lines = []
         for key, label in _FIELDS:
             v = (kwargs.get(key) or "").strip()
@@ -104,11 +106,12 @@ class CharacterCard:
         sp = (save_preset_as or "").strip()
         if sp and result:
             try:
-                from ..card_presets.store import upsert
+                from ..card_presets.store import picture_from_tensor, upsert
                 values = {"name": name or "", "notes": notes}
                 for key, _ in _FIELDS + _VOICE_FIELDS:
                     values[key] = (kwargs.get(key) or "")
-                upsert(sp, "character", values, tags=(tags if (tags or "").strip() else None))
+                upsert(sp, "character", values, tags=(tags if (tags or "").strip() else None),
+                       picture=None if picture is None else picture_from_tensor(picture))
                 print(f"[CharacterCard] saved preset '{sp}'")
             except Exception as e:
                 print(f"[CharacterCard] save preset '{sp}' failed: {e}")

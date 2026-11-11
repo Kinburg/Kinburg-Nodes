@@ -43,8 +43,10 @@ import torch
 import comfy.utils
 
 from . import cache as shot_cache
-from .nodes import (MORPHEUS_SHOT, KinburgMorpheusDream, LINK_MODES, _flatten_shots, _frames_for,
-                    _log_uris, _require_h3, _seconds, h3)
+from . import cast as cast_mod
+from .nodes import (MORPHEUS_SHOT, KinburgMorpheusDream, LINK_MODES, _cast_in_order, _flatten_shots,
+                    _frames_for, _log_uris, _require_h3, _seconds, h3)
+from ..card_presets.presets_node import CAST_TYPE
 from ..local_llm.llm_node import (LLM_CONFIG, PLACEHOLDER, UNLOAD_MODES, _generate_and_format,
                                   _resolve_path, _shutdown_worker, build_llm_request,
                                   resolve_unload)
@@ -52,6 +54,7 @@ from ..timer.timer_nodes import _format_elapsed
 from ..categories import CAT_MORPHEUS
 
 ANCHOR_MODES = ["continuous", "plan"]
+LOCATION_MODES = ["by section", "in order"]
 CACHE_MODES = ["disk", "off"]
 MAX_SHOTS = 64
 
@@ -192,6 +195,47 @@ ANCHOR_NEGATIVE = ("restarting the sequence from the beginning, reverting to an 
 # something it tries to put on screen. The heavy lifting is done by ANCHOR_NEGATIVE.
 ANCHOR_CLAUSE = "Continues from the first frame; the action moves forward only."
 
+# ---- cast mode: a music video with Card Presets cards wired. The sampler then builds every shot as
+# ref2va, wraps the shot's text in H3's reference layout and attaches the pictures of whoever the
+# text NAMES — so these prompts are about naming exactly the right people, and about nothing else
+# the pictures already carry.
+CAST_SCRIPT_SYSTEM = """You are a music-video director breaking a song into shots, for a video model that generates one shot at a time and never sees the others. The film is cut to the music: every shot is its own take, and a cut may change the place, the framing and who is on screen.
+
+Your output is the DIRECTION each shot's writer works from, so each line must stand on its own: someone reading only that line must know what to film.
+
+Rules:
+- One numbered line per shot, in order, two or three concrete sentences each, present tense.
+- Use people and places only by the exact names you are given. Whoever sings in a shot is in frame in that shot. Anyone else appears only when you name them, so name only who is in frame — never name someone to say they are absent.
+- The lyrics are given for MOOD and ENERGY — how big, how close, how still the shot is. Never illustrate them literally.
+- Let the size and the energy of each shot follow its moment in the song.
+- Never write "then", "next", "finally" or "meanwhile", never summarise the whole video inside a line, and never mention another shot.
+
+Whatever language the brief is in, answer in ENGLISH, with EXACTLY one labelled line per shot and nothing else:
+
+[SHOT 1]: ...
+[SHOT 2]: ..."""
+
+CAST_SHOT_SYSTEM = """You write one shot of a music video for MiniMax H3, a model that generates the picture from reference images of the cast. Every shot is generated on its own, and the song is already fixed, so you describe only what is SEEN.
+
+Whatever language the input is in, write in ENGLISH. Answer with the labelled blocks and nothing else: no preamble, no commentary.
+
+Rules:
+- Name people and places ONLY by the exact names you are given, and ONLY those who are in frame. A name on the page puts that person in the shot, so never name someone to say they are absent.
+- Never describe anyone's face, hair or clothes: their reference images carry their looks. Describe what they DO — singing, playing, moving — and where they are in the frame.
+- Never quote lyrics and never invent dialogue: the sung words are added for you.
+- One continuous take: no cuts and no change of place inside the shot. Give the framing and one camera movement in professional terms.
+- Present tense, plain prose, no markdown.
+
+Answer with EXACTLY these two labelled blocks:
+[SCENE]: one paragraph of three to five sentences — where we are, who is in frame and where, what they do over the length of the shot, the framing and the camera movement.
+[END STATE]: one sentence describing the last frame as a still photograph, ending with the motion at that instant.
+
+### EXAMPLE (a 7.50 s shot; cast: Keen (a person), Burg (a person), Kharkiv (a place); Keen sings)
+[SCENE]: Night in Kharkiv, rain on broken asphalt, one sodium lamp burning behind the rubble. Keen stands centre frame at a battered microphone and sings hard into it, her free hand clenched at her side. Burg plays a dark electric guitar on the left, head down, swaying with the beat. The camera opens on a medium wide and pushes in slowly until Keen fills the frame from the waist up.
+[END STATE]: A medium shot of Keen singing into the microphone with Burg soft-focus behind her left shoulder; the camera is still creeping forward and she rocks on her heels to the beat."""
+
+_LABELS_CAST = ["SCENE", "END STATE"]
+
 
 # ------------------------------------------------------------------------------------- text utils
 def _blocks(text, labels):
@@ -269,6 +313,22 @@ def dedupe_dialogue(storyboard, audio):
     return " ".join(s.strip() for s in kept if s.strip()).strip()
 
 
+def _sung_note(here):
+    """What a cast shot's writer is told about the singing in it: who, so they are put in frame,
+    and the words for the performance only — the words themselves are stamped by `_assemble_cast`."""
+    if not here:
+        return "Nobody sings in this shot — an instrumental moment."
+    who = list(dict.fromkeys(v for v, _ in here if v))
+    words = " / ".join(t for _, t in here)
+    if not who:
+        lead = "The lead singer sings in this shot and is in frame, singing."
+    elif len(who) == 1:
+        lead = f"{who[0]} sings in this shot, so {who[0]} is in frame, singing."
+    else:
+        lead = f"{' and '.join(who)} sing in this shot, so they are all in frame, singing."
+    return f"{lead} The words, for the performance only — do not quote them, they are added for you: {words}"
+
+
 def _beat_lines(text):
     """One line per shot, BLANKS KEPT — they are what "leave this shot to the LLM" looks like.
     Dropping empty lines would silently shift every note onto the wrong shot."""
@@ -343,8 +403,8 @@ class KinburgMorpheusStoryboard:
                                          "tooltip": "Seconds per shot: one value for all of them, or a comma list ('5.2, 6, 5.2') where the last value repeats. Each is snapped to H3's 0.71 s grid by the Dream node, and the LLM is told the snapped length so its beats cover the real duration."}),
                 "anchor": (ANCHOR_MODES, {"default": "continuous", "advanced": True,
                                           "tooltip": "What a shot's FIRST frame is wired to when a keyframe exists for it:\n\n• continuous — only the END keyframe is wired; the shot starts from the previous shot's generated tail. Seams are exactly continuous, and the shot is still pulled to its planned keyframe by its end. Best default.\n\n• plan — both keyframes are wired, like doing it by hand. Tighter adherence to the storyboard, at the price of a small jump at each seam (a generated tail is never bit-identical to the re-encoded keyframe).\n\nEither way the LLM SEES both frames — this only changes what the sampler is conditioned on."}),
-                "link": (LINK_MODES, {"default": "continue",
-                                      "tooltip": "What shots with no start keyframe do: 'continue' inherits the previous shot's last frame (one flowing take), 'cut' starts fresh from text (a montage of hard cuts)."}),
+                "link": (LINK_MODES + ["by section"], {"default": "continue",
+                                      "tooltip": "What shots with no start keyframe do: 'continue' inherits the previous shot's last frame (one flowing take), 'cut' starts fresh from text (a montage of hard cuts).\n\n'by section' reads the sections in 'shot_lyrics' (Orpheus' 'lyrics'): a shot continues the one before it while the song stays in the same section, and cuts where the section changes."}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff,
                                  "tooltip": "LLM seed. Deliberately NOT 'control after generate': the prompts are the sampler's cache key, so a seed that moved every run would re-sample every shot at minutes apiece. Change it to re-roll all the writing."}),
                 "cache": (CACHE_MODES, {"default": "disk", "advanced": True,
@@ -361,11 +421,14 @@ class KinburgMorpheusStoryboard:
                 "keyframes": ("IMAGE", {"tooltip": "Keyframes in order, as one IMAGE batch — used as SHOT BOUNDARIES left to right: frame 1 starts shot 1, frame 2 ends shot 1 and starts shot 2, and so on. Give as many or as few as you have: none (all text), one (a hard opening then free fantasy), K-1 shots' worth, or all of them."}),
                 # Also un-advanced: this is the main handle on a text-driven chain and the input
                 # Dream Board feeds, so it has to be visible without unfolding anything.
-                "beats": ("STRING", {"multiline": True, "dynamicPrompts": False,
+                # One row, not a text box: a line per shot is written in another node and wired in.
+                # It stays a widget because saved workflows store widget values by position —
+                # dropping it would shift every value after it in an existing graph.
+                "beats": ("STRING", {"default": "", "dynamicPrompts": False,
                                      "tooltip": "Optional direction, ONE LINE PER SHOT ('shot 3: he crashes through a billboard'). Lines are matched to shots by position; blank or missing lines leave that shot to the LLM. This is the main handle on a text-only chain."}),
-                "prompt_overrides": ("STRING", {"multiline": True, "dynamicPrompts": False, "advanced": True,
+                "prompt_overrides": ("STRING", {"default": "", "dynamicPrompts": False, "advanced": True,
                                                 "tooltip": "Finished prompts that BYPASS the LLM, separated by a line of three dashes (---), in shot order; an empty block keeps the LLM's version. The 'prompts' output uses the same format, so the loop is: run once, read it, fix the one shot that came out wrong, paste it back."}),
-                "style": ("STRING", {"multiline": True, "dynamicPrompts": False, "advanced": True,
+                "style": ("STRING", {"default": "", "dynamicPrompts": False, "advanced": True,
                                      "tooltip": "Skip the style-bible call and use these blocks verbatim: paste back a previous run's 'style' output (or hand-write [STYLE]: / [SCENE]: / [AUDIO BED]: / [NEGATIVE]: blocks). This is how you keep one look across several runs."}),
                 "shots": (MORPHEUS_SHOT, {"tooltip": "A chain to work on. Shots that already have a prompt pass through untouched — that is the 'hand-build the opening shot with Morpheus Dream and let this node write the rest' case. Shots with an EMPTY prompt are WRITTEN IN PLACE, keeping their own keyframes, length and link: that is what 'Morpheus Dream Board 🌙' sends, and with it you can leave keyframes / durations / links / shot_count alone. shot_count then means how many extra shots to append after the chain (default none)."}),
                 # NOT advanced: Dream Board drives this one, and an input you have to unfold before
@@ -382,6 +445,15 @@ class KinburgMorpheusStoryboard:
                                                 "tooltip": "Override the system prompt used when a shot has NO images ('invent it from the direction, and from the previous shot's end state if there is one'). Blank = built-in default."}),
                 "script_system": ("STRING", {"multiline": True, "dynamicPrompts": False, "forceInput": True,
                                              "tooltip": "Override the system prompt for the planning call. Blank = the default, which asks for one numbered line per shot, two or three concrete sentences each, ending on the state that shot must reach."}),
+                "shot_lyrics": ("STRING", {"forceInput": True,
+                                           "tooltip": "Orpheus' 'lyrics' output — what is sung over each shot and by whom, one numbered line per shot. Used with a cast wired.\n\nThe planner reads it for mood and to put the singer in frame; the words themselves are NOT left to the LLM: each shot gets its line stamped verbatim at the end of its scene, as 'Keen sings: \"…\"', which is also what puts the singer's reference into that shot. Line numbers are shot numbers, so wire the same Orpheus that set 'durations'."}),
+                "cast_1": (CAST_TYPE, {"tooltip": "The same Card Presets cards you wire into the sampler ('cast' output) — connect one and another slot appears.\n\nWith any card wired this node writes for the ref2va sampler: the planner and the shot writer are told the cast by name, every shot becomes a plain scene that names only who is in frame (the sampler attaches exactly those references), the style paragraph is stamped before it, and the words from 'shot_lyrics' are stamped after it. Looks are never written — the pictures carry them."}),
+                "cast_2": (CAST_TYPE,),
+                "location_1": (CAST_TYPE, {"tooltip": "The places the video can be set in — Card Presets cards ('cast' output), usually entity cards with a picture or just a description. Connect one and another slot appears. Needs a cast.\n\nEvery shot gets exactly ONE of them, chosen by 'locations', and its name is put into the shot's text — so wire the same cards into the sampler's 'cast_N' too, and it attaches that one picture. A place only changes on a cut: a shot that continues the previous one stays where it was."}),
+                "location_2": (CAST_TYPE,),
+                # LAST widget, for the reason 'trims' is last on the sampler: saved values are positional
+                "locations": (LOCATION_MODES, {"default": "by section",
+                                               "tooltip": "How shots are given their place when 'location_N' cards are wired.\n\n• by section — the planner chooses from the places' descriptions, one per kind of section, and keeps it: every chorus returns to the same place. It reads the section of each shot from 'shot_lyrics'. Write 'for the choruses' into a card's description to decide it yourself, or start a line of 'beats' with the place in brackets — '(Roof) Keen sings…'. A shot whose line names no place stays where the previous one was.\n\n• in order — no LLM: the places are played in wiring order, each for an equal share of the clip's length."}),
             },
         }
 
@@ -505,12 +577,35 @@ class KinburgMorpheusStoryboard:
         parts.append(f"6. [Negative Prompt/Constraints]: {negative}")
         return "\n\n".join(parts)
 
+    @staticmethod
+    def _assemble_cast(bible, body, sung, place=None):
+        """A cast shot: the style paragraph, then `[Shot 1]` with the scene and the sung words.
+
+        The sampler wraps this in H3's reference layout, and anything before `[Shot 1]` opens its
+        description — the place the official examples keep the look. The words are stamped here,
+        verbatim, rather than written by the LLM: a model asked to copy a Ukrainian line will
+        "fix" it, and `Keen sings:` is also what makes the sampler attach Keen's sheet. The shot's
+        place is guaranteed the same way: named in the scene, or put in front of it."""
+        scene = " ".join((body.get("SCENE") or "").split())
+        if place and not cast_mod.present([place], scene):
+            # the writer forgot to say where: without the name the sampler attaches no place
+            scene = f"In {place['name']}. {scene}"
+        runs = []
+        for voice, words in sung:
+            if runs and runs[-1][0] == voice:
+                runs[-1][1].append(words)
+            else:
+                runs.append((voice, [words]))
+        line = " ".join(f'{v} sings: "{" ".join(w)}"' if v else f'Sung: "{" ".join(w)}"' for v, w in runs)
+        shot = "[Shot 1] " + " ".join(x for x in (scene, line) if x)
+        return f"{bible['style']}\n\n{shot}" if bible["style"] else shot
+
     # -------------------------------------------------------------------------------------- writer
     def write(self, config, brief, shot_count, durations, anchor, link, seed, cache,
               unload_after_run, script="auto", live_preview=True, keyframes=None, beats="",
               prompt_overrides="", style="", shots=None, links="", style_system="",
               shot_system_morph="", shot_system_start="", shot_system_text="", script_system="",
-              unique_id=None):
+              unique_id=None, shot_lyrics="", locations="by section", **kwargs):
         _require_h3()
         t_run = time.time()
         cfg = config if isinstance(config, dict) else {}
@@ -521,6 +616,28 @@ class KinburgMorpheusStoryboard:
             raise ValueError(f"LLM model file not found: {model or '(none selected)'}")
 
         warn = []
+        # A cast turns this into the writer for the ref2va sampler — see CAST_SHOT_SYSTEM.
+        cast, notes = cast_mod.roster(_cast_in_order(kwargs))
+        warn += notes
+        locs, notes = cast_mod.roster(_cast_in_order(kwargs, "location"))
+        warn += [n.replace("cast card", "location card") for n in notes]
+        if locs and not cast:
+            warn.append("locations are wired without a cast — they are only used when the node "
+                        "writes for the ref2va sampler, so they were ignored")
+            locs = []
+        lyrics_text = (shot_lyrics or "").strip() if cast else ""
+        sung = cast_mod.parse_shot_lyrics(lyrics_text)
+        if cast and not lyrics_text:
+            warn.append("a cast is wired but no 'shot_lyrics' — no shot gets its sung words stamped; "
+                        "wire Orpheus' 'lyrics' output")
+        names = {c["name"] for c in cast}
+        strangers = sorted({v for here in sung.values() for v, _ in here if v and v not in names})
+        if strangers:
+            warn.append(f"{', '.join(strangers)} sing(s) in 'shot_lyrics' but no card has that name, "
+                        f"so no reference is attached for them — name the card the same as the singer")
+        if sung and not any(v for here in sung.values() for v, _ in here):
+            warn.append("'shot_lyrics' names no singer, so the stamped words can't bring anyone's "
+                        "reference with them — give Echo a plan with a voice column")
         frames = _frame_list(keyframes)
         K = len(frames)
         mmproj = _resolve_path(cfg.get("mmproj", PLACEHOLDER), cfg.get("mmproj_path", ""))
@@ -558,7 +675,7 @@ class KinburgMorpheusStoryboard:
         sys_morph = (shot_system_morph or "").strip() or SHOT_SYSTEM_MORPH
         sys_start = (shot_system_start or "").strip() or SHOT_SYSTEM_START
         sys_text = (shot_system_text or "").strip() or SHOT_SYSTEM_TEXT
-        sys_script = (script_system or "").strip() or SCRIPT_SYSTEM
+        sys_script = (script_system or "").strip() or (CAST_SCRIPT_SYSTEM if cast else SCRIPT_SYSTEM)
         brief = (brief or "").strip()
         if not brief and not beat_lines:
             raise ValueError("Nothing to write from: give a brief, or per-shot beats, or both.")
@@ -572,11 +689,23 @@ class KinburgMorpheusStoryboard:
         # agrees with the `link` widget — which is every workflow that never touches `links` — so
         # adding this feature invalidates nobody's cached prompts, and therefore re-samples nobody's
         # finished video. Only a genuinely mixed chain gets the longer key.
+        if link == "by section":
+            link = "continue"
+            if not (links or "").strip():
+                links = ", ".join(cast_mod.links_by_section(shot_lyrics, len(incoming) + 1, n))
+                if not (shot_lyrics or "").strip():
+                    warn.append("link = by section but no 'shot_lyrics' is wired — every shot "
+                                "continues the one before it")
         lnks = _links(links, n, link)
         link_key = link if all(x == link for x in lnks) else ",".join(lnks)
+        # The cast joins the key only when wired, so every chain written without one keeps its
+        # cached prompts — and therefore its sampled shots. Lyrics are NOT here: each shot's own line
+        # is in that shot's key, so a re-aligned verse rewrites that shot onwards, not the bible.
         env = shot_cache.key(_cfg_fingerprint(cfg), brief, sys_style, sys_morph, sys_start,
                              sys_text, sys_script, int(seed), n, anchor,
-                             link_key, ",".join(f"{d:g}" for d in durs))
+                             link_key, ",".join(f"{d:g}" for d in durs),
+                             *(("cast", CAST_SHOT_SYSTEM, cast_mod.describe(cast)) if cast else ()),
+                             *(("locations", locations, cast_mod.describe(locs)) if locs else ()))
 
         # ONE table for the whole sequence, so the bible, the plan, the loop and the report all
         # talk about the same shots whether each came in on the chain or is about to be appended.
@@ -606,6 +735,9 @@ class KinburgMorpheusStoryboard:
             warn.append(f"{len(overrides)} prompt override block(s) for {len(slots)} shots — blocks "
                         f"are matched by position (separate them with a line of ---)")
 
+        order = (cast_mod.places_in_order([sl["frames"] for sl in slots],
+                                          [sl["link"] for sl in slots], len(locs))
+                 if locs and locations == "in order" else [])
         todo = sum(1 for sl in slots if sl["fill"])
         # A chained shot brings its own direction, so the planning call is only worth making when
         # something actually lacks one — and never for a single shot, which needs no dividing up.
@@ -675,7 +807,7 @@ class KinburgMorpheusStoryboard:
         # added its own part. A shot can only be told about its own stretch.
         script_src = "hand-written beats" if any(beat_lines) else "off"
         if want_script:
-            skey = shot_cache.key(env, "script")
+            skey = shot_cache.key(env, "script", *((lyrics_text,) if lyrics_text else ()))
             hit = shot_cache.load_json(skey) if use_cache else None
             if hit and hit.get("lines"):
                 beat_lines, script_src = list(hit["lines"]), "cached"
@@ -685,6 +817,31 @@ class KinburgMorpheusStoryboard:
                           f"Break it into {len(slots)} shots. Their lengths: {lens}."
                           + ("\n\nThe images are the sequence's first and last keyframes — the plan "
                              "must arrive there." if K and can_see else ""))
+                if cast:
+                    prompt += "\n\nThe cast — use these names exactly:\n" + cast_mod.describe(cast)
+                    if lyrics_text:
+                        prompt += ("\n\nWhat is sung over each shot, and by whom — for mood, not "
+                                   "subject matter:\n" + lyrics_text)
+                    held = [str(k + 1) for k, sl in enumerate(slots) if k and sl["link"] == "continue"]
+                    if held:
+                        prompt += (f"\n\nShots {', '.join(held)} carry on the shot before them "
+                                   "with no cut: the same take, the same place and people, the "
+                                   "camera going on from where it was — it may settle, it never "
+                                   "reverses its move.")
+                    prompt += ("\n\nA shot that starts on a cut must differ clearly from the shot "
+                               "before it in shot size or angle — a wide after a close-up, never "
+                               "nearly the same framing twice.")
+                    if locs and locations == "in order":
+                        prompt += ("\n\nWhere each shot takes place is already decided — write "
+                                   "each line for its place:\n" + "\n".join(
+                                       f"shot {k + 1}: {locs[j]['name']}" for k, j in enumerate(order))
+                                   + "\n\nThe places:\n" + cast_mod.describe(locs))
+                    elif locs:
+                        prompt += ("\n\nThe places. Every shot happens in exactly ONE of them: open "
+                                   "each line with it in round brackets — `[SHOT 3]: (Name) …`. Give "
+                                   "each kind of section its own place and keep it — every chorus "
+                                   "returns to the same place — and change place only where the "
+                                   "section changes:\n" + cast_mod.describe(locs))
                 # only the two ENDS of the sequence: the plan needs to know where it starts and
                 # where it lands, the boundaries in between are each shot's own business
                 ends = [sl["start"] for sl in slots if sl["start"] is not None] \
@@ -715,6 +872,7 @@ class KinburgMorpheusStoryboard:
         # --- one call per shot -------------------------------------------------------------------
         chain = []
         rows, prompts, end_state, prev = [], [], "", shot_cache.key(env, "bible")
+        place, placed = None, []
         for i, sl in enumerate(slots):
             # A shot already carrying a prompt passes through untouched — that is a hand-built
             # Morpheus Dream someone wired in front of this node.
@@ -740,9 +898,22 @@ class KinburgMorpheusStoryboard:
             snapped = _seconds(sl["frames"])
             dur = snapped
 
+            here = sung.get(i + 1, [])
+            if locs:
+                # one place per shot; it can only change on a cut
+                if i and lnk == "continue" and place:
+                    beat = cast_mod.pick_place(beat, locs)[1]
+                elif locations == "in order":
+                    place, beat = locs[order[i]], cast_mod.pick_place(beat, locs)[1]
+                else:
+                    named, beat = cast_mod.pick_place(beat, locs)
+                    place = named or place or locs[0]
+                placed.append(place["name"])
             key_i = shot_cache.key(prev, i, beat, f"{snapped:.3f}",
                                    shot_cache.tensor_key(vis_start if can_see else None),
-                                   shot_cache.tensor_key(vis_end if can_see else None))
+                                   shot_cache.tensor_key(vis_end if can_see else None),
+                                   *((repr(here),) if lyrics_text else ()),
+                                   *((place["name"],) if locs else ()))
             prev = key_i
 
             # Is this shot's first frame fixed at all? Either an image is conditioned on, or the
@@ -758,13 +929,17 @@ class KinburgMorpheusStoryboard:
                 if hit:
                     body = {k: v for k, v in hit.get("body", {}).items()}
                     end_state = hit.get("end_state", "")
-                    prompt, src = self._assemble(bible, body, anchored), "cached"
+                    prompt = (self._assemble_cast(bible, body, here, place) if cast
+                              else self._assemble(bible, body, anchored))
+                    src = "cached"
                 else:
                     # The context per call is deliberately thin — length, the director's note, and
                     # a starting state only when there is no image to show it. Feeding the brief and
                     # the whole style bible in here made the model weave all of it into its answer.
                     imgs = [im for im in (vis_start, vis_end) if im is not None] if can_see else []
-                    if len(imgs) == 2:
+                    if cast:
+                        sys_shot, mode = CAST_SHOT_SYSTEM, "cast"
+                    elif len(imgs) == 2:
                         sys_shot, mode = sys_morph, "2 keyframes"
                     elif len(imgs) == 1 and vis_start is not None:
                         sys_shot, mode = sys_start, "start keyframe"
@@ -788,33 +963,56 @@ class KinburgMorpheusStoryboard:
                              ("The single image given is this shot's LAST frame — the shot must "
                               "arrive exactly there.") if (len(imgs) == 1 and vis_start is None) else "",
                              ]
+                    if cast:
+                        # A cut is a new take: the previous shot's last frame is not where this
+                        # one starts, so it is only handed over when the shot really continues.
+                        parts = [f"Shot length: {snapped:.2f} seconds.",
+                                 ("Direction for this shot: " + beat) if beat else "",
+                                 "The cast — use these names exactly, and name only who is in frame:\n"
+                                 + cast_mod.describe(cast),
+                                 _sung_note(here) if lyrics_text else "",
+                                 (f"This shot takes place in {place['name']} — name it, and name no "
+                                  f"other place:\n" + cast_mod.describe([place])) if place else "",
+                                 ("The first frame is fixed and is not shown to you. It looks like "
+                                  "this: " + end_state + " Begin from exactly that state. The camera goes "
+                                  "on with the move it was making or settles — it never reverses it.")
+                                 if (i > 0 and lnk == "continue" and end_state and vis_start is None)
+                                 else ("This shot starts on a cut. The shot before it ended like "
+                                       "this: " + end_state + " Open on a clearly different shot "
+                                       "size or angle.")
+                                 if (i > 0 and end_state and vis_start is None) else "",
+                                 parts[-1]]
+                    label = "SCENE" if cast else "STORYBOARD"
                     text, err = ask(sys_shot, "\n\n".join(p for p in parts if p), imgs,
                                     f"shot {i + 1}/{len(slots)} ({mode})")
                     if err:
                         warn.append(f"shot {i + 1}: LLM call failed ({err}) — used the director's "
                                     f"note or the brief as the prompt")
-                        body = {"STORYBOARD": beat or brief}
+                        body = {label: beat or brief}
                         src = "failed"
                     else:
-                        body = _blocks(text, _LABELS_SHOT)
-                        if not body.get("STORYBOARD"):
+                        body = _blocks(text, _LABELS_CAST if cast else _LABELS_SHOT)
+                        if not body.get(label):
                             # unlabelled answer: keep it whole rather than throw the shot away
-                            body = {"STORYBOARD": text.strip()}
-                            warn.append(f"shot {i + 1}: the answer had no [STORYBOARD] label, so "
+                            body = {label: text.strip()}
+                            warn.append(f"shot {i + 1}: the answer had no [{label}] label, so "
                                         f"the whole reply was used as the shot description")
                         end_state = body.get("END STATE", "").strip()
                         src = "written"
                         if use_cache:
                             shot_cache.save_json(key_i, {"shot": i + 1, "body": body,
                                                          "end_state": end_state})
-                    prompt = self._assemble(bible, body, anchored)
+                    prompt = (self._assemble_cast(bible, body, here, place) if cast
+                              else self._assemble(bible, body, anchored))
 
             # Stamp what the writer could SEE, not who wrote it: a shot whose conditioned first
             # frame is an inherited tail was written against a forecast, and that is exactly the
             # shot the sampler's in-loop LLM should correct once the real frame exists.
             saw_start = cond_start is not None and can_see
-            if src == "override":
-                refine = "off"                      # a hand-pasted prompt is nobody else's business
+            if src == "override" or cast:
+                # a hand-pasted prompt is nobody else's business; a cast shot is a ref2va scene,
+                # which the sampler's writer (it writes the six-section template) must not touch
+                refine = "off"
             elif src == "failed":
                 refine = "full"                     # there is no real prompt to preserve
             elif anchored and not saw_start:
@@ -860,6 +1058,11 @@ class KinburgMorpheusStoryboard:
                   + (link if all(x == link for x in lnks) else ", ".join(lnks)),
                   f"style bible: {style_src}",
                   f"script: {script_src}",
+                  *([f"cast: {', '.join(c['name'] for c in cast)} — ref2va scenes; words stamped on "
+                     f"{sum(1 for k in range(1, len(slots) + 1) if sung.get(k))} of {len(slots)} shot(s)"]
+                    if cast else []),
+                  *([f"locations ({locations}): " + ", ".join(
+                      f"{c['name']} ×{placed.count(c['name'])}" for c in locs)] if locs else []),
                   f"LLM: {os.path.basename(model)} · seed {int(seed)} · cache {cache}",
                   f"total: {_format_elapsed(time.time() - t_run, 'human')}",
                   "",

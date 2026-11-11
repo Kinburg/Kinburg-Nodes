@@ -589,7 +589,9 @@ a name + a description. Both cards carry a **`save_preset_as`** field (+ optiona
 **`tags`**): type a name and run to save the card to a reusable library — it saves at run time, so
 it captures whatever's filled in, whether **typed or wired in** (e.g. from a photo description);
 reuse it via **Card Presets** (below). To save an LLM's JSON card in one step instead, use **Card
-Save**.
+Save**. All three also take an optional **`picture`** — a character sheet (front / back / profile /
+close-up) or a location — saved with the card, for video models that take reference images. Only
+the first image of a batch is kept; not wired, a re-save keeps the picture the card already has.
 Character Card also describes a **singing** voice — **`voice_tags`** (a music caption fragment:
 *"male lead vocal, raspy baritone, close-mic"*) and **`voice_notes`** (prose for the LLM: range,
 habits, what they never do). Both go into the Markdown block, and a second **`voice`** output
@@ -674,8 +676,10 @@ dropdown narrows the list to one tag. Build the library with **Card Save** (phot
 **Character Card** / **Entity Card** nodes' `save_preset_as` (+ `tags`) field (see above); presets
 are rendered back through the card nodes' own logic — so the format always matches — and persisted
 on disk. **🔄 Refresh** re-reads the list. Build a character once (by hand or by photo), then reuse
-it from the dropdown instead of re-describing the same photo every time.
-Category `Kinburg-Nodes/LLM/presets`.
+it from the dropdown instead of re-describing the same photo every time. The **`picture`** output
+gives the card's saved picture back as an IMAGE, ready for a reference-image input such as **MiniMax
+H3 Reference to Video**'s; nothing comes out when the card has none. An edit made in 🗂 Manage
+reaches the node on its next run. Category `Kinburg-Nodes/LLM/presets`.
 
 **🗂 Manage** opens the **card library** — the place a saved card is *changed*, so a wrong eye
 colour or a voice you keep re-typing is a two-click fix instead of a re-run of the node that wrote
@@ -693,6 +697,12 @@ often filed under a name the model could not read off the picture). Rename it an
 Presets** node that had picked it follows, so a rename can't quietly turn into an empty `card` on the
 next run. Switching a card between character and entity keeps both sets of fields — only the block
 changes.
+
+The editor also holds the card's **picture**: **📁** picks a file, or paste (Ctrl+V) / drop one
+anywhere over the editor — while it is open it takes image pastes, so nothing lands on the canvas
+behind it — and **✕** removes it; 🖼 marks such cards in the list. Pictures are kept in
+`card_presets/data/pictures/`, named by a hash of their pixels, so a duplicate shares its original's
+file, and one no card points at any more is deleted on the next save.
 
 ---
 

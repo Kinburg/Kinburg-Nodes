@@ -50,6 +50,10 @@ _UNIT_BARS = {"bar": 1.0, "2 bars": 2.0, "phrase (4 bars)": 4.0}
 #: lives at 6-8 s a shot, and the picker is free to run longer when the music gives it nowhere to cut.
 DEFAULT_PREFERRED = 7.0
 
+#: The shortest shot when cutting between lyric lines. A sung line is often 3-4 s, under H3's
+#: trained minimum; it renders anyway, and anything shorter than this is a flash, not a shot.
+LINE_MIN_SECONDS = 2.0
+
 #: How many seconds of deviation a cue's *strength* buys it. Between two candidates it is the
 #: strength DIFFERENCE that pays: at 2.0 a section boundary (1.0) outranks a weak onset (0.1) up to
 #: 1.8 s further from the ideal length, and loses beyond that. Past a couple of seconds the shot

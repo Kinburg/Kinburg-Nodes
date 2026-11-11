@@ -83,7 +83,9 @@ exists because six things have to be right that a hand-wired graph gets wrong:
   share the shot, and a shot is never trimmed below 5 frames — the report says when it was clamped.
   The next shot's first frame moves to the cut point with it and the audio slot shrinks to match, so
   picture and sound stay together. Free to change, like `seam_trim`: it happens at decode, so cached
-  latents replay.
+  latents replay. Orpheus counts every shot at full length, so the frames `seam_trim` drops at a
+  continued seam are given back out of the tail trim — of that shot, or the next one that has
+  enough — and the cuts stay on the music.
 
 - **`lora_triggers`** — wire the **`triggers`** output of `Lora Unlim Accumulator` here and the
   trigger words go into **every** shot's prompt. Not simply appended: a Morpheus prompt is MiniMax's
@@ -92,6 +94,42 @@ exists because six things have to be right that a hand-wired graph gets wrong:
   also re-applied after the in-loop writer has reworked a shot, since a rewrite can drop them, and a
   trigger already present (case-insensitively) is never repeated. Because they go in *before* each
   shot's cache key is taken, changing them re-samples rather than replaying latents made without them.
+
+### Lipsync music videos — `song` and the cast
+
+Two optional inputs turn the sampler into a music-video renderer. Both need **`audio_vae`**.
+
+- **`song`** — the finished track. Every shot hears **its own slice** of it, pinned at the shot's
+  frame 0 with **MiniMax H3 Add Guide**, so the singing on screen follows the song. The slice starts
+  where the shot sits on the **whole chain's** timeline — after earlier shots' `seam_trim` and
+  `trims`, and whatever `shots_range` renders — and runs for the shot's full sampled length. The
+  `audio` output is then the song itself, cut to the rendered frames, not the shots' re-generated
+  sound (`song_audio` = `model` hands out that re-generated sound instead, joined like any chain's —
+  free to switch, cached shots replay). Measured before building it: pinning the song this way and passing it as a reference audio
+  give the same sound, mouths and time, but the reference way let a poster's title text leak into the
+  picture. With a song wired, `trims` stops being free — moving a cut moves every later shot's slice,
+  so those shots sample again. Write the sung words into each shot's prompt for the best mouth shapes.
+- **`cast_1`, `cast_2` …** — the **`cast`** output of **Card Presets** (connect one and another slot
+  appears): band members as character cards with their character sheets, locations as entity cards.
+  A shot gets a card when its prompt **names** it — whole word, the case as written, **outside
+  quotes**. Case, because a name can be an ordinary word too ("Keen"); quotes, because the sung line
+  and text printed on clothes are quoted and can hold the names as well (a band called "Keen Burg No
+  Death"). A negation ("without Burg") still counts, so name only who is in frame. A card in the shot
+  is written into H3's own reference prompt layout — **subject_definitions**, **summary**,
+  **retention_analysis**, **detailed_description**, the format ComfyUI's MiniMax H3 reference
+  templates use — and, when it has a picture, attached as a reference image, numbered `<Picture K>`
+  in wiring order. A character sheet is described the way that stopped the model drawing a sheet's
+  four views as four people. The Dream's own text becomes the scene, so write it as **plain scene
+  text**; the `prompts` output shows what every shot really got, and the report lists who each shot
+  got and which part of the song it heard.
+
+With any card wired, every shot is built with **MiniMax H3 Reference to Video** — load the **ref2va**
+checkpoint — and keyframes become Add Guide anchors (a continuing shot's start frame rides on the
+same frame-0 anchor as its slice of the song). `ref_image_size` (advanced) is `max` by default, the
+strongest identity; `match` is faster, which matters because every reference rides through every
+sampling step. A card with no picture goes in as words only — a location described in text often
+works and saves that time. The in-loop writer stands down while a cast is wired: it
+writes this suite's own template, and a cast shot's prompt is a reference scene.
 
 ### The in-loop writer — the forecast, removed
 
@@ -270,6 +308,52 @@ otherwise minutes of silence.
 wired frame always wins — so it is how you put one hard cut into an otherwise flowing sequence. Leave
 it blank and every shot follows the single `link` widget; that case keeps the cache key byte-identical
 to before the option existed, so adding it re-wrote nobody's prompts and re-sampled nobody's video.
+
+**Writing for a cast.** Wire the same Card Presets cards into **`cast_1`, `cast_2` …** that go into
+the sampler, and Orpheus' **`lyrics`** into **`shot_lyrics`** (Orpheus' `durations` into
+`durations`, `link` = `by section` for a clip edited to the music). The node then writes for the ref2va
+sampler instead of its own template:
+
+- the planner is a music-video one: told the cast by name and what is sung over each shot and by
+  whom, it puts every singer in frame in their shot, takes the lyrics as **mood**, never as subject
+  matter, and names only who is in frame;
+- each shot is one plain **scene** paragraph — who is where doing what, the framing and one camera
+  move — that names people and places only by their card names and never describes their looks,
+  because the pictures carry them and a name on the page is what attaches a picture;
+- the style bible's look is stamped **before** the scene as its own paragraph, the scene follows as
+  `[Shot 1]`, and the shot's sung words are stamped **after** it, verbatim, as `Keen sings: "…"`.
+  The words are never left to the LLM — a model asked to copy a Ukrainian line will "fix" it — and
+  the stamped name is also what makes the sampler attach the singer's sheet;
+- a shot that continues is told the previous shot's end state and to carry the camera on, never
+  to reverse it; a shot that starts on a cut is shown the same end state as the thing to differ
+  from — a clearly different shot size or angle; and no shot is left for the sampler's in-loop
+  writer.
+
+**`link` = `by section`** takes the sections from `shot_lyrics`: a shot continues the one before it
+while the song stays in the same section and cuts where the section changes (wordless shots in a
+row are one take). Shots generated on their own from the same references do not agree on how big
+a singer is in frame, so cutting on every line makes the picture jump; a continued shot starts
+from the previous shot's last frame and cannot. A filled `links` still wins. Keep the sampler's
+`seam_trim` small (1) here.
+
+**Places.** Wire the cards of the places the video can be set in into **`location_1`,
+`location_2` …** (and into the sampler's cast inputs as well). Every shot then gets exactly **one**
+of them, its name goes into the shot's text — put in front of the scene if the writer left it out —
+and the sampler attaches that one picture. `locations` decides how:
+
+- **by section** — the planner chooses from the places' descriptions, one per kind of section, and
+  keeps it, so every chorus returns to the same place. It knows the section of each shot because
+  Orpheus' `lyrics` now opens a sung shot with it (`3. [Chorus] Keen - "…"`). Write "for the
+  choruses" into a card's description to decide it yourself, or open a line of `beats` with the
+  place in brackets, `(Roof) Keen sings…`. A line that names no place stays where the previous shot
+  was;
+- **in order** — no LLM: the places are played in wiring order, each for an equal share of the
+  clip's length.
+
+A place only changes on a cut — a shot that continues the previous one stays where it was.
+
+The report counts the shots that got words and the shots per place, and warns when a singer in the
+lyrics has no card of that name. With no card wired, nothing changes, cache keys included.
 
 ### `Morpheus Dream Board 🌙` — a conversation becomes a storyboard
 
@@ -597,12 +681,22 @@ ordinary beat, so the input can look inert. Raise `cue_pull` to follow the singi
 price of less even shots — and the report counts how many of the sung sections actually became cuts,
 so the choice is made against a number rather than a guess.
 
-It also fills the **`lyrics`** output: what is sung over each shot, by shot number. Wire it into
+**`cut_on` = `lines`** is the lipsync setting: cuts fall in the gaps **between sung lines** instead
+of on the bar grid, in the middle of the gap (at most 2 s before the next line), so no line is split across
+two shots, a line keeps its tail and the next shot has settled before the mouth opens. Detected moments still cut the stretches with no
+words. A shot may then be as short as 2 s — under H3's trained 5.17 s, which renders but is warned
+about — and `pace` goes that low too: around 4 gives roughly one line per shot. The price is that
+these cuts sit on the singing, not on the beat.
+
+It also fills the **`lyrics`** output: what is sung over each shot, by shot number. A line that
+still crosses a cut is split there word by word, so no shot quotes words sung in another. Wire it into
 `Phantas Storyboard`'s `shot_lyrics` and the planner stops writing shot 7 in ignorance of its own
 moment in the song. It is handed over as **mood**, explicitly not as subject matter — left to itself
 a model illustrates lyrics literally, a line about a river becomes a river in every frame, and that
 competes with the cast block that actually holds identity across frames. And it carries **no
 timestamps at all**, because that planner emits weights and the frame grid is applied afterwards.
+`Morpheus Storyboard` takes it on its own `shot_lyrics` when a cast is wired, and there the words
+also go into the shot, stamped verbatim after the scene for the lipsync.
 
 `start_sec` / `end_sec` cut a window out of the track — to skip a long intro, or to make a teaser —
 while the *whole* track is still analysed, because tempo and downbeat are measured far more reliably

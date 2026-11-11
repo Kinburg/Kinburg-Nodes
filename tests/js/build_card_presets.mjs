@@ -26,7 +26,7 @@ const EXPOSE = `
 globalThis.CP = { presetsForTag, libraryRows, copyName, editorPayload, renameInGraph, syncReader,
                   cardEditor, libraryDialog, fieldsFor, refreshStore,
                   setStore: (s) => { STORE = s; }, getStore: () => STORE,
-                  posted: () => POSTED, cards: () => CARDS, boxes: () => BOXES };
+                  posted: () => POSTED, cards: () => CARDS, boxes: () => BOXES, doc: () => DOC };
 `;
 
 // A backend that behaves like card_presets/routes.py, over an in-memory library.
@@ -34,6 +34,13 @@ const EXTRA = String.raw`
 globalThis.alert = () => {};
 const BOXES = [];
 document.body.appendChild = (el) => { BOXES.push(el); return el; };
+// The editor takes image pastes on the document, in the capture phase, while it is open.
+const DOC = {};
+document.addEventListener = (t, f, capture) => { DOC[t] = { f, capture }; };
+document.removeEventListener = (t, f) => { if (DOC[t] && DOC[t].f === f) delete DOC[t]; };
+globalThis.FileReader = class {
+  readAsDataURL(file) { this.result = "data:image/png;base64,FAKE-" + file.name; setTimeout(() => this.onload(), 0); }
+};
 
 const SCHEMA = {
   character: [{ key: "name", label: "Name" }, { key: "gender", label: "Gender" },
@@ -44,7 +51,7 @@ const SCHEMA = {
 let CARDS = {
   Vasya: { type: "character", tags: ["heroes"],
            values: { name: "Vasya", gender: "male", eye_color: "brown", notes: "quiet" } },
-  Zoya:  { type: "character", tags: ["heroes", "band"],
+  Zoya:  { type: "character", tags: ["heroes", "band"], picture: "0123456789abcdef.png",
            values: { name: "Zoya", gender: "female", voice_tags: "female lead vocal" } },
   Cafe:  { type: "entity", tags: ["places"],
            values: { name: "Cafe", description: "bronze pitchers" } },
@@ -53,7 +60,8 @@ const storeData = () => ({
   ok: true, none: "\u{1F6AB} None", all_tags: "\u{1F3F7} All",
   order: ["\u{1F6AB} None", ...Object.keys(CARDS).sort()],
   tags: [...new Set(Object.values(CARDS).flatMap((c) => c.tags))].sort(),
-  presets: Object.fromEntries(Object.entries(CARDS).map(([k, v]) => [k, { type: v.type, tags: v.tags }])),
+  presets: Object.fromEntries(Object.entries(CARDS).map(([k, v]) =>
+    [k, { type: v.type, tags: v.tags, ...(v.picture ? { picture: v.picture } : {}) }])),
   schema: SCHEMA,
 });
 
@@ -78,8 +86,14 @@ api.fetchApi = async (route, opt) => {
         const prev = CARDS[body.name] || (body.old_name ? CARDS[body.old_name] : null) || {};
         if (body.old_name && body.old_name !== body.name) delete CARDS[body.old_name];
         const tags = String(body.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+        // like store.upsert: absent keeps, "" removes, a data: URL is stored, a file name is shared
+        let picture = prev.picture || "";
+        if (body.picture !== undefined) {
+          picture = String(body.picture).startsWith("data:") ? "feedface00000000.png" : body.picture;
+        }
         CARDS[body.name] = { type: body.type, values: body.values,
-                             tags: tags.length ? tags : (prev.tags || []) };
+                             tags: tags.length ? tags : (prev.tags || []),
+                             ...(picture ? { picture } : {}) };
       }
       return reply(storeData());
     }
@@ -88,7 +102,8 @@ api.fetchApi = async (route, opt) => {
   if (route.startsWith("/kinburg/cards/preset")) {
     const nm = decodeURIComponent(route.split("name=")[1] || "");
     const c = CARDS[nm];
-    return reply(c ? { ok: true, name: nm, type: c.type, tags: c.tags, values: { ...c.values } }
+    return reply(c ? { ok: true, name: nm, type: c.type, tags: c.tags, values: { ...c.values },
+                       picture: c.picture || "" }
                    : { ok: false, error: "no saved card named '" + nm + "'" });
   }
   return reply(storeData());
@@ -242,6 +257,90 @@ del.onclick();
 await tick();
 check("...the second one actually deletes",
       (postsTo("/kinburg/cards/save").pop() || {}).body.delete === true);
+
+// ---- pictures ---------------------------------------------------------------------------------
+body = CP.editorPayload(entry, { key: "Vasya", type: "character", tags: "", edited: {} });
+check("a save that has no picture to send leaves the key out (= keep the stored one)",
+      !("picture" in body));
+check("...while an explicit \"\" asks for removal",
+      CP.editorPayload(entry, { key: "Vasya", type: "character", tags: "", edited: {}, picture: "" }).picture === "");
+
+const imgOf = (root) => allOf(root, "IMG")[0];
+const unpicOf = (root) => allOf(root, "BUTTON").find((b) => b.title === "Remove the picture from this card");
+const pasteEv = (files) => ({ clipboardData: { files }, pd: false,
+                              preventDefault() { this.pd = true; }, stopPropagation() { this.sp = true; } });
+
+CP.cardEditor({ key: "Zoya", type: "character", tags: ["band"], values: { ...CP.cards().Zoya.values },
+                picture: CP.cards().Zoya.picture, isNew: false });
+box = lastBox();
+check("the editor shows the stored picture, served by the library route",
+      imgOf(box).src === "/api/kinburg/cards/picture?file=0123456789abcdef.png", imgOf(box).src);
+check("...and listens for pastes on the document, in the capture phase",
+      CP.doc().paste && CP.doc().paste.capture === true);
+const textPaste = pasteEv([{ name: "x.txt", type: "text/plain" }]);
+await CP.doc().paste.f(textPaste);
+check("a text paste is left alone for the field it was meant for", textPaste.pd === false);
+const imgPaste = pasteEv([mkFile("sheet.png")]);
+CP.doc().paste.f(imgPaste);
+await tick(); await tick();
+check("an image paste is taken (and kept from ComfyUI's canvas)", imgPaste.pd === true && imgPaste.sp === true);
+check("...and replaces the thumbnail", imgOf(box).src === "data:image/png;base64,FAKE-sheet.png", imgOf(box).src);
+await btn(box, "Save").onclick();
+saved = postsTo("/kinburg/cards/save").pop();
+check("Save sends the new picture as a data: URL", String(saved.body.picture).startsWith("data:image/png"));
+check("...which the library now holds", CP.cards().Zoya.picture === "feedface00000000.png");
+check("closing the editor stops it taking pastes", !CP.doc().paste);
+
+CP.cardEditor({ key: "Zoya", type: "character", tags: ["band"], values: { ...CP.cards().Zoya.values },
+                picture: CP.cards().Zoya.picture, isNew: false });
+box = lastBox();
+field(box, "Eyes").value = "green";
+await btn(box, "Save").onclick();
+saved = postsTo("/kinburg/cards/save").pop();
+check("an edit that never touched the picture doesn't send it", !("picture" in saved.body));
+check("...so the stored one stays", CP.cards().Zoya.picture === "feedface00000000.png");
+
+CP.cardEditor({ key: "Zoya", type: "character", tags: ["band"], values: { ...CP.cards().Zoya.values },
+                picture: CP.cards().Zoya.picture, isNew: false });
+box = lastBox();
+unpicOf(box).onclick();
+check("✕ empties the thumbnail", imgOf(box).style.display === "none");
+await btn(box, "Save").onclick();
+check("...and Save removes the picture", postsTo("/kinburg/cards/save").pop().body.picture === ""
+      && !CP.cards().Zoya.picture);
+
+CP.cardEditor({ key: "Kharkiv", type: "entity", tags: "", values: { name: "Kharkiv", description: "ruins" }, isNew: true });
+box = lastBox();
+check("a new card starts with no picture and nothing to remove",
+      imgOf(box).style.display === "none" && unpicOf(box).disabled === true);
+const overlay = CP.boxes()[CP.boxes().length - 1];
+const dropEv = pasteEv([mkFile("kharkiv.png")]);
+dropEv.dataTransfer = { files: [mkFile("kharkiv.png")], types: ["Files"] };
+overlay.fire("drop", dropEv);
+await tick(); await tick();
+check("a picture dropped anywhere over the editor is taken", imgOf(box).src === "data:image/png;base64,FAKE-kharkiv.png");
+const picker = allOf(box, "INPUT").find((i) => i.type === "file");
+picker.files = [mkFile("ruins.png")];
+picker.fire("change", pasteEv([]));
+await tick(); await tick();
+check("...and so is one chosen with 📁", imgOf(box).src === "data:image/png;base64,FAKE-ruins.png");
+await btn(box, "Create").onclick();
+saved = postsTo("/kinburg/cards/save").pop();
+check("...the last one picked is the one a new card is created with",
+      saved.body.picture === "data:image/png;base64,FAKE-ruins.png" && CP.cards().Kharkiv.picture === "feedface00000000.png");
+
+// a duplicate shares its original's file by name instead of re-uploading it
+CP.cards().Zoya.picture = "0123456789abcdef.png";
+await CP.libraryDialog("Zoya");
+box = lastBox();
+check("the library marks a card that has a picture",
+      allOf(box, "SPAN").some((s) => /Zoya \u{1F5BC}/u.test(String(s.textContent))));
+allOf(box, "BUTTON").find((b) => b.textContent === "⧉").onclick();   // Zoya is focused, so first
+await tick();
+await btn(lastBox(), "Create").onclick();
+saved = postsTo("/kinburg/cards/save").pop();
+check("a duplicate is saved pointing at the same picture file",
+      saved.body.name === "Zoya copy" && saved.body.picture === "0123456789abcdef.png", JSON.stringify(saved.body.picture));
 
 console.log("\n" + (fails.length ? "FAILED: " + fails.join(", ") : "ALL PASS"));
 process.exit(fails.length ? 1 : 0);

@@ -57,6 +57,7 @@ class CardSave:
             "optional": {
                 "save_as": ("STRING", {"default": "", "tooltip": "Preset name for the library. Empty = use the JSON's own 'name' field. Empty here AND in the JSON = render only, don't save. Re-saving the same name overwrites it."}),
                 "tags": ("STRING", {"default": "", "tooltip": "Comma-separated tags to filter the library by in Card Presets (e.g. 'heroes, medieval'). Empty = leave existing tags untouched (edit/clear them in Card Presets → Manage)."}),
+                "picture": ("IMAGE", {"tooltip": "Saved WITH the card — usually the same picture the LLM described (a character sheet, a location), for video models that take reference images. Card Presets gives it back on its 'picture' output. Only the first image of a batch is kept. Not wired = the saved card keeps the picture it already has."}),
             },
         }
 
@@ -65,7 +66,7 @@ class CardSave:
     FUNCTION = "run"
     CATEGORY = CAT_LLM_PRESETS
 
-    def run(self, json_string="", card_type=_AUTO, save_as="", tags=""):
+    def run(self, json_string="", card_type=_AUTO, save_as="", tags="", picture=None):
         values, err = _parse(json_string)
         if err:
             report = f"parse error: {err}"
@@ -90,10 +91,12 @@ class CardSave:
         # Empty tags string -> None (leave existing tags alone on overwrite).
         tags_arg = tags if (tags or "").strip() else None
         try:
-            store.upsert(name, ctype, values, tags=tags_arg)
+            store.upsert(name, ctype, values, tags=tags_arg,
+                         picture=None if picture is None else store.picture_from_tensor(picture))
             saved = store.get(name) or {}
             tag_note = f", tags: {', '.join(saved.get('tags') or [])}" if saved.get("tags") else ""
-            report = f"saved '{name}' ({ctype}{tag_note})"
+            pic_note = ", with picture" if saved.get("picture") else ""
+            report = f"saved '{name}' ({ctype}{tag_note}{pic_note})"
             print(f"[CardSave] {report}")
             return (card, name, report)
         except Exception as e:

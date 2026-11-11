@@ -112,8 +112,8 @@ class KinburgOrpheusScore:
         return {
             "required": {
                 "audio": ("AUDIO", {"tooltip": "The finished track — straight out of Siren, or a LoadAudio for something off disk. It is analysed whole even when 'start_sec'/'end_sec' narrow the part you are cutting, because tempo and downbeat are measured far more reliably over the whole song than over a 20-second window."}),
-                "cut_on": (T.CUT_UNITS, {"default": "2 bars", "tooltip": "The musical unit a cut may land on. Same vocabulary as Siren Section's 'snap'.\n\nThis is not only taste — it decides how much video gets generated and thrown away, and by how much depends on the tempo. A shot is 3-7 bars at a normal tempo, so 'bar' gives the planner more lines than it can use while 'phrase (4 bars)' may give it only two possible shot lengths. The report prints the full cost table for YOUR tempo; read it once per song."}),
-                "pace": ("FLOAT", {"default": 7.0, "min": T.MIN_SECONDS, "max": T.MAX_SECONDS, "step": 0.25, "tooltip": "The shot length to aim for, in seconds — a BIAS, not a length.\n\nIt decides how many shots the rest of the track should become; the cut itself then goes to the best cue available, which is never exactly this number. So on a 7.5 s phrase grid, 7 and 9 give the SAME plan — there is nothing between the candidates to choose. Move it in whole seconds and watch the shot count, not the decimals."}),
+                "cut_on": (T.CUT_UNITS + ["lines"], {"default": "2 bars", "tooltip": "'lines' (needs Echo's 'timing') cuts in the gaps BETWEEN sung lines instead of on the bar grid, so no line is split across two shots - for lipsync. Shots may then be as short as 2 s, under H3's trained 5.17 s; lower 'pace' to get closer to one line per shot.\n\nThe other values: The musical unit a cut may land on. Same vocabulary as Siren Section's 'snap'.\n\nThis is not only taste — it decides how much video gets generated and thrown away, and by how much depends on the tempo. A shot is 3-7 bars at a normal tempo, so 'bar' gives the planner more lines than it can use while 'phrase (4 bars)' may give it only two possible shot lengths. The report prints the full cost table for YOUR tempo; read it once per song."}),
+                "pace": ("FLOAT", {"default": 7.0, "min": T.LINE_MIN_SECONDS, "max": T.MAX_SECONDS, "step": 0.25, "tooltip": "The shot length to aim for, in seconds — a BIAS, not a length.\n\nIt decides how many shots the rest of the track should become; the cut itself then goes to the best cue available, which is never exactly this number. So on a 7.5 s phrase grid, 7 and 9 give the SAME plan — there is nothing between the candidates to choose. Move it in whole seconds and watch the shot count, not the decimals."}),
                 "sensitivity": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": "How far above its own neighbourhood a moment must stand to become a candidate cut. Low = every drum hit is a candidate (the planner has plenty of choice and cuts nearer 'pace'); high = only the big moments, so shots stretch to reach one.\n\nIgnored for section boundaries when a 'plan' is wired — those are read, not detected."}),
                 "bpm": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 300.0, "step": 0.01, "tooltip": "0 = measure it from the audio. Anything else is used verbatim.\n\nType it for a song you generated: you know the tempo exactly, and a measured one carries a confidence that can be low on a ballad or anything without drums. The downbeat is measured either way — knowing the tempo does not tell you where bar 1 starts."}),
                 "beats_per_bar": ("INT", {"default": 4, "min": 1, "max": 16, "tooltip": "The time signature's top number. Only used to turn beats into bars, which is what 'cut_on' measures in."}),
@@ -163,15 +163,18 @@ class KinburgOrpheusScore:
                 f"one shot ({T.MIN_SECONDS:.2f} s is the shortest H3 renders). Widen it.")
 
         bar_sec = found["bar_seconds"]
-        step = T.unit_seconds(bar_sec, beats_per_bar, cut_on)
+        sung = _sections_of(timing)
+        by_line = cut_on == "lines" and bool(sung)
+        if cut_on == "lines" and not sung:
+            notes.append("cut_on = lines needs Echo's 'timing' wired - cutting on bars instead")
+        step = None if by_line else T.unit_seconds(bar_sec, beats_per_bar, cut_on)
         offset = det.phase_for(found, step) if step else 0.0
-        if not step:
+        if not step and not by_line:
             notes.append("no tempo, so there is no bar grid: cuts fall on detected moments alone, "
                          "and on plain length where there are none. Type the bpm.")
 
         cues = list(found["cues"])
         plan_rows = []
-        sung = _sections_of(timing)
         if sung:
             # Echo's boundaries REPLACE both the detected ones and the plan's. The plan says where a
             # section was asked to be; on the author's own take those two were measured up to 18 s
@@ -187,6 +190,19 @@ class KinburgOrpheusScore:
                 for at in (float(a), float(b)):
                     if start + 1e-6 < at < end - 1e-6:
                         cues.append(T.cue(at, 0.8, "section", "words start/stop"))
+            if by_line:
+                # A cut may only fall where nobody is singing: every cue inside a line goes, and
+                # each gap between two lines becomes one, in the middle of it, so the line before keeps its
+                # tail and the next shot settles before the mouth opens. A gap over 4 s is a break (Echo's
+                # `quiet`), and the next line takes 2 s of it. Overlapping lines (a backing echo) have none.
+                lines = sorted(timing.get("lines") or [], key=lambda ln: ln["start"])
+                cues = [c for c in cues if not any(ln["start"] <= c["t"] < ln["end"] for ln in lines)]
+                for prev, ln in zip(lines, lines[1:]):
+                    gap = ln["start"] - max(x["end"] for x in lines if x["start"] <= prev["start"])
+                    at = ln["start"] - min(gap / 2, 2.0)
+                    if gap >= 0 and start + 1e-6 < at < end - 1e-6:
+                        cues.append(T.cue(at, 1.0 if ln["section"] != prev["section"] else 0.6,
+                                          "section", ln.get("label") or ""))
             notes.append(f"section boundaries came from Echo's alignment ({len(sung)} sung "
                          f"section(s)), not from the plan or the detector")
             if str(plan or "").strip():
@@ -212,7 +228,8 @@ class KinburgOrpheusScore:
         if step:
             cues = T.snap_cues(cues, step, offset=offset, total=end)
         shots = T.plan_shots(end, cues, preferred=pace, start=start, cue_pull=cue_pull,
-                             step=step, offset=offset)
+                             step=step, offset=offset,
+                             min_sec=T.LINE_MIN_SECONDS if by_line else T.MIN_SECONDS)
         notes.extend(T.warnings(shots, total=end))
         # A wired timing supplies CANDIDATES; `cue_pull` decides whether the planner can afford
         # them. At the default 2.0 a boundary more than about 2 s off the pace-preferred position

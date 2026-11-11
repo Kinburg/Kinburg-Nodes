@@ -44,9 +44,17 @@ Things this node has to get right that a hand-wired graph does not:
   * **iterating.** Sampled latents are cached on disk under a causal key (see `cache.py`), so
     editing shot 5 of 8 re-samples 5..8 and replays 1..4.
 
-Not in v1, deliberately: reference images / audio (`MiniMaxH3ReferenceToVideo`). They cannot be
-combined with keyframes anyway — `comfy/model_base.py` lets `minimax_refs` overwrite the keyframes'
-`cond_video_latents`, so a shot is either fl2va or ref2va, never both.
+Two optional inputs turn it into a music-video sampler (both need the ref2va checkpoint when a cast
+is wired, and the audio vae):
+
+  * **song** — every shot hears its own slice of the song, pinned at its frame 0 with `MiniMax H3
+    Add Guide`, so the singing on screen follows the track. The slice starts where the shot's first
+    KEPT frame sits on the storyboard's timeline (minus its dropped head frames), and the output
+    track is the song itself, not the shots' re-generated audio.
+  * **cast_N** — Card Presets cards. A shot whose prompt names a card (see `cast.py`) gets that
+    card defined in H3's ref2va prompt format and, if it has a picture, attached as a reference
+    image; the shot is then built with `MiniMax H3 Reference to Video` and its keyframes become Add
+    Guide anchors. The shot's own text is the scene.
 """
 import logging
 import re
@@ -62,6 +70,8 @@ import node_helpers
 from comfy_extras.nodes_custom_sampler import Guider_Basic, Noise_RandomNoise
 
 from . import cache as shot_cache
+from . import cast as cast_mod
+from ..card_presets.presets_node import CAST_TYPE
 from ..local_llm.llm_node import LLM_CONFIG, _shutdown_worker as _shutdown_llm
 from ..timer.timer_nodes import _format_elapsed
 from ..util.images import fp16_round as _fp16_round, log_uris as _log_uris
@@ -138,6 +148,17 @@ def _with_triggers(prompt, triggers):
         return head + "\n\n" + tail + "\n\n" + rest
     base = text.rstrip().rstrip(",")
     return (base + "\n\n" + tail) if base.strip() else tail
+
+
+def _cast_in_order(kwargs, prefix="cast"):
+    """The wired `cast_N` cards in slot order — numerically, so `cast_10` doesn't land between
+    `cast_1` and `cast_2` and silently renumber every `<Picture K>`."""
+    found = []
+    for key, val in kwargs.items():
+        m = re.fullmatch(prefix + r"_(\d+)", key)
+        if m and isinstance(val, dict):
+            found.append((int(m.group(1)), val))
+    return [v for _, v in sorted(found, key=lambda p: p[0])]
 
 
 def _flatten_shots(shots):
@@ -291,7 +312,12 @@ class KinburgMorpheus:
                 # after it — 'audio', 'cache' and 'cache_tag' would all come back holding their
                 # neighbour's setting in graphs that were saved before this existed.
                 "trims": ("STRING", {"default": "", "advanced": True,
-                                     "tooltip": "Frames dropped from the TAIL of each shot — a comma list, last value repeating, the same shape 'durations' and 'links' take. Blank (default) trims nothing and behaves exactly as before.\n\nThis is Orpheus' output. H3's shot lengths move in a 0.708 s quantum and bar lines do not, so a cut that has to land on a downbeat is reached by generating the first legal length LONGER than the music needs and dropping the overshoot here. Generate long, cut on the beat.\n\nCosts nothing to change: trimming happens at decode, so cached shots replay. The next shot's first frame moves to the cut point with it, and the shot's audio slot shrinks to match, so picture and sound stay together.\n\nNote it competes with 'seam_trim' for room — a shot is never trimmed below 5 frames, and the report says when it was clamped."}),
+                                     "tooltip": "Frames dropped from the TAIL of each shot — a comma list, last value repeating, the same shape 'durations' and 'links' take. Blank (default) trims nothing and behaves exactly as before.\n\nThis is Orpheus' output. H3's shot lengths move in a 0.708 s quantum and bar lines do not, so a cut that has to land on a downbeat is reached by generating the first legal length LONGER than the music needs and dropping the overshoot here. Generate long, cut on the beat.\n\nCosts nothing to change: trimming happens at decode, so cached shots replay. The next shot's first frame moves to the cut point with it, and the shot's audio slot shrinks to match, so picture and sound stay together.\n\nNote it competes with 'seam_trim' for room — a shot is never trimmed below 5 frames, and the report says when it was clamped.\n\nWith a 'song' wired it is no longer free: moving a cut moves where every later shot's slice of the song starts, so those shots sample again."}),
+                # appended after 'trims' for the same reason 'trims' is last
+                "ref_image_size": (["max", "match"], {"default": "max", "advanced": True,
+                                                      "tooltip": "How big the cast's pictures go in, when 'cast_N' cards are wired. max = up to a 2048 px short edge, the strongest identity; match = scaled down to the canvas, faster. Every reference rides through every sampling step, so on a shot with three sheets this is a real difference in time."}),
+                "song_audio": (["song", "model"], {"default": "song", "advanced": True,
+                                                   "tooltip": "What the audio output carries when 'song' is wired. song = the song itself under the rendered frames, untouched. model = what H3 generated while hearing it, decoded and joined shot by shot like any other chain ('audio' = concat) - to hear what the model made of the song. Free to switch: cached shots replay."}),
             },
             "optional": {
                 "audio_vae": ("VAE", {"tooltip": "The AUDIO vae. Without it the video comes out silent."}),
@@ -300,6 +326,9 @@ class KinburgMorpheus:
                 "sampler": ("SAMPLER", {"tooltip": "Optional explicit sampler (overrides sampler_name)."}),
                 "noise": ("NOISE", {"tooltip": "Optional noise source; its seed becomes the base seed, and each shot still gets its own offset. Leave empty to use the 'seed' widget."}),
                 "lora_triggers": ("STRING", {"forceInput": True, "tooltip": "Comma-separated LoRA trigger words, added to EVERY shot's prompt — wire the 'triggers' output of 'Lora Unlim Accumulator' here. They go in just before the prompt's [Negative] section, never after it, and are re-applied after the in-loop writer runs, so neither the storyboard's layout nor an LLM rewrite can lose them. A trigger already present in the text (case-insensitive) is not repeated."}),
+                "song": ("AUDIO", {"tooltip": "The finished song the video is cut to. Every shot hears its own slice of it, pinned at its first frame ('MiniMax H3 Add Guide'), so the singing on screen follows the track — lipsync. The slice is taken from where the shot sits on the storyboard's timeline, after seam_trim and trims, so shot 3 always hears what plays under shot 3.\n\nThe 'audio' output is then the song itself, cut to the rendered frames — not the shots' re-generated audio. Needs 'audio_vae'. Write the sung words into the shot's prompt for the best mouth shapes."}),
+                "cast_1": (CAST_TYPE, {"tooltip": "A card from Card Presets ('cast' output): a band member, or a location. Connect one and another slot appears.\n\nA shot whose prompt NAMES the card — whole word, same case, outside quotes — gets it: defined in H3's reference prompt format and, if the card has a picture, attached as a reference image. Quotes are skipped so the sung line and printed text don't count; a negation ('without Burg') still does, so name only who is in frame.\n\nWith any card wired every shot is built for the ref2va checkpoint (MiniMax H3 Reference to Video), so load that model, and write each Dream's prompt as the plain scene — Morpheus adds the definitions. The 'prompts' output shows what each shot really got."}),
+                "cast_2": (CAST_TYPE,),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -379,14 +408,21 @@ class KinburgMorpheus:
     def render(self, shots, model, clip, vae, width, height, steps, scheduler, sampler_name,
                seed, shift_video, shift_audio, seam_trim, audio, seam_fade_ms, cache,
                cache_tag, trims="", live_preview=True, llm_keep_loaded=False, shots_range="",
-               audio_vae=None, sigmas=None, sampler=None, noise=None, llm_config=None,
-               lora_triggers="", unique_id=None):
+               ref_image_size="max", song_audio="song", audio_vae=None, sigmas=None, sampler=None, noise=None,
+               llm_config=None, lora_triggers="", song=None, unique_id=None, **kwargs):
         _require_h3()
         chain = _flatten_shots(shots)
         if not chain:
             raise ValueError("No shots wired — chain at least one 'Morpheus Dream'.")
+        if song is not None and audio_vae is None:
+            raise ValueError("'song' needs 'audio_vae' wired — that is how each shot hears its slice.")
 
-        warn, t_run = [], time.time()
+        t_run = time.time()
+        cast, warn = cast_mod.roster(_cast_in_order(kwargs))
+        if cast and llm_config is not None:
+            warn.append("the in-loop writer is off while a cast is wired — it writes Morpheus' own "
+                        "template, and a cast shot's prompt is a ref2va scene")
+            llm_config = None
         lo, hi = _parse_range(shots_range, len(chain))
         cw, ch = _snap32(width), _snap32(height)
         if cw * ch > h3.MAX_PIXELS:
@@ -422,6 +458,7 @@ class KinburgMorpheus:
         plan = []
         trim = max(0, int(seam_trim))
         cuts = _per_shot_ints(trims, len(chain))
+        owed = 0
         for i, s in enumerate(chain):
             has_start = s.get("start_frame") is not None or (i > 0 and s["link"] == "continue")
             # frame 0 duplicates the previous shot's tail; the frames after it are the model
@@ -435,6 +472,11 @@ class KinburgMorpheus:
             if cuts[i] > cut:
                 warn.append(f"shot {i + 1}: trim of {cuts[i]} frames would leave under 5 frames — "
                             f"clamped to {cut}")
+            # `trims` put each cut on the beat counting every shot at full length, so frames
+            # dropped at a seam are given back out of the end trim, as soon as one is big enough
+            owed += drop
+            back = min(owed, cut)
+            cut, owed = cut - back, owed - back
             plan.append({"frames": s["frames"], "drop": drop, "cut": cut,
                          "out": s["frames"] - drop - cut, "in_range": lo <= i + 1 <= hi})
             if not (124 <= s["frames"] <= 362):
@@ -448,6 +490,20 @@ class KinburgMorpheus:
                                 f"({r_img:.2f}) but the canvas is {cw}x{ch} ({r_c:.2f}) — H3 stretches "
                                 f"the first frame, it does not crop, so this shot will be distorted")
         total_out = sum(p["out"] for p in plan if p["in_range"])
+        # Where each shot's first KEPT frame sits on the whole chain's timeline — the song's clock,
+        # whatever shots_range renders. A shot's frame 0 is `drop` frames earlier than that.
+        at = 0
+        for p in plan:
+            p["at"], at = at, at + p["out"]
+
+        def song_part(p):
+            """This shot's slice of the song: from its frame 0, for its full sampled length."""
+            wav, sr_s = song["waveform"], int(song["sample_rate"])
+            a = int(round(max(0, p["at"] - p["drop"]) * sr_s / h3.FPS))
+            b = int(round((max(0, p["at"] - p["drop"]) + p["frames"]) * sr_s / h3.FPS))
+            if a >= wav.shape[-1]:
+                return None
+            return {"waveform": wav[..., a:b], "sample_rate": sr_s}
 
         # which shots actually run: the ones in the output range, plus any earlier shot whose tail
         # frame the next one inherits. Decided up front so the progress bar knows its true total.
@@ -466,12 +522,14 @@ class KinburgMorpheus:
             shot_cache.tensor_key(sig.cpu() if hasattr(sig, "cpu") else None),
             shift_video if pre_shift is None else pre_shift, shift_audio, cache_tag,
         )
-        def shot_key(prev_key, i, s, prompt):
+        def shot_key(prev_key, i, s, prompt, *extra):
             """A shot's key. Computed IN the loop, not up front: with an LLM in the loop the prompt
-            is written from the previous shot's rendered frame, so it doesn't exist until then."""
+            is written from the previous shot's rendered frame, so it doesn't exist until then.
+            `extra` is the song slice and the cast pictures — empty without them, so the keys of
+            plain chains are the ones they always had."""
             return shot_cache.key(prev_key, i, prompt, s["frames"], s["link"], s["seed_offset"],
                                   s["keyframe_strength"], shot_cache.tensor_key(s.get("start_frame")),
-                                  shot_cache.tensor_key(s.get("end_frame")))
+                                  shot_cache.tensor_key(s.get("end_frame")), *extra)
 
         # --- live log + the in-loop writer --------------------------------------------------------
         # The log is wired up whether or not an LLM is: every decoded shot posts its last frame, so
@@ -497,7 +555,8 @@ class KinburgMorpheus:
         # --- the loop ---------------------------------------------------------------------------
         sr = int(getattr(audio_vae, "audio_sample_rate_output",
                          getattr(audio_vae, "audio_sample_rate", DEFAULT_AUD_SR))) if audio_vae else DEFAULT_AUD_SR
-        want_audio = audio == "concat" and audio_vae is not None
+        song_out = song is not None and song_audio == "song"
+        want_audio = audio == "concat" and audio_vae is not None and not song_out
         if audio == "concat" and audio_vae is None:
             warn.append("audio = concat but no 'audio_vae' is wired — the track is silent")
 
@@ -513,7 +572,7 @@ class KinburgMorpheus:
             previewer = None
 
         images, cursor, handoff, rows, wav_chunks = None, 0, None, [], []
-        hits, done_units, cache_errs = 0, 0, []
+        hits, done_units, cache_errs, cast_rows = 0, 0, [], []
         prompts_out, prev_key, wrote_any = [], env, False
         for i, s in enumerate(chain):
             if i + 1 > hi:
@@ -525,9 +584,21 @@ class KinburgMorpheus:
             # Triggers go in HERE, before the cache key is taken from the prompt, so changing them
             # re-samples the shots instead of replaying latents made without them.
             prompt, rmode, t_write = _with_triggers(s["prompt"], lora_triggers), "—", 0.0
+            who, pictures, heard, extra = [], [], None, []
+            if cast:
+                if re.search(r"\[\s*scene overview", s["prompt"] or "", re.I):
+                    warn.append(f"shot {i + 1} is written in Morpheus' own template — with a cast "
+                                f"wired the whole text becomes the scene of a ref2va prompt; write "
+                                f"plain scene text")
+                who = cast_mod.present(cast, s["prompt"])
+                prompt, pictures = cast_mod.assemble(prompt, who)
+                extra += [shot_cache.tensor_key(pic) for pic in pictures] + [ref_image_size]
+            if song is not None:
+                heard = song_part(p)
+                extra.append(shot_cache.tensor_key(heard["waveform"]) if heard else "after the song")
             if not p["process"]:
                 # still has to advance the causal chain, or every later key would shift
-                prev_key = shot_key(prev_key, i, s, prompt)
+                prev_key = shot_key(prev_key, i, s, prompt, *extra)
                 logging.info(f"[Morpheus] shot {i + 1}/{len(chain)} — skipped (outside "
                              f"shots_range, nothing downstream needs it)")
                 continue
@@ -570,7 +641,7 @@ class KinburgMorpheus:
                         except Exception:
                             pass
 
-            key_i = shot_key(prev_key, i, s, prompt)
+            key_i = shot_key(prev_key, i, s, prompt, *extra)
             prev_key = key_i
             entry = shot_cache.load(key_i) if cache == "disk" else None
             cached = entry is not None
@@ -581,9 +652,28 @@ class KinburgMorpheus:
             else:
                 logging.info(f"[Morpheus] shot {i + 1}/{len(chain)} — sampling {p['frames']} frames "
                              f"({_seconds(p['frames']):.2f} s) at {cw}x{ch}, seed {seed_i}")
-                cond, latent = h3.MiniMaxH3ImageToVideo.execute(
-                    clip=clip, vae=vae, prompt=prompt, width=cw, height=ch,
-                    length=p["frames"], first_frame=start, last_frame=end).result
+                if cast:
+                    # ref2va: the cast's pictures are references, the keyframes become timeline
+                    # anchors, and the song's slice rides on the frame-0 anchor with the start frame
+                    cond, latent = h3.MiniMaxH3ReferenceToVideo.execute(
+                        clip=clip, prompt=prompt, width=cw, height=ch, length=p["frames"],
+                        ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae,
+                        ref_images={f"ref_image_{k}": pic for k, pic in enumerate(pictures)}).result
+                    if start is not None or heard is not None:
+                        cond = h3.MiniMaxH3AddGuide.execute(
+                            positive=cond, latent=latent, frame_idx=0, vae=vae, audio_vae=audio_vae,
+                            image=start, audio=heard).result[0]
+                    if end is not None:
+                        cond = h3.MiniMaxH3AddGuide.execute(
+                            positive=cond, latent=latent, frame_idx=-1, vae=vae, image=end).result[0]
+                else:
+                    cond, latent = h3.MiniMaxH3ImageToVideo.execute(
+                        clip=clip, vae=vae, prompt=prompt, width=cw, height=ch,
+                        length=p["frames"], first_frame=start, last_frame=end).result
+                    if heard is not None:
+                        cond = h3.MiniMaxH3AddGuide.execute(
+                            positive=cond, latent=latent, frame_idx=0, audio_vae=audio_vae,
+                            audio=heard).result[0]
                 if (start is not None or end is not None) and s["keyframe_strength"] < 1.0:
                     cond = node_helpers.conditioning_set_values(
                         cond, {"minimax_visual_cond_noise_aug": s["keyframe_strength"]})
@@ -655,7 +745,10 @@ class KinburgMorpheus:
                                        "first_frame": ("wired" if s.get("start_frame") is not None
                                                        else ("inherited" if start is not None else "none")),
                                        "last_frame": "frame" if end is not None else "none",
-                                       "refined": rmode, "prompt": prompt[:1500]})
+                                       "refined": rmode, "prompt": prompt[:1500],
+                                       "cast": [c["name"] for c in who],
+                                       "song": None if song is None else round(
+                                           max(0, p["at"] - p["drop"]) / h3.FPS, 3)})
                 if err:
                     cache_errs.append(f"shot {i + 1}: {err.splitlines()[0][:160]}")
             del video_lat, audio_lat, decoded
@@ -664,6 +757,16 @@ class KinburgMorpheus:
             rows.append((i + 1, p, seed_i, time.time() - t_shot - t_write, t_write, cached, rmode,
                          "wired" if s.get("start_frame") is not None else
                          ("inherited" if (i > 0 and s["link"] == "continue") else "text")))
+            if cast or song is not None:
+                bits = []
+                if cast:
+                    bits.append(", ".join(c["name"] + (" 🖼" if c.get("picture") is not None else "")
+                                          for c in who) or "nobody named")
+                if song is not None:
+                    g0 = max(0, p["at"] - p["drop"])
+                    bits.append(f"hears {_seconds(g0):.2f}-{_seconds(g0 + p['frames']):.2f} s"
+                                + ("" if heard is not None else " (past the end of the song: silent)"))
+                cast_rows.append(f"  shot {i + 1}: " + " · ".join(bits))
 
         if images is None:
             raise RuntimeError(f"shots_range {shots_range!r} selected nothing to render")
@@ -671,7 +774,15 @@ class KinburgMorpheus:
             images = images[:cursor]
 
         # --- audio: one normalisation for the whole track, ramps at the seams -------------------
-        if wav_chunks:
+        if song_out:
+            # the song itself under the rendered frames — already mastered, so left as it is
+            sr = int(song["sample_rate"])
+            a = int(round(plan[lo - 1]["at"] * sr / h3.FPS))
+            n = int(round(images.shape[0] * sr / h3.FPS))
+            track = song["waveform"][..., a:a + n].to("cpu", torch.float32)
+            if track.shape[-1] < n:
+                track = torch.cat([track, torch.zeros(track.shape[:-1] + (n - track.shape[-1],))], dim=-1)
+        elif wav_chunks:
             self._ramp_seams(wav_chunks, seam_fade_ms, sr)
             track = torch.cat(wav_chunks, dim=-1)
             std = torch.std(track, dim=[1, 2], keepdim=True) * 5.0
@@ -687,10 +798,21 @@ class KinburgMorpheus:
         if cache_errs:
             warn.append("the shot cache could NOT be written, so nothing will replay next run: "
                         + "; ".join(cache_errs))
+        notes = []
+        if song is not None:
+            notes.append("song: every shot hears its own slice at frame 0; the audio output is "
+                         + (f"the song itself, {sr} Hz" if song_out else "the model's own audio"))
+        if cast:
+            notes.append("cast: " + ", ".join(c["name"] + (" 🖼" if c.get("picture") is not None else "")
+                                              for c in cast)
+                         + f" — ref2va (needs the ref2va checkpoint), pictures at '{ref_image_size}'")
+        if cast_rows:
+            notes += ["", "per shot:"] + cast_rows
         report = self._report(rows, images, cw, ch, sr, shift_note, sched_note, sampler_name,
                               sampler, base_seed, cache, hits, lo, hi, len(chain), warn,
                               time.time() - t_run, want_audio, seam_fade_ms,
-                              llm_config is not None, wrote_any, seam_trim, lora_triggers)
+                              llm_config is not None, wrote_any, seam_trim, lora_triggers,
+                              notes, song_out)
         logging.info(f"[Morpheus] storyboard done: {images.shape[0]} frames "
                      f"({_seconds(images.shape[0]):.2f} s) in "
                      f"{_format_elapsed(time.time() - t_run, 'human')}")
@@ -701,7 +823,7 @@ class KinburgMorpheus:
     @staticmethod
     def _report(rows, images, cw, ch, sr, shift_note, sched_note, sampler_name, sampler,
                 base_seed, cache, hits, lo, hi, n_shots, warn, elapsed, want_audio, fade_ms,
-                has_llm, wrote_any, trim, triggers=""):
+                has_llm, wrote_any, trim, triggers="", notes=(), has_song=False):
         n = images.shape[0]
         out = [f"Morpheus — {n} frames = {_seconds(n):.2f} s @ {h3.FPS} fps · {cw}x{ch}",
                f"shots: {n_shots} in the chain, rendered {lo}-{hi}"
@@ -713,7 +835,9 @@ class KinburgMorpheus:
                f"seam trim: {trim} frame(s) off each continuing shot",
                "lora triggers: " + ((triggers or "").strip() + " (in every shot, before [Negative])"
                                     if (triggers or "").strip() else "none wired"),
-               f"audio: {'decoded, one global normalisation, ' + str(fade_ms) + ' ms seam ramps, ' + str(sr) + ' Hz' if want_audio else 'silent'}",
+               "audio: " + ("the song" if has_song else
+                            f"decoded, one global normalisation, {fade_ms} ms seam ramps, {sr} Hz"
+                            if want_audio else "silent"),
                f"in-loop writer: " + ("wired" + (" — some shots were reworked from their real first "
                                                  "frame" if wrote_any else " — nothing needed reworking")
                                       if has_llm else "not wired (shots sampled as they arrived)"),
@@ -730,6 +854,8 @@ class KinburgMorpheus:
                        f"{start:<11} {rmode:<11} "
                        f"{(_format_elapsed(w_secs, 'human') if w_secs else '—'):<9} "
                        f"{('cached' if cached else _format_elapsed(secs, 'human'))}{mark}")
+        if notes:
+            out += [""] + list(notes)
         if warn:
             out += ["", "warnings:"] + [f"  · {w}" for w in warn]
         return "\n".join(out)

@@ -32,6 +32,7 @@ SUITES = [
     ("orpheus_detect", "py", TESTS / "test_orpheus_detect.py"),
     ("orpheus_node", "py", TESTS / "test_orpheus_node.py"),
     ("morpheus_trims", "py", TESTS / "test_morpheus_trims.py"),
+    ("morpheus_cast", "py", TESTS / "test_morpheus_cast.py"),
     ("phantas_board", "py", TESTS / "test_phantas_board.py"),
     ("phantas", "py", TESTS / "test_phantas.py"),
     ("card_presets", "py", TESTS / "test_card_presets.py"),

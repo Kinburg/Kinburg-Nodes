@@ -27,9 +27,10 @@ req = list(Node.INPUT_TYPES()["required"])
 
 # ------------------------------------------------------------------------------- the widget order
 check("trims exists as an input", "trims" in req, req[-3:])
-check("…and it is the LAST widget", req[-1] == "trims", req[-4:])
+check("…and only the widgets added later still come after it, in the order they were added",
+      req[-3:] == ["trims", "ref_image_size", "song_audio"], req[-4:])
 check("…the widgets before it are untouched",
-      req[-4:-1] == ["live_preview", "llm_keep_loaded", "shots_range"], req[-4:])
+      req[-6:-3] == ["live_preview", "llm_keep_loaded", "shots_range"], req[-6:])
 check("…and it defaults to blank, so old graphs behave exactly as before",
       Node.INPUT_TYPES()["required"]["trims"][1]["default"] == "")
 check("render() accepts it by keyword with a default",
@@ -63,5 +64,23 @@ check("a greedy trim is clamped to leave 5 frames", out_frames(124, 1, 999) == (
 check("…and never goes negative", out_frames(124, 1, -3)[1] == 0)
 check("head and tail trims share the shot",
       out_frames(124, 20, 999) == (5, 99), out_frames(124, 20, 999))
+
+# ------------------------------------------------- frames dropped at a seam come back out of the trim
+# Orpheus' trims count every shot at full length; a continued shot loses `drop` head frames, so the
+# end trim is shortened by as much. Mirrors render()'s plan loop.
+def outs(frames, drops, cuts):
+    owed, res = 0, []
+    for f, d, c in zip(frames, drops, cuts):
+        out, cut = out_frames(f, d, c)
+        owed += d
+        back = min(owed, cut)
+        owed -= back
+        res.append(out + back)
+    return res
+
+
+check("a seam drop is paid back by that shot's own trim", outs([192, 192], [0, 1], [8, 8]) == [184, 184])
+check("...or by the next shot that has one, as far as its trim goes", outs([192, 192, 192], [0, 12, 0], [8, 0, 8]) == [184, 180, 192])
+check("with no trims nothing is paid back", outs([192, 192], [0, 12], [0, 0]) == [192, 180])
 
 check.done()
