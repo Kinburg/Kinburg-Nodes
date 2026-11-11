@@ -680,6 +680,12 @@ class KinburgMorpheusStoryboard:
         if not brief and not beat_lines:
             raise ValueError("Nothing to write from: give a brief, or per-shot beats, or both.")
         want_script = script == "auto" and not any(beat_lines) and bool(brief)
+        # The settings' context reaches the two calls that decide the look and the plan. The shot
+        # writers don't get it: they work from a plan line, and retell whatever else they read.
+        background = str(cfg.get("context") or "").strip()
+        if background:
+            background = ("Background on the project — for your understanding only, never retell "
+                          f"or quote it:\n{background}\n\n")
 
         # Deliberately WITHOUT the beat lines: they don't reach the style bible (see the bible call
         # below), which keeps the bible — and therefore shot 1 — cached when a later shot's note is
@@ -787,10 +793,16 @@ class KinburgMorpheusStoryboard:
                 # one shot later doesn't invalidate the look of the whole thing
                 seen = [sl["start"] for sl in slots if sl["start"] is not None][:2] \
                     or (frames[:2] if K else [])
-                prompt = (f"Sequence brief:\n{brief}\n\n"
+                prompt = (f"{background}Sequence brief:\n{brief}\n\n"
                           f"It will be told in {len(slots)} shot(s) of about "
                           f"{', '.join(f'{d:.1f}' for d in secs)} seconds."
                           + ("\n\nThe look must match the images provided." if seen and can_see else ""))
+                if cast:
+                    # their looks live on the cards; a bible that guesses them contradicts the references
+                    prompt += ("\n\nThe people and places are given to the video model as reference "
+                               "pictures. In [SUBJECT] only name them — "
+                               + ", ".join(c["name"] for c in cast + locs)
+                               + " — and never describe a face, age, hair, clothes or a setting.")
                 text, err = ask(sys_style, prompt, seen if can_see else [], "style bible")
                 if err:
                     warn.append(f"style bible call failed ({err}) — falling back to the brief")
@@ -813,7 +825,7 @@ class KinburgMorpheusStoryboard:
                 beat_lines, script_src = list(hit["lines"]), "cached"
             else:
                 lens = ", ".join(f"shot {i + 1}: {d:.2f}s" for i, d in enumerate(secs))
-                prompt = (f"Sequence brief:\n{brief}\n\n"
+                prompt = (f"{background}Sequence brief:\n{brief}\n\n"
                           f"Break it into {len(slots)} shots. Their lengths: {lens}."
                           + ("\n\nThe images are the sequence's first and last keyframes — the plan "
                              "must arrive there." if K and can_see else ""))
@@ -864,7 +876,8 @@ class KinburgMorpheusStoryboard:
             pbar.update_absolute(1, stages)
 
         bible_text = "\n\n".join(f"[{k.upper()}]: {v}"
-                                 for k, v in (("style", bible["style"]), ("subject", bible["subject"]),
+                                 for k, v in (("style", bible["style"]),
+                                              ("subject", "" if cast else bible["subject"]),
                                               ("audio bed", bible["audio_bed"]),
                                               ("negative", bible["negative"])) if v)
         pbar.update_absolute(stages - todo, stages)

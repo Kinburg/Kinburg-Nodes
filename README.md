@@ -1,7 +1,7 @@
 # 🎨 Kinburg-Nodes
 
 <!-- BEGIN GENERATED badges — tools/gen_readme_index.py -->
-[![version](https://img.shields.io/badge/version-3.7.0-blue.svg)](pyproject.toml)
+[![version](https://img.shields.io/badge/version-3.7.1-blue.svg)](pyproject.toml)
 [![nodes](https://img.shields.io/badge/nodes-115-orange.svg)](#-node-index)
 [![tests](https://img.shields.io/badge/tests-3016%20checks-brightgreen.svg)](#-tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)

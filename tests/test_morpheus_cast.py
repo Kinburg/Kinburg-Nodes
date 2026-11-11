@@ -355,8 +355,11 @@ def write(**kw):
     return SB.KinburgMorpheusStoryboard().write(**a)
 
 
-shots_out, prompts, _, report, _ = write(shot_lyrics=LYR, cast_1=KEEN, cast_2=BURG, cast_3=CITY)
+shots_out, prompts, bible_out, report, _ = write(shot_lyrics=LYR, cast_1=KEEN, cast_2=BURG, cast_3=CITY)
 calls = {c["tag"].split(" (")[0]: c for c in ASKED}
+check("the bible is told to name the cast, not to describe it",
+      "only name them — Keen, Burg, " in calls["style bible"]["prompt"])
+check("...and its guessed subject is not handed out", "[SUBJECT]" not in bible_out and "[STYLE]" in bible_out)
 check("the plan is written by the music-video planner", calls["script"]["system"] == SB.CAST_SCRIPT_SYSTEM)
 check("...told the cast by name and what is sung over each shot",
       "- Keen (a person, female)" in calls["script"]["prompt"] and LYR in calls["script"]["prompt"])
@@ -371,6 +374,12 @@ check("a duet shot puts both singers in frame", "Keen and Burg sing in this shot
 check("a cut is a new take — the previous end state is not handed over",
       "first frame is fixed" not in calls["shot 2/3"]["prompt"])
 check("the writer never sees the cast's looks", "Hair color" not in calls["shot 1/3"]["prompt"])
+
+check("no context, no background block", "Background on the project" not in calls["script"]["prompt"])
+write(config=dict(CFG, context="Keen Burg play melodic metal."), shot_lyrics=LYR, cast_1=KEEN, cast_2=BURG)
+bg = {c["tag"].split(" (")[0]: "Keen Burg play melodic metal." in c["prompt"] for c in ASKED}
+check("the settings' context reaches the bible and the planner", bg["style bible"] and bg["script"], bg)
+check("...and no shot writer", not any(v for t, v in bg.items() if t.startswith("shot")), bg)
 
 p = prompts.split("\n\n---\n\n")
 check("a shot is the style, then [Shot 1] with the scene on one line",
