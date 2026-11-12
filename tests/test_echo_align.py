@@ -1,9 +1,5 @@
-"""The parts of Echo's aligner that do not need weights: the encode-window cap and the word score.
-
-`align.py` imports torch only inside its functions, so the two pieces of arithmetic in it are
-testable on their own — and they are the two that can silently lose data. A window split that drops
-a line loses its timing entirely, and it does so quietly, on exactly the long sections nobody
-notices until a subtitle is missing three minutes in.
+"""The parts of Echo's aligner that do not need weights: the encode-window cap, the word score and
+the loop that decides where each section is searched for.
 """
 import sys
 from pathlib import Path
@@ -24,57 +20,40 @@ A = load_module("kn.echo.align", "echo/align.py")
 check = Checker()
 
 
-def block(window, n_lines, chars=20):
-    return {"label": "Verse 1", "window": window,
-            "lines": [{"text": "x" * chars,
-                       "words": [{"text": "x" * chars, "key": "x"}]} for _ in range(n_lines)]}
+# ------------------------------------------------- a long window is encoded in pieces, searched whole
+# The words are never divided between pieces of a window — only the audio is, for the encoder's
+# memory. So what has to hold is that the pieces come back as ONE gapless run of frames.
+import torch  # noqa: E402
 
 
-# ------------------------------------------------------------------- a short block is not split
-short = block((10.0, 40.0), 6)
-parts = A._split_window(short, A.MAX_WINDOW)
-check("a window inside the cap is left alone", len(parts) == 1 and parts[0][1] == (10.0, 40.0),
-      parts[0][1] if parts else parts)
-check("...and it keeps every line", len(parts[0][0]) == 6)
+class Ramp(torch.nn.Module):
+    """Emits, for every frame, the first sample of that frame — on a wave that counts its frames."""
+
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.empty(1))
+        self.seen = []
+
+    def forward(self, chunk):
+        self.seen.append(chunk.shape[-1] / 16000.0)
+        return chunk[:, ::A.FRAME_SAMPLES].unsqueeze(-1), None
 
 
-# ------------------------------------------------------------------------- a long one is split
-long_block = block((0.0, 140.0), 12)
-parts = A._split_window(long_block, 45.0)
-check("a 140 s window becomes four", len(parts) == 4, len(parts))
-
-# The failure that would be silent: a line in no window is a line with no timing.
-seen = [ln for group, _ in parts for ln in group]
-check("every line is in exactly one part",
-      len(seen) == 12 and all(sum(ln is x for x in seen) == 1 for ln in long_block["lines"]),
-      len(seen))
-check("no part is empty", all(group for group, _ in parts))
-check("the parts stay inside the block's own window",
-      all(0.0 <= lo < hi <= 140.0 for _, (lo, hi) in parts), [w for _, w in parts])
-check("they run in order", all(parts[i][1][0] <= parts[i + 1][1][0] for i in range(len(parts) - 1)),
-      [w for _, w in parts])
-# A word sitting on a split point has to be inside SOME window, so the seams overlap.
-check("consecutive parts overlap at the seam",
-      all(parts[i][1][1] > parts[i + 1][1][0] for i in range(len(parts) - 1)),
-      [w for _, w in parts])
-check("no part exceeds the cap by more than the seam overlap",
-      all((hi - lo) <= 45.0 + 2.5 for _, (lo, hi) in parts),
-      [round(hi - lo, 2) for _, (lo, hi) in parts])
-
-# Splitting is by how much TEXT there is, not by line count: a long line takes longer to sing.
-lopsided = {"label": "V", "window": (0.0, 120.0), "lines": [
-    {"text": "x" * 400, "words": [{"text": "x" * 400, "key": "x"}]},
-    {"text": "x", "words": [{"text": "x", "key": "x"}]},
-    {"text": "x", "words": [{"text": "x", "key": "x"}]},
-]}
-lop = A._split_window(lopsided, 45.0)
-check("a line that dwarfs the others gets a part of its own",
-      len(lop[0][0]) == 1 and sum(len(g) for g, _ in lop) == 3, [len(g) for g, _ in lop])
-
-# The degenerate shapes: one line cannot be split, and a zero-length window must not divide by zero.
-check("a single line is never split", len(A._split_window(block((0.0, 200.0), 1), 45.0)) == 1)
-check("a zero-width window does not raise",
-      len(A._split_window(block((5.0, 5.0), 3), 45.0)) == 1)
+ramp = Ramp()
+frames = 7000                                                       # 140 s
+wave = torch.arange(frames).repeat_interleave(A.FRAME_SAMPLES).float().unsqueeze(0)
+lo_s, hi_s = 100 * A.FRAME_SAMPLES, 6900 * A.FRAME_SAMPLES
+em = A._emission(ramp, wave, lo_s, hi_s)
+check("a 136 s window is encoded in several pieces", len(ramp.seen) == 4, ramp.seen)
+check("no piece exceeds the cap by more than its context",
+      max(ramp.seen) <= A.MAX_WINDOW + 2 * A.ENCODE_CONTEXT / 16000.0, ramp.seen)
+check("the pieces come back as one gapless run of frames",
+      em.shape[0] == 6800 and torch.equal(em[:, 0], torch.arange(100, 6900).float()),
+      (em.shape, em[:3, 0], em[-3:, 0]))
+ramp.seen.clear()
+check("a window inside the cap is one piece, untouched",
+      A._emission(ramp, wave, 0, 1000 * A.FRAME_SAMPLES).shape[0] == 1000 and len(ramp.seen) == 1,
+      ramp.seen)
 
 
 # -------------------------------------------------------------------------- the word confidence
@@ -257,5 +236,101 @@ check("...which is what the confidence gate is for", TR.ANCHOR_TRUST > 0.0, TR.A
 widest = max(hi - lo for _, lo, hi in SEEN)
 check("no anchored window approaches the length of the song", widest < SONG * 0.35,
       f"{widest:.1f} s of {SONG:.0f}")
+
+# ================================================ a line cannot start after the next section did
+# The same track's LAST chorus: its lines 4-5 are growled and the model cannot hear them (0.04 where
+# they really are), and the clean outro at 240 s is inside the same window — so they were laid on
+# the outro at 0.27, two voices' words in one shot and nothing over the growl itself.
+GROWL = {"g4": 226.4, "g5": 232.8}
+
+
+def stub_growl(model, tokenizer, aligner, wave, lo, hi, lines, star, label, notes):
+    SEEN.append((label, round(lo, 2), round(hi, 2)))
+    out = []
+    for ln in lines:
+        for w in ln["words"]:
+            k = w["key"]
+            if k in GROWL:
+                # A clean voice inside the window beats the growl; without one, the growl is found.
+                out.append((w, 247.3, 249.8, 0.27) if hi > 247.0 else (w, GROWL[k], GROWL[k] + 2.5, 0.05))
+            else:
+                at = {"c1": 217.0, "c2": 220.2, "c3": 223.1, "o1": 240.1, "o2": 243.4}[k]
+                out.append((w, at, at + 2.5, 0.8))
+    return out
+
+
+def one_line(key, label):
+    return {"text": "x" * 33, "voice": "", "label": label, "words": [{"text": "x" * 33, "key": key}]}
+
+
+A._align_window = stub_growl
+last_chorus = {"label": "Chorus", "voice": "", "start": 200.4, "end": 237.4, "window": (190.0, 256.0),
+               "lines": [one_line(k, "Chorus") for k in ("c1", "c2", "c3", "g4", "g5")]}
+outro = {"label": "Outro", "voice": "", "start": 237.4, "end": 266.4, "window": (236.0, 267.0),
+         "lines": [one_line(k, "Outro") for k in ("o1", "o2")]}
+SEEN.clear()
+ceiling_notes = A.align_job({"total": 267.0, "blocks": [last_chorus, outro], "language": "uk"},
+                            {"waveform": None, "sample_rate": 16000}, anchor=False,
+                            retry_pinned=False)
+at = {ln["words"][0]["key"]: ln["words"][0]["start"] for ln in last_chorus["lines"] + outro["lines"]}
+check("lines laid over the next section are searched again before it",
+      all(abs(at[k] - GROWL[k]) < 0.5 for k in GROWL), at)
+check("...in a window that stops where that section starts", SEEN[-1][2] <= 240.1 + TR.ANCHOR_OVERLAP,
+      SEEN[-1])
+check("...and starts at the last line that stayed", SEEN[-1][1] == 223.1, SEEN[-1])
+check("the lines that were fine are not touched", (at["c1"], at["c3"], at["o1"]) == (217.0, 223.1, 240.1),
+      at)
+check("it is said, with the confidence that explains why",
+      any("Outro" in n and "0.05" in n for n in ceiling_notes), ceiling_notes)
+
+# ======================================== a section sung early in an interlude nobody gave a length
+# Same track, 2:21-2:41: with no plan the `[Interlude]` is a row of no length, so the bridge was
+# planned at 162 s and searched from 155 s. It is sung from 145 s — the subtitles stayed dark while
+# it was sung and then showed its words over what came next.
+A._align_window = stub_window
+TRUTH_BACKUP = dict(TRUTH)
+TRUTH.clear()
+TRUTH.update({"Chorus": (121.0, 141.3), "Bridge": (145.0, 152.0)})
+early = {"total": 267.0, "language": "uk", "blocks": [
+    {"label": label, "voice": "", "start": p0, "end": p1, "window": (p0 - 3.0, p1 + 3.0),
+     "lines": [one_line("aa", label)]}
+    for label, (p0, p1) in (("Chorus", (124.6, 161.5)), ("Bridge", (162.2, 175.4)))]}
+SEEN.clear()
+A.align_job(early, {"waveform": None, "sample_rate": 16000}, anchor=True, retry_pinned=False)
+bridge_at = early["blocks"][1]["lines"][0]["words"][0]["start"]
+TRUTH.clear()
+TRUTH.update(TRUTH_BACKUP)
+check("a section sung inside the interlude before it is found there", abs(bridge_at - 145.0) < 0.5,
+      (bridge_at, SEEN))
+check("...because its window reaches back to the previous section's last word",
+      abs(SEEN[-1][1] - (141.3 - TR.ANCHOR_OVERLAP)) < 0.01, SEEN[-1])
+check("...and is never wider than one encode", SEEN[-1][2] - SEEN[-1][1] <= A.MAX_WINDOW, SEEN[-1])
+
+# ================================================= a section after a solo longer than one encode
+# Same track, isolated vocal: the bridge ends at 172 s, the solo runs to 216 s and the last chorus
+# is 217-237 s. Its window was 61 s, so its first lines were looked for in the first half of it —
+# all solo — and their subtitles came up 24 s early over silence.
+A._align_window = stub_window
+TRUTH_BACKUP = dict(TRUTH)
+TRUTH.clear()
+TRUTH.update({"Bridge": (161.0, 172.0), "Chorus": (217.0, 237.0)})
+solo = {"total": 267.0, "language": "uk", "blocks": [
+    {"label": label, "voice": "", "start": p0, "end": p1, "window": (p0 - 3.0, p1 + 3.0),
+     "lines": [one_line(k, label) for k in keys]}
+    for label, (p0, p1), keys in (("Bridge", (162.0, 175.0), ("aa",)),
+                                  ("Chorus", (200.4, 237.4), ("aa", "bb", "cc", "dd", "ee")))]}
+SEEN.clear()
+A.mono_16k = lambda audio: (None, 267.0)
+A.align_job(solo, {"waveform": None, "sample_rate": 16000}, anchor=True, retry_pinned=False)
+chorus_at = solo["blocks"][1]["lines"][0]["words"][0]["start"]
+TRUTH.clear()
+TRUTH.update(TRUTH_BACKUP)
+check("a window longer than one encode is still searched ONCE, with every line in it",
+      [label for label, _, _ in SEEN] == ["Bridge", "Chorus"], SEEN)
+check("...and wide enough to hold the solo AND the chorus after it",
+      SEEN[-1][1] < 173.0 and SEEN[-1][2] > 237.0 and SEEN[-1][2] - SEEN[-1][1] > A.MAX_WINDOW,
+      SEEN[-1])
+check("...so the chorus is found after the solo, not inside it", abs(chorus_at - 217.0) < 0.5,
+      chorus_at)
 
 check.done()

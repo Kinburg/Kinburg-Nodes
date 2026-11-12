@@ -13,9 +13,9 @@ word, it cannot drop one, and it hands back a per-token probability that says ho
 **Why this does not repeat the memory failure the author already hit.** `wav2vec2` is a transformer
 over 20 ms frames, so encoding a three-minute song in one go is ~9 000 frames of quadratic
 attention. It is never asked to. `track.py` cuts the song into blocks bounded by the plan, and each
-block is encoded on its own — 15-45 s, i.e. 750-2 250 frames. Peak memory is set by the longest
-SECTION and stops depending on the song's length entirely. A block that somehow exceeds the cap is
-split rather than allowed to grow.
+block is encoded on its own — 15-45 s, i.e. 750-2 250 frames. A window longer than the cap is
+ENCODED in pieces and still searched as one, so peak memory is set by `MAX_WINDOW` and stops
+depending on the song's length entirely.
 
 Two consequences of using a per-block window that are worth stating, because they are the reason it
 beats one pass over the whole song:
@@ -42,15 +42,19 @@ MODEL_SUBDIR = os.path.join("stt", "echo")
 MODEL_NAME = "MMS_FA (ctc_alignment_mling_uroman)"
 MODEL_BYTES = 1_270_000_000
 
-#: The longest window handed to the encoder in one piece, in seconds. 45 s is ~2 250 frames, whose
+#: The longest stretch handed to the encoder in one piece, in seconds. 45 s is ~2 250 frames, whose
 #: attention is a few hundred MB and comfortable on any card that can run a diffusion model. Raise
-#: it and the quadratic term starts to bite; lower it and long verses get split for no reason.
+#: it and the quadratic term starts to bite.
 MAX_WINDOW = 45.0
 
 #: One emission frame. Fixed by the convolutional stack (strides 5·2·2·2·2·2·2 = 320 samples at
 #: 16 kHz), so a word can never be located more precisely than this and there is no point pretending
 #: otherwise in a report.
 FRAME_SECONDS = 0.02
+FRAME_SAMPLES = 320
+
+#: Audio encoded on each side of a piece and thrown away, in samples (a whole number of frames).
+ENCODE_CONTEXT = 2 * 16000
 
 _CACHE = {}
 
@@ -152,47 +156,33 @@ def mono_16k(audio):
     return wave, total
 
 
-def _split_window(block, max_window):
-    """A block too long for one encode -> several, split by how much text is in each.
+def _emission(model, wave, a, b):
+    """Samples `[a, b)` -> one `(frames, tokens)` emission, encoded `MAX_WINDOW` at a time.
 
-    Only reached by a section longer than three quarters of a minute, which in practice means a plan
-    row that swallowed several sections. Splitting by character count rather than by line keeps the
-    sub-windows proportional to how long the words take to sing, which is the best guess available
-    without having aligned anything yet.
+    The cap is on what the ENCODER is handed, because that is where the quadratic term is. The
+    Viterbi over the result is linear, so the words are always searched for across the whole window
+    in one pass and only the audio is cut. Cutting the words instead — "the first half of the lines
+    is in the first half of the window" — is a guess about where they are, made before looking, and
+    it was wrong whenever a window held more music than singing: a chorus after a 45 s solo was
+    searched for inside the solo.
+
+    Each piece is encoded with `ENCODE_CONTEXT` of audio on either side and only its own frames are
+    kept, so no frame is computed from a signal that starts or stops at a seam.
     """
-    import math
+    import torch
 
-    lo, hi = float(block["window"][0]), float(block["window"][1])
-    span = hi - lo
-    parts = max(1, int(math.ceil(span / max(1.0, float(max_window)))))
-    if parts == 1 or len(block["lines"]) <= 1:
-        return [(block["lines"], (lo, hi))]
-
-    sizes = [max(1, sum(len(w["text"]) for w in ln["words"])) for ln in block["lines"]]
-    total = float(sum(sizes))
-
-    groups, edges, carried, used = [], [], [], 0.0
-    for ln, size in zip(block["lines"], sizes):
-        carried.append(ln)
-        used += size
-        # Close a part once its share of the text is inside it. The LAST part is never closed here
-        # and simply takes what is left, so a rounding error cannot strand a line outside every
-        # window — a line nobody searches for is a line with no timing at all.
-        if len(groups) < parts - 1 and used / total >= (len(groups) + 1) / parts:
-            groups.append(carried)
-            edges.append(lo + span * (used / total))
-            carried = []
-    if carried:
-        groups.append(carried)
-
-    # A second of overlap on each seam: the split point is a guess from character counts, and a word
-    # sitting right on it must be inside SOME window or it is never found.
-    out, prev = [], lo
-    for i, group in enumerate(groups):
-        end = hi if i >= len(edges) else edges[i]
-        out.append((group, (max(lo, prev - 1.0), min(hi, end + 1.0))))
-        prev = end
-    return out
+    p = next(model.parameters())
+    step = int(MAX_WINDOW * 16000) // FRAME_SAMPLES * FRAME_SAMPLES
+    pieces = []
+    for s in range(a, b, step):
+        e = min(b, s + step)
+        s0, e0 = max(a, s - ENCODE_CONTEXT), min(b, e + ENCODE_CONTEXT)
+        with torch.inference_mode():
+            out, _ = model(wave[:, s0:e0].to(device=p.device, dtype=p.dtype))
+        out = out[0].float().cpu()
+        skip = (s - s0) // FRAME_SAMPLES
+        pieces.append(out[skip:] if e == b else out[skip:skip + (e - s) // FRAME_SAMPLES])
+    return torch.cat(pieces)
 
 
 def _score(spans):
@@ -251,12 +241,7 @@ def _align_window(model, tokenizer, aligner, wave, lo, hi, lines, star, label, n
                      f"something through. Section skipped.")
         return None
 
-    chunk = wave[:, a:b].to(device=next(model.parameters()).device,
-                            dtype=next(model.parameters()).dtype)
-    with torch.inference_mode():
-        emission, _ = model(chunk)
-    emission = emission[0].float().cpu()                   # (frames, tokens), already log-domain
-    del chunk
+    emission = _emission(model, wave, a, b)                # (frames, tokens), already log-domain
 
     try:
         spans = aligner(emission, tokens)
@@ -300,7 +285,57 @@ def _pinned(placed, lo, hi):
     return (min(p[1] for p in placed) - lo) < PIN_EDGE or (hi - max(p[2] for p in placed)) < PIN_EDGE
 
 
-def align_job(job, audio, device=None, half=True, max_window=MAX_WINDOW, star=True,
+def _under_ceilings(found, model, tokenizer, aligner, wave, star, notes):
+    """Pull back the lines that were placed after the NEXT section had already begun.
+
+    The floor's mirror, and it needs a second pass because a ceiling is only known once the next
+    section has been found. The case it exists for: a growled chorus whose last two lines the model
+    cannot hear, with a clean outro inside the same window — forced alignment has to put the words
+    somewhere, and a clear voice singing something else scores better than a growl singing them. A
+    line cannot start after the following section did, so those lines are searched again between
+    the last line that stayed and that section's first word, and the answer is kept whatever it
+    scores: like the floor, the ceiling is a fact, not an estimate.
+
+    Only a trusted next section is a ceiling, and only for lines it is surer of than they are of
+    themselves — otherwise nobody knows which of the two is the misplaced one.
+    """
+    from . import track as TR
+
+    def placed(lines):
+        return [w for ln in lines for w in ln["words"] if w.get("start") is not None]
+
+    for i, (block, lo, _, _) in enumerate(found):
+        nxt = next((f for f in found[i + 1:] if f[3] >= TR.ANCHOR_TRUST), None)
+        if nxt is None:
+            continue
+        ceiling = nxt[2] + TR.ANCHOR_OVERLAP
+        lines = block["lines"]
+        late = next((k for k, ln in enumerate(lines)
+                     if placed([ln]) and placed([ln])[0]["start"] > ceiling), None)
+        if late is None:
+            continue
+        tail = placed(lines[late:])
+        if sum(w["score"] for w in tail) / len(tail) >= nxt[3]:
+            continue
+        kept = placed(lines[:late])
+        if kept:
+            lo = kept[-1]["start"]
+        if ceiling - lo < 1.0:
+            continue
+        again = _align_window(model, tokenizer, aligner, wave, lo, ceiling, lines[late:], star,
+                              block["label"], notes)
+        if not again:
+            continue
+        moved = min(p[1] for p in again) - min(w["start"] for w in tail)
+        for w, start, end, score in again:
+            w["start"], w["end"], w["score"] = start, end, score
+        notes.append(f"{block['label']}: {len(lines) - late} line(s) had been placed after "
+                     f"'{nxt[0]['label']}' began, which is surer of its own words. They were "
+                     f"searched again before it and moved {moved:+.1f} s, confidence "
+                     f"{_confidence(again):.2f} — low means the model cannot hear them as written.")
+
+
+def align_job(job, audio, device=None, half=True, star=True,
               retry_pinned=True, anchor=True, slack=None, progress=None):
     """Fill `start` / `end` / `score` on every findable word of `job`, in place. Returns notes.
 
@@ -326,81 +361,78 @@ def align_job(job, audio, device=None, half=True, max_window=MAX_WINDOW, star=Tr
     if not blocks:
         return notes
 
-    prev_end, drift, floors = None, 0.0, 0
+    prev_end, drift, floors, found = None, 0.0, 0, []
     for done, block in enumerate(blocks, 1):
         window = (TR.anchor(block, prev_end, drift, slack, total) if anchor
                   else tuple(block["window"]))
+        if anchor and prev_end is not None:
+            # The plan's start is only as good as its idea of the music BEFORE this section, and a
+            # plan made from the lyric alone has none: an interlude is a row of no length, so a
+            # bridge sung four seconds into it was searched from fourteen seconds in and its words
+            # were laid on whatever came later. Everything back to the previous section's last word
+            # is fair ground, so the window reaches there. Too early is slower; too late is wrong.
+            window = (min(window[0], max(0.0, prev_end - TR.ANCHOR_OVERLAP)), window[1])
         floor = window[0] if (anchor and prev_end is not None) else None
-        placed_all, conf, first, last = [], [], None, None
+        lo, hi = window
+        lines, label = block["lines"], block["label"]
+        placed = _align_window(model, tokenizer, aligner, wave, lo, hi, lines, star, label, notes)
 
-        # Still split for the encoder's sake — the cap is about attention memory and applies to an
-        # anchored window exactly as it did to a planned one.
-        parts = _split_window({**block, "window": window}, float(max_window))
-        if len(parts) > 1 and done == 1:
-            notes.append(f"a section was longer than the {max_window:.0f} s encode window and was "
-                         f"split into several. That is a plan row covering more than one section — "
-                         f"the words are still placed, just searched for in smaller neighbourhoods.")
-
-        for lines, (lo, hi) in parts:
-            label = block["label"]
-            placed = _align_window(model, tokenizer, aligner, wave, lo, hi, lines, star, label,
-                                   notes)
-
-            if placed and retry_pinned and _pinned(placed, lo, hi):
-                # Open the window and ask again. The wider answer is kept only if it is MORE
-                # confident: a section that genuinely starts at its window's edge comes back the
-                # same and loses nothing, while a crammed one was scoring badly precisely because
-                # the words are not there. One retry, never a search.
-                grow = max(PIN_WIDEN_MIN, (hi - lo) * PIN_WIDEN)
-                # The floor is NOT widened past. Letting the retry dig below where the previous
-                # section stopped singing is exactly the overlap anchoring exists to prevent, and a
-                # section pinned against it is telling you something rather than needing rescue.
-                lo2 = max(0.0, lo - grow) if floor is None else max(floor, lo - grow)
-                hi2 = min(total, hi + grow)
-                if (lo2, hi2) != (lo, hi):
-                    again = _align_window(model, tokenizer, aligner, wave, lo2, hi2, lines, star,
-                                          label, notes)
-                    if again and _confidence(again) > _confidence(placed):
-                        moved = min(p[1] for p in again) - min(p[1] for p in placed)
+        if placed and retry_pinned and _pinned(placed, lo, hi):
+            # Open the window and ask again. The wider answer is kept only if it is MORE
+            # confident: a section that genuinely starts at its window's edge comes back the
+            # same and loses nothing, while a crammed one was scoring badly precisely because
+            # the words are not there. One retry, never a search.
+            grow = max(PIN_WIDEN_MIN, (hi - lo) * PIN_WIDEN)
+            # The floor is NOT widened past. Letting the retry dig below where the previous
+            # section stopped singing is exactly the overlap anchoring exists to prevent, and a
+            # section pinned against it is telling you something rather than needing rescue.
+            lo2 = max(0.0, lo - grow) if floor is None else max(floor, lo - grow)
+            hi2 = min(total, hi + grow)
+            if (lo2, hi2) != (lo, hi):
+                again = _align_window(model, tokenizer, aligner, wave, lo2, hi2, lines, star,
+                                      label, notes)
+                if again and _confidence(again) > _confidence(placed):
+                    moved = min(p[1] for p in again) - min(p[1] for p in placed)
+                    notes.append(
+                        f"{label}: its words sat flat against the edge of its window, so it "
+                        f"was searched again {grow:.0f} s wider and found {moved:+.1f} s "
+                        f"away, confidence {_confidence(placed):.2f} -> "
+                        f"{_confidence(again):.2f}.")
+                    placed, lo = again, lo2
+                elif _confidence(placed) < TR.ANCHOR_TRUST:
+                    if floor is not None and (min(p[1] for p in placed) - floor) < PIN_EDGE:
+                        floors += 1
                         notes.append(
-                            f"{label}: its words sat flat against the edge of its window, so it "
-                            f"was searched again {grow:.0f} s wider and found {moved:+.1f} s "
-                            f"away, confidence {_confidence(placed):.2f} -> "
-                            f"{_confidence(again):.2f}.")
-                        placed, lo = again, lo2
-                    elif _confidence(placed) < TR.ANCHOR_TRUST:
-                        if floor is not None and (min(p[1] for p in placed) - floor) < PIN_EDGE:
-                            floors += 1
-                            notes.append(
-                                f"{label}: its words start exactly where the previous section "
-                                f"stopped singing, at only {_confidence(placed):.2f} confidence. "
-                                f"That normally means this section was NOT sung — the aligner has "
-                                f"to put the words somewhere and this is the earliest it is "
-                                f"allowed. Do not trust its subtitles.")
-                        else:
-                            notes.append(
-                                f"{label}: its words sit against the edge of the search window at "
-                                f"only {_confidence(placed):.2f} confidence, and a wider search "
-                                f"did no better. They are probably not sung where the plan says.")
+                            f"{label}: its words start exactly where the previous section "
+                            f"stopped singing, at only {_confidence(placed):.2f} confidence. "
+                            f"That normally means this section was NOT sung — the aligner has "
+                            f"to put the words somewhere and this is the earliest it is "
+                            f"allowed. Do not trust its subtitles.")
+                    else:
+                        notes.append(
+                            f"{label}: its words sit against the edge of the search window at "
+                            f"only {_confidence(placed):.2f} confidence, and a wider search "
+                            f"did no better. They are probably not sung where the plan says.")
 
-            for entry in placed or []:
-                placed_all.append(entry)
-                conf.append(entry[3])
-                first = entry[1] if first is None else min(first, entry[1])
-                last = entry[2] if last is None else max(last, entry[2])
-
-        for w, start, end, score in placed_all:
+        conf = [p[3] for p in placed or []]
+        first = min(p[1] for p in placed) if placed else None
+        last = max(p[2] for p in placed) if placed else None
+        for w, start, end, score in placed or []:
             w["start"], w["end"], w["score"] = start, end, score
 
         # What this block teaches the next one — only if it is worth believing.
-        if anchor and conf and (sum(conf) / len(conf)) >= TR.ANCHOR_TRUST:
+        sure = (sum(conf) / len(conf)) if conf else 0.0
+        if anchor and sure >= TR.ANCHOR_TRUST:
             prev_end, drift = last, first - float(block["start"])
+        found.append((block, window[0], first, sure))
 
         if progress is not None:
             try:
                 progress(done, len(blocks))
             except Exception:
                 pass
+
+    _under_ceilings(found, model, tokenizer, aligner, wave, star, notes)
 
     if floors:
         notes.append(f"{floors} section(s) were pinned against the previous one's last word. Those "
