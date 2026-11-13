@@ -591,7 +591,7 @@ class KinburgMorpheus:
                                 f"wired the whole text becomes the scene of a ref2va prompt; write "
                                 f"plain scene text")
                 who = cast_mod.present(cast, s["prompt"])
-                prompt, pictures = cast_mod.assemble(prompt, who)
+                prompt, pictures = cast_mod.assemble(prompt, who, song is not None)
                 extra += [shot_cache.tensor_key(pic) for pic in pictures] + [ref_image_size]
             if song is not None:
                 heard = song_part(p)

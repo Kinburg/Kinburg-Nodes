@@ -135,8 +135,16 @@ def _description(values):
     return str(values.get("description") or "").strip()
 
 
-def assemble(scene, cards):
-    """(prompt, pictures): the shot's ref2va prompt, and the pictures to attach in `<Picture>` order."""
+_SINGS = re.compile(r'\b(?:sings?|[Ss]ung)\b\s*[:,]?\s*["“«„]')
+
+
+def assemble(scene, cards, song=False):
+    """(prompt, pictures): the shot's ref2va prompt, and the pictures to attach in `<Picture>` order.
+
+    `song` — the shot hears a slice of the song. The slice only guides H3's own soundtrack, it does
+    not replace it, so wherever the slice is silent (after a line, in a vocal stem without music)
+    the model is free to go on singing: the mouth keeps moving under no words. The soundscape
+    section is where the official layout says what is heard, so that is where it is told to stop."""
     defs, keep, pictures = [], [], []
     for n, c in enumerate(cards, 1):
         name, values = c["name"], c.get("values") or {}
@@ -181,4 +189,10 @@ def assemble(scene, cards):
     scene = (scene or "").strip()
     parts.append("detailed_description:\n" + (scene if re.search(r"(?m)^\[Shot 1\]", scene)
                                               else "[Shot 1] " + scene))
+    if song:
+        parts.append("overall_soundscape:\n" + (
+            "The only voice is the quoted line, sung once. After its last word the singer closes "
+            "their mouth and stays silent: no more words, no humming, no ad-libs."
+            if _SINGS.search(scene) else
+            "Nobody sings or speaks in this shot: every mouth stays closed."))
     return "\n\n".join(parts), pictures

@@ -223,6 +223,7 @@ Rules:
 - Name people and places ONLY by the exact names you are given, and ONLY those who are in frame. A name on the page puts that person in the shot, so never name someone to say they are absent.
 - Never describe anyone's face, hair or clothes: their reference images carry their looks. Describe what they DO — singing, playing, moving — and where they are in the frame.
 - Never quote lyrics and never invent dialogue: the sung words are added for you.
+- The sung line may end before the shot does. Say once that the singer sings, and never write the singing as lasting to the end of the shot or describe how the line ends ("last words", "final notes", "holds the note"): what follows the line is a look, a gesture or the camera, with the mouth closed.
 - One continuous take: no cuts and no change of place inside the shot. Give the framing and one camera movement in professional terms.
 - Present tense, plain prose, no markdown.
 

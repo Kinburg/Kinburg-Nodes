@@ -1,8 +1,8 @@
 {
   "id": "370ae556-a726-4a82-89c7-ee4a92f62517",
   "revision": 0,
-  "last_node_id": 77,
-  "last_link_id": 127,
+  "last_node_id": 80,
+  "last_link_id": 136,
   "nodes": [
     {
       "id": 3,
@@ -18,7 +18,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 29,
+      "order": 30,
       "mode": 0,
       "inputs": [
         {
@@ -81,7 +81,7 @@
         110
       ],
       "flags": {},
-      "order": 35,
+      "order": 37,
       "mode": 0,
       "inputs": [
         {
@@ -105,9 +105,7 @@
           "localized_name": "audio",
           "name": "audio",
           "type": "AUDIO",
-          "links": [
-            92
-          ]
+          "links": []
         }
       ],
       "title": "Window preview",
@@ -210,7 +208,7 @@
         650
       ],
       "flags": {},
-      "order": 31,
+      "order": 32,
       "mode": 0,
       "showAdvanced": false,
       "inputs": [
@@ -527,7 +525,7 @@
         550
       ],
       "flags": {},
-      "order": 34,
+      "order": 36,
       "mode": 0,
       "showAdvanced": true,
       "inputs": [
@@ -764,7 +762,7 @@
         730
       ],
       "flags": {},
-      "order": 36,
+      "order": 38,
       "mode": 0,
       "showAdvanced": false,
       "inputs": [
@@ -1190,7 +1188,7 @@
         90
       ],
       "flags": {},
-      "order": 23,
+      "order": 24,
       "mode": 0,
       "inputs": [
         {
@@ -1538,7 +1536,7 @@
         1120
       ],
       "flags": {},
-      "order": 38,
+      "order": 40,
       "mode": 0,
       "showAdvanced": false,
       "inputs": [
@@ -1613,7 +1611,7 @@
           "name": "song",
           "shape": 7,
           "type": "AUDIO",
-          "link": 92
+          "link": 136
         },
         {
           "localized_name": "cast_1",
@@ -1924,7 +1922,7 @@
         180
       ],
       "flags": {},
-      "order": 40,
+      "order": 42,
       "mode": 0,
       "showAdvanced": true,
       "inputs": [
@@ -2035,7 +2033,7 @@
       "flags": {
         "collapsed": false
       },
-      "order": 42,
+      "order": 44,
       "mode": 0,
       "inputs": [
         {
@@ -2141,7 +2139,8 @@
           "links": [
             35,
             102,
-            107
+            107,
+            132
           ]
         }
       ],
@@ -2261,7 +2260,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 24,
+      "order": 25,
       "mode": 0,
       "inputs": [
         {
@@ -2300,7 +2299,8 @@
           "name": "FLOAT",
           "type": "FLOAT",
           "links": [
-            63
+            63,
+            133
           ]
         },
         {
@@ -2390,7 +2390,7 @@
       "flags": {
         "collapsed": false
       },
-      "order": 33,
+      "order": 35,
       "mode": 0,
       "inputs": [
         {
@@ -3152,7 +3152,7 @@
         260
       ],
       "flags": {},
-      "order": 25,
+      "order": 26,
       "mode": 0,
       "inputs": [
         {
@@ -3248,7 +3248,7 @@
         280
       ],
       "flags": {},
-      "order": 30,
+      "order": 31,
       "mode": 0,
       "inputs": [
         {
@@ -3426,7 +3426,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 32,
+      "order": 34,
       "mode": 0,
       "inputs": [
         {
@@ -3534,7 +3534,7 @@
         660
       ],
       "flags": {},
-      "order": 37,
+      "order": 39,
       "mode": 0,
       "inputs": [
         {
@@ -3614,7 +3614,7 @@
         1920
       ],
       "flags": {},
-      "order": 39,
+      "order": 41,
       "mode": 0,
       "inputs": [
         {
@@ -3694,7 +3694,7 @@
         1120
       ],
       "flags": {},
-      "order": 41,
+      "order": 43,
       "mode": 0,
       "inputs": [
         {
@@ -3922,7 +3922,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 27,
+      "order": 28,
       "mode": 0,
       "inputs": [
         {
@@ -3984,7 +3984,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 28,
+      "order": 29,
       "mode": 0,
       "inputs": [
         {
@@ -4085,15 +4085,15 @@
       "id": 77,
       "type": "AudioSeparateVocals",
       "pos": [
-        520,
-        -270
+        510,
+        -240
       ],
       "size": [
         270,
-        170
+        162.00000687490586
       ],
       "flags": {},
-      "order": 26,
+      "order": 27,
       "mode": 0,
       "inputs": [
         {
@@ -4136,7 +4136,8 @@
           "name": "Vocals",
           "type": "AUDIO",
           "links": [
-            127
+            127,
+            135
           ]
         },
         {
@@ -4158,6 +4159,119 @@
         "model": "⬇️  UVR Karaoke",
         "segments": 1,
         "target_device": "cuda"
+      }
+    },
+    {
+      "id": 79,
+      "type": "PreviewAudio",
+      "pos": [
+        1030,
+        -240
+      ],
+      "size": [
+        690,
+        110
+      ],
+      "flags": {},
+      "order": 33,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 134
+        },
+        {
+          "localized_name": "audioUI",
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "widget": {
+            "name": "audioUI"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            136
+          ]
+        }
+      ],
+      "title": "Window preview",
+      "properties": {
+        "Node name for S&R": "PreviewAudio"
+      },
+      "widgets_values": [],
+      "widgets_values_named": {}
+    },
+    {
+      "id": 80,
+      "type": "TrimAudioDuration",
+      "pos": [
+        790,
+        -240
+      ],
+      "size": [
+        230,
+        90
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 135
+        },
+        {
+          "localized_name": "start_index",
+          "name": "start_index",
+          "type": "FLOAT",
+          "widget": {
+            "name": "start_index"
+          },
+          "link": 132
+        },
+        {
+          "localized_name": "duration",
+          "name": "duration",
+          "type": "FLOAT",
+          "widget": {
+            "name": "duration"
+          },
+          "link": 133
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "AUDIO",
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            134
+          ]
+        }
+      ],
+      "title": "Trim",
+      "properties": {
+        "Node name for S&R": "TrimAudioDuration"
+      },
+      "widgets_values": [
+        47,
+        30
+      ],
+      "widgets_values_named": {
+        "start_index": 47,
+        "duration": 30
       }
     }
   ],
@@ -4499,14 +4613,6 @@
       "AUDIO"
     ],
     [
-      92,
-      4,
-      0,
-      23,
-      10,
-      "AUDIO"
-    ],
-    [
       93,
       23,
       4,
@@ -4681,6 +4787,46 @@
       30,
       1,
       "FLOAT"
+    ],
+    [
+      132,
+      27,
+      0,
+      80,
+      1,
+      "FLOAT"
+    ],
+    [
+      133,
+      30,
+      0,
+      80,
+      2,
+      "FLOAT"
+    ],
+    [
+      134,
+      80,
+      0,
+      79,
+      0,
+      "AUDIO"
+    ],
+    [
+      135,
+      77,
+      0,
+      80,
+      0,
+      "AUDIO"
+    ],
+    [
+      136,
+      79,
+      0,
+      23,
+      10,
+      "AUDIO"
     ]
   ],
   "groups": [
@@ -4791,15 +4937,27 @@
       ],
       "color": "#3f789e",
       "flags": {}
+    },
+    {
+      "id": 10,
+      "title": "Remove plus",
+      "bounding": [
+        500,
+        -310,
+        1230,
+        240
+      ],
+      "color": "#3f789e",
+      "flags": {}
     }
   ],
   "config": {},
   "extra": {
     "ds": {
-      "scale": 1.0717944050001322,
+      "scale": 1.8987491679164443,
       "offset": [
-        120.72827549621923,
-        487.4787188083192
+        -254.98814143192828,
+        499.58980503239565
       ]
     }
   },

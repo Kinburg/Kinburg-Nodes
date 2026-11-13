@@ -93,6 +93,16 @@ check("an entity with a picture is an appearance anchor",
 prompt, _ = C.assemble("Gritty rock look.\n\n[Shot 1] Keen sings.", [KEEN])
 check("a scene that brings its own [Shot 1] keeps what stands before it as the description's opening",
       prompt.endswith("detailed_description:\nGritty rock look.\n\n[Shot 1] Keen sings."), prompt[-80:])
+check("without a song nothing is said about sound", "overall_soundscape" not in prompt)
+prompt, _ = C.assemble('[Shot 1] Keen at the mic. Keen sings: "Вулиці міста"', [KEEN], True)
+check("with a song the soundscape closes the prompt and ends the singing with the line",
+      prompt.split("\n\n")[-1].startswith("overall_soundscape:\nThe only voice is the quoted line, sung once."),
+      prompt[-200:])
+check("...a line without a named singer counts too",
+      "sung once" in C.assemble('[Shot 1] A crowd. Sung: "la la"', [], True)[0])
+check("...and a shot with no sung line is told nobody sings — a T-shirt's text is not a line",
+      C.assemble('Keen stands in a "No Death" shirt.', [KEEN], True)[0]
+      .endswith("Nobody sings or speaks in this shot: every mouth stays closed."))
 
 # ------------------------------------------------------------------- roster, as the writer is told
 kept, notes = C.roster([KEEN, card(""), dict(KEEN), BURG])
